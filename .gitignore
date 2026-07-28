@@ -1,0 +1,27 @@
+# secrets - never commit these
+.env
+.env.local
+*.env
+!.env.example
+
+# node
+node_modules/
+npm-debug.log*
+
+# expo
+.expo/
+dist/
+web-build/
+
+# native
+*.orig.*
+*.p12
+*.key
+*.mobileprovision
+
+# os
+.DS_Store
+
+# editors
+.vscode/
+.idea/
