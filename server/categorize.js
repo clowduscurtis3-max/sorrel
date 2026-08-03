@@ -48,7 +48,10 @@ function isAmbiguous(pfc) {
 
 // Batches every ambiguous transaction into a single Claude call and asks it
 // to pick from our fixed category list, so we don't invent new buckets and
-// don't pay for one request per transaction.
+// don't pay for one request per transaction. Any failure here (rate limit,
+// spend cap, network hiccup) falls back to an empty result rather than
+// throwing, so a handful of transactions land in "Other" instead of the
+// whole sync failing.
 async function categorizeAmbiguous(transactions) {
   if (transactions.length === 0) return {};
 
@@ -58,16 +61,22 @@ async function categorizeAmbiguous(transactions) {
     amount: t.amount,
   }));
 
-  const message = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 1024,
-    system:
-      `You categorize bank transactions for a personal finance app. ` +
-      `Choose exactly one category per transaction from this fixed list: ` +
-      `${FRIENDLY_CATEGORIES.join(', ')}. ` +
-      `Respond with ONLY a JSON object mapping each transaction id to its category, no other text.`,
-    messages: [{ role: 'user', content: JSON.stringify(items) }],
-  });
+  let message;
+  try {
+    message = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1024,
+      system:
+        `You categorize bank transactions for a personal finance app. ` +
+        `Choose exactly one category per transaction from this fixed list: ` +
+        `${FRIENDLY_CATEGORIES.join(', ')}. ` +
+        `Respond with ONLY a JSON object mapping each transaction id to its category, no other text.`,
+      messages: [{ role: 'user', content: JSON.stringify(items) }],
+    });
+  } catch (err) {
+    console.error('Claude categorization failed, falling back to Other:', err);
+    return {};
+  }
 
   const text = message.content
     .filter((block) => block.type === 'text')

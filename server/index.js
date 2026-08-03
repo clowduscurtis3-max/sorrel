@@ -68,7 +68,7 @@ app.get('/transactions', requireUser, async (req, res) => {
   try {
     const { data: item, error } = await supabaseAdmin
       .from('plaid_items')
-      .select('access_token')
+      .select('access_token, cursor')
       .eq('user_id', req.userId)
       .single();
 
@@ -76,36 +76,88 @@ app.get('/transactions', requireUser, async (req, res) => {
       return res.status(404).json({ error: 'No linked bank account' });
     }
 
-    const transactions = await syncAllTransactions(item.access_token);
-    const categorized = await categorizeTransactions(transactions);
-    res.json({ transactions: categorized });
+    await syncTransactions(req.userId, item.access_token, item.cursor);
+
+    const { data: transactions, error: txError } = await supabaseAdmin
+      .from('transactions')
+      .select('*')
+      .eq('user_id', req.userId)
+      .order('date', { ascending: false });
+    if (txError) throw txError;
+
+    res.json({ transactions });
   } catch (err) {
     console.error(err.response?.data || err);
     res.status(500).json({ error: 'Failed to fetch transactions' });
   }
 });
 
-// Plaid Sandbox items sometimes need a moment before transaction data is
-// ready, so retry a few times on PRODUCT_NOT_READY before giving up.
-async function syncAllTransactions(access_token, attempt = 1) {
+// Pulls only what changed since the last stored cursor (Plaid Sandbox
+// items sometimes need a moment before data is ready, hence the retry),
+// categorizes new/changed transactions, reconciles removed ones, and
+// saves the new cursor so the next call only fetches the next delta.
+async function syncTransactions(userId, access_token, cursor, attempt = 1) {
   try {
-    let cursor;
     let hasMore = true;
     const added = [];
+    const modified = [];
+    const removed = [];
+    let nextCursor = cursor;
 
     while (hasMore) {
-      const response = await plaidClient.transactionsSync({ access_token, cursor });
+      const response = await plaidClient.transactionsSync({
+        access_token,
+        cursor: nextCursor,
+      });
       added.push(...response.data.added);
+      modified.push(...response.data.modified);
+      removed.push(...response.data.removed);
       hasMore = response.data.has_more;
-      cursor = response.data.next_cursor;
+      nextCursor = response.data.next_cursor;
     }
 
-    return added;
+    const changed = await categorizeTransactions([...added, ...modified]);
+    if (changed.length > 0) {
+      const { error } = await supabaseAdmin.from('transactions').upsert(
+        changed.map((t) => ({
+          user_id: userId,
+          transaction_id: t.transaction_id,
+          account_id: t.account_id,
+          amount: t.amount,
+          iso_currency_code: t.iso_currency_code,
+          date: t.date,
+          name: t.name,
+          merchant_name: t.merchant_name,
+          pending: t.pending,
+          personal_finance_category: t.personal_finance_category,
+          category: t.category,
+        })),
+        { onConflict: 'transaction_id' }
+      );
+      if (error) throw error;
+    }
+
+    if (removed.length > 0) {
+      const { error } = await supabaseAdmin
+        .from('transactions')
+        .delete()
+        .in(
+          'transaction_id',
+          removed.map((r) => r.transaction_id)
+        );
+      if (error) throw error;
+    }
+
+    const { error: cursorError } = await supabaseAdmin
+      .from('plaid_items')
+      .update({ cursor: nextCursor })
+      .eq('user_id', userId);
+    if (cursorError) throw cursorError;
   } catch (err) {
     const code = err.response?.data?.error_code;
     if (code === 'PRODUCT_NOT_READY' && attempt < 5) {
       await new Promise((r) => setTimeout(r, 1500));
-      return syncAllTransactions(access_token, attempt + 1);
+      return syncTransactions(userId, access_token, cursor, attempt + 1);
     }
     throw err;
   }
