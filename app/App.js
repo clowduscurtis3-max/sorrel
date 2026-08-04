@@ -26,6 +26,10 @@ WebBrowser.maybeCompleteAuthSession();
 // Google sign-in finishes, e.g. exp://192.168.x.x:8081/--/ in Expo Go.
 const redirectTo = makeRedirectUri();
 
+// Fixed scheme the backend redirects to once Gmail linking finishes —
+// must match GMAIL_LINKED_REDIRECT in server/index.js exactly.
+const GMAIL_REDIRECT = 'pocketaccountant://gmail-linked';
+
 async function createSessionFromUrl(url) {
   const { params, errorCode } = QueryParams.getQueryParams(url);
   if (errorCode) throw new Error(errorCode);
@@ -81,15 +85,37 @@ function apiErrorMessage(err) {
   return 'Something went wrong. Please try again.';
 }
 
-// Groups a flat transaction list into the shape SectionList expects,
-// one section per category, alphabetically ordered.
+// Groups transactions into the shape SectionList expects, one section per
+// category. A transaction with matched receipt items is exploded into its
+// individual line items (each under its own category) instead of showing
+// as a single lump-sum row — that's the whole point of itemization.
 function groupByCategory(transactions) {
   const groups = {};
-  for (const t of transactions) {
-    const key = t.category || 'Other';
+
+  function addTo(category, entry) {
+    const key = category || 'Other';
     if (!groups[key]) groups[key] = [];
-    groups[key].push(t);
+    groups[key].push(entry);
   }
+
+  for (const t of transactions) {
+    if (t.items && t.items.length > 0) {
+      t.items.forEach((item, i) => {
+        addTo(item.category, {
+          key: `${t.transaction_id}-${i}`,
+          name: item.name,
+          amount: item.amount,
+        });
+      });
+    } else {
+      addTo(t.category, {
+        key: t.transaction_id,
+        name: t.merchant_name || t.name,
+        amount: t.amount,
+      });
+    }
+  }
+
   return Object.keys(groups)
     .sort()
     .map((title) => ({ title, data: groups[title] }));
@@ -103,6 +129,9 @@ export default function App() {
   const [transactions, setTransactions] = useState([]);
   const [loadingTransactions, setLoadingTransactions] = useState(false);
   const [error, setError] = useState(null);
+  const [gmailEmail, setGmailEmail] = useState(null);
+  const [gmailLinking, setGmailLinking] = useState(false);
+  const [showGmailExplainer, setShowGmailExplainer] = useState(false);
   const url = Linking.useLinkingURL();
 
   useEffect(() => {
@@ -125,8 +154,63 @@ export default function App() {
   }, [url]);
 
   useEffect(() => {
-    if (session) fetchTransactions();
+    if (session) {
+      fetchTransactions();
+      fetchGmailStatus();
+    }
   }, [session]);
+
+  async function fetchGmailStatus() {
+    try {
+      const res = await apiFetch('/gmail/status');
+      if (res.status === 404) {
+        setGmailEmail(null);
+        return;
+      }
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const data = await res.json();
+      setGmailEmail(data.email);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function linkGmail() {
+    setGmailLinking(true);
+    setError(null);
+    try {
+      const res = await apiFetch('/gmail/auth-url');
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const { url } = await res.json();
+
+      const result = await WebBrowser.openAuthSessionAsync(url, GMAIL_REDIRECT);
+      if (result.type === 'success') {
+        if (result.url.includes('error=1')) {
+          setError('Failed to link Gmail. Please try again.');
+        } else {
+          setShowGmailExplainer(false);
+          await fetchGmailStatus();
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      setError(apiErrorMessage(err));
+    } finally {
+      setGmailLinking(false);
+    }
+  }
+
+  async function unlinkGmail() {
+    setError(null);
+    try {
+      const res = await apiFetch('/gmail/unlink', { method: 'POST' });
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      setGmailEmail(null);
+    } catch (err) {
+      console.error(err);
+      setError(apiErrorMessage(err));
+    }
+  }
 
   // Doubles as "does this user already have a linked account?" — the
   // backend returns 404 until /exchange-token has run at least once.
@@ -248,6 +332,41 @@ export default function App() {
         <Button title="Sign out" onPress={signOut} />
       </View>
 
+      <View style={styles.gmailSection}>
+        {gmailEmail ? (
+          <>
+            <Text style={styles.smallText}>
+              Itemized receipts linked: {gmailEmail}
+            </Text>
+            <Button title="Unlink email" onPress={unlinkGmail} />
+          </>
+        ) : showGmailExplainer ? (
+          <>
+            <Text style={styles.smallText}>
+              Optional: link Gmail so receipts from retailers can be broken
+              into itemized purchases (e.g. individual grocery items)
+              instead of one lump total. We only read receipt-like emails —
+              nothing else in your inbox is accessed or stored. You can
+              unlink at any time.
+            </Text>
+            {gmailLinking ? (
+              <ActivityIndicator />
+            ) : (
+              <Button title="Link Gmail" onPress={linkGmail} />
+            )}
+            <Button
+              title="Not now"
+              onPress={() => setShowGmailExplainer(false)}
+            />
+          </>
+        ) : (
+          <Button
+            title="Get itemized receipts (optional)"
+            onPress={() => setShowGmailExplainer(true)}
+          />
+        )}
+      </View>
+
       {error && (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>{error}</Text>
@@ -271,15 +390,13 @@ export default function App() {
         <SectionList
           style={styles.list}
           sections={groupByCategory(transactions)}
-          keyExtractor={(item) => item.transaction_id}
+          keyExtractor={(item) => item.key}
           renderSectionHeader={({ section: { title } }) => (
             <Text style={styles.sectionHeader}>{title}</Text>
           )}
           renderItem={({ item }) => (
             <View style={styles.row}>
-              <Text style={styles.rowName}>
-                {item.merchant_name || item.name}
-              </Text>
+              <Text style={styles.rowName}>{item.name}</Text>
               <Text style={styles.rowAmount}>${item.amount.toFixed(2)}</Text>
             </View>
           )}
@@ -312,6 +429,17 @@ const styles = StyleSheet.create({
   },
   text: {
     fontSize: 16,
+  },
+  gmailSection: {
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 24,
+    paddingBottom: 16,
+  },
+  smallText: {
+    fontSize: 13,
+    color: '#444',
+    textAlign: 'center',
   },
   errorBanner: {
     alignItems: 'center',
