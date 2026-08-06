@@ -1,7 +1,9 @@
 -- Phase 2: Core Budgeting Loop
--- Paste this into the Supabase SQL Editor (Project -> SQL Editor -> New query)
--- and run it once. No migration tooling is wired up yet, so this is applied
--- by hand, consistent with how the existing tables were created.
+-- Originally hand-applied via the Supabase SQL Editor before the Supabase
+-- CLI was linked (see supabase/config.toml + `supabase link`) - kept here,
+-- renamed to the CLI's timestamp convention, and marked as already-applied
+-- via `supabase migration repair` rather than re-run, since this already
+-- exists in the live database.
 
 -- Transparency: every categorized transaction should be able to say *why*
 -- it landed in its category, not just what the category is.

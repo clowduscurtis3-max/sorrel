@@ -1,6 +1,9 @@
 -- Phase 3 pre-work: security/bug-audit fixes.
--- Paste this into the Supabase SQL Editor (Project -> SQL Editor -> New
--- query) and run it once, same as 0001/0002.
+-- Applied via `supabase db push` (Supabase CLI, linked as of this
+-- migration) rather than pasted into the SQL Editor by hand - this is the
+-- first migration actually run that way; 0001/0002 above were retroactively
+-- marked as already-applied via `supabase migration repair` since they
+-- already existed in the live database from before the CLI was linked.
 
 -- The Phase 1 tables (plaid_items, transactions, gmail_accounts, receipts,
 -- scanned_emails) were created before any migration file existed for this

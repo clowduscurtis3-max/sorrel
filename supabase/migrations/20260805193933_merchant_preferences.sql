@@ -1,8 +1,8 @@
 -- Step 7: remembers a user's manual category corrections per merchant, so
 -- future purchases from the same merchant use the corrected category
 -- automatically instead of re-guessing (and re-flagging for review) every
--- time. Paste into the Supabase SQL Editor and run once, same as
--- 0001_budgeting.sql.
+-- time. Originally hand-applied via the Supabase SQL Editor - see the note
+-- in 20260805193932_budgeting.sql about the switch to the Supabase CLI.
 
 create table if not exists merchant_category_preferences (
   id uuid primary key default gen_random_uuid(),
