@@ -1,5 +1,6 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const { SPEND_CATEGORIES } = require('./categorize');
+const { logError } = require('./safeLog');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -39,7 +40,7 @@ async function extractReceipts(emails) {
       messages: [{ role: 'user', content: JSON.stringify(items) }],
     });
   } catch (err) {
-    console.error('Receipt extraction failed:', err);
+    logError('Receipt extraction failed:', err);
     return [];
   }
 

@@ -112,6 +112,15 @@ function apiErrorMessage(err) {
   return 'Something went wrong. Please try again.';
 }
 
+// Plaid's amount convention is negative-for-money-in (income, refunds) and
+// positive-for-money-out (spend) - budget.js already accounts for this
+// (Math.abs when summing Income). The transaction list didn't, so income/
+// refund rows rendered as e.g. "$-500.00" instead of a clearly-signed
+// credit.
+function formatAmount(amount) {
+  return amount < 0 ? `+$${Math.abs(amount).toFixed(2)}` : `$${amount.toFixed(2)}`;
+}
+
 // Groups transactions into the shape SectionList expects, one section per
 // category. A transaction with matched receipt items is exploded into its
 // individual line items (each under its own category) instead of showing
@@ -715,7 +724,7 @@ export default function App() {
             <View style={styles.row}>
               <View style={styles.rowMain}>
                 <Text style={styles.rowName}>{item.name}</Text>
-                <Text style={styles.rowAmount}>${item.amount.toFixed(2)}</Text>
+                <Text style={styles.rowAmount}>{formatAmount(item.amount)}</Text>
               </View>
 
               {item.needsReview &&

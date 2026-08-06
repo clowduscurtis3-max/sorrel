@@ -152,20 +152,40 @@ async function generateBudget(userId) {
   }
 
   const { period_start, period_end } = currentMonthRange();
-  const rows = SPEND_CATEGORIES.filter(
-    (c) => proposed[c] && typeof proposed[c].budgeted_amount === 'number'
-  ).map((category) => ({
+  // A category is only usable if Claude gave it a finite, non-negative
+  // number - previously only `typeof === 'number'` was checked, so a
+  // negative, NaN, or Infinity budgeted_amount (malformed response, or a
+  // model slip) would have been written straight to the DB and shown to
+  // the user as a real budget figure.
+  const rows = SPEND_CATEGORIES.filter((c) => {
+    const amount = proposed[c]?.budgeted_amount;
+    return typeof amount === 'number' && Number.isFinite(amount) && amount >= 0;
+  }).map((category) => ({
     user_id: userId,
     category,
     period_start,
     period_end,
-    budgeted_amount: proposed[category].budgeted_amount,
+    budgeted_amount: Math.round(proposed[category].budgeted_amount * 100) / 100,
     reasoning: proposed[category].reasoning || null,
     updated_at: new Date().toISOString(),
   }));
 
   if (rows.length === 0) {
     throw new Error('AI budget generation returned no usable categories.');
+  }
+
+  // Sanity check, not a hard failure - a total wildly above income points
+  // to a bad Claude response, but per this module's own philosophy (see
+  // header comment) a plausible-but-imperfect budget is still more useful
+  // than none, so this only logs for a developer to notice, it doesn't
+  // block the save.
+  const totalBudgeted = rows.reduce((sum, r) => sum + r.budgeted_amount, 0);
+  if (averageMonthlyIncome > 0 && totalBudgeted > averageMonthlyIncome * 1.5) {
+    console.error(
+      `Budget sanity check failed for user ${userId}: proposed total ` +
+        `($${totalBudgeted}) is more than 1.5x average monthly income ` +
+        `($${averageMonthlyIncome}) - saving anyway, but this budget may be off.`
+    );
   }
 
   // Delete-then-insert rather than upsert: if Claude's response ever omits

@@ -1,5 +1,6 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const supabaseAdmin = require('./supabaseAdmin');
+const { logError } = require('./safeLog');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -144,7 +145,7 @@ async function categorizeAmbiguous(transactions) {
       messages: [{ role: 'user', content: JSON.stringify(items) }],
     });
   } catch (err) {
-    console.error('Claude categorization failed, falling back to Other:', err);
+    logError('Claude categorization failed, falling back to Other:', err);
     return {};
   }
 

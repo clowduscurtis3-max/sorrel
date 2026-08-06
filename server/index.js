@@ -12,6 +12,7 @@ const {
 } = require('./categorize');
 const {
   buildAuthUrl,
+  verifyState,
   exchangeCodeForTokens,
   getGmailProfile,
 } = require('./googleOAuth');
@@ -23,6 +24,7 @@ const {
 const { extractReceipts } = require('./receipts');
 const { matchReceiptsToTransactions } = require('./matching');
 const { generateBudget, currentMonthRange, NoHistoryError } = require('./budget');
+const { logError } = require('./safeLog');
 
 // Where we send the system browser once Gmail linking finishes, so the app
 // (watching for this scheme via WebBrowser.openAuthSessionAsync) resolves.
@@ -64,7 +66,7 @@ app.post('/link-token', requireUser, async (req, res) => {
     });
     res.json({ link_token: response.data.link_token });
   } catch (err) {
-    console.error(err.response?.data || err);
+    logError('Failed to create link token:', err);
     res.status(500).json({ error: 'Failed to create link token' });
   }
 });
@@ -76,6 +78,29 @@ app.post('/exchange-token', requireUser, async (req, res) => {
   try {
     const exchange = await plaidClient.itemPublicTokenExchange({ public_token });
     const { access_token, item_id } = exchange.data;
+
+    const { data: existingItem } = await supabaseAdmin
+      .from('plaid_items')
+      .select('item_id')
+      .eq('user_id', req.userId)
+      .single();
+
+    // Re-linking mints a brand-new Plaid item with entirely new
+    // transaction_ids (Plaid Link, not "update mode" re-auth - see the
+    // cursor:null comment below). The *old* item's rows in `transactions`
+    // never get touched by transactionsSync again, so without this they'd
+    // sit there forever, double-counting spend against the freshly synced
+    // new item. This already happened once for real (48 duplicate rows,
+    // cleaned up by hand - see CLAUDE.md); deleting the old item's
+    // transactions here, atomically with the re-link, is the actual fix
+    // rather than another manual cleanup.
+    if (existingItem && existingItem.item_id !== item_id) {
+      const { error: deleteError } = await supabaseAdmin
+        .from('transactions')
+        .delete()
+        .eq('user_id', req.userId);
+      if (deleteError) throw deleteError;
+    }
 
     // Encrypted before it ever reaches Supabase - see server/crypto.js.
     // cursor is reset to null on every (re-)link: a cursor is scoped to
@@ -98,7 +123,7 @@ app.post('/exchange-token', requireUser, async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error(err.response?.data || err);
+    logError('Failed to link account:', err);
     res.status(500).json({ error: 'Failed to link account' });
   }
 });
@@ -176,7 +201,7 @@ app.get('/transactions', requireUser, async (req, res) => {
       return res.status(404).json({ error: 'No linked bank account' });
     }
 
-    await syncTransactions(req.userId, decrypt(item.access_token), item.cursor);
+    await syncTransactionsLocked(req.userId, decrypt(item.access_token), item.cursor);
 
     // Best-effort: if Gmail is linked, pull in any new receipts too, so the
     // itemized view stays fresh without a separate manual step. A Gmail
@@ -190,7 +215,7 @@ app.get('/transactions', requireUser, async (req, res) => {
       try {
         await scanForReceipts(req.userId, gmailAccount);
       } catch (err) {
-        console.error('Gmail receipt scan failed (non-fatal):', err);
+        logError('Gmail receipt scan failed (non-fatal):', err);
       }
     }
 
@@ -211,7 +236,7 @@ app.get('/transactions', requireUser, async (req, res) => {
         code: 'RELINK_REQUIRED',
       });
     }
-    console.error(err.response?.data || err);
+    logError('Failed to fetch transactions:', err);
     res.status(500).json({ error: 'Failed to fetch transactions' });
   }
 });
@@ -416,18 +441,38 @@ async function attachMatchedReceipts(userId, transactions) {
   if (!receipts || receipts.length === 0) return transactions;
 
   const newMatches = matchReceiptsToTransactions(receipts, transactions);
+  const confirmedMatches = [];
   for (const m of newMatches) {
-    await supabaseAdmin
+    // Conditional on matched_transaction_id still being null, backed by a
+    // unique index on receipts(matched_transaction_id) (see
+    // migrations/0003_security_fixes.sql). matchReceiptsToTransactions only
+    // dedupes within *this* call's read of the data - two concurrent
+    // requests for the same user (a real possibility once Phase 3 adds
+    // auto-sync running alongside manual refreshes) could otherwise both
+    // pick the same transaction as the best match for two different
+    // receipts, since neither call knows about the other's in-flight pick,
+    // and the second write would silently clobber the first. Now the loser
+    // either affects zero rows (lost the null-check race) or gets a unique-
+    // violation error (lost the index race, code 23505) - both treated as
+    // "someone else already claimed this" rather than allowed to overwrite.
+    const { data: updated, error: updateError } = await supabaseAdmin
       .from('receipts')
       .update({ matched_transaction_id: m.transactionId })
-      .eq('id', m.receiptId);
+      .eq('id', m.receiptId)
+      .is('matched_transaction_id', null)
+      .select('id');
+    if (updateError) {
+      if (updateError.code === '23505') continue;
+      throw updateError;
+    }
+    if (updated && updated.length > 0) confirmedMatches.push(m);
   }
 
   const itemsByTransactionId = {};
   for (const r of receipts) {
     const txId =
       r.matched_transaction_id ??
-      newMatches.find((m) => m.receiptId === r.id)?.transactionId;
+      confirmedMatches.find((m) => m.receiptId === r.id)?.transactionId;
     if (txId) itemsByTransactionId[txId] = r.items;
   }
 
@@ -438,10 +483,35 @@ async function attachMatchedReceipts(userId, transactions) {
   );
 }
 
+// In-memory, single-process lock (this backend runs as one Express
+// process - see CLAUDE.md's local-dev setup - so a Map is sufficient here;
+// a DB-backed lock would be needed if this ever runs as more than one
+// instance). Deduplicates concurrent sync attempts for the same user
+// instead of letting them race: two overlapping requests (e.g. a
+// pull-to-refresh landing mid another one, and - once Phase 3's
+// auto-sync exists - a background tick overlapping a manual refresh) used
+// to both read the same starting cursor and independently pay for a full
+// Plaid + Claude round trip, racing on the final cursor write at the end.
+// Now the second caller just awaits the first one's in-flight sync
+// instead of starting its own.
+const activeSyncs = new Map();
+
+function syncTransactionsLocked(userId, access_token, cursor) {
+  if (activeSyncs.has(userId)) return activeSyncs.get(userId);
+
+  const promise = syncTransactions(userId, access_token, cursor).finally(() => {
+    activeSyncs.delete(userId);
+  });
+  activeSyncs.set(userId, promise);
+  return promise;
+}
+
 // Pulls only what changed since the last stored cursor (Plaid Sandbox
 // items sometimes need a moment before data is ready, hence the retry),
 // categorizes new/changed transactions, reconciles removed ones, and
 // saves the new cursor so the next call only fetches the next delta.
+// Not called directly outside this file - always go through
+// syncTransactionsLocked so concurrent callers can't race each other.
 async function syncTransactions(userId, access_token, cursor, attempt = 1) {
   try {
     let hasMore = true;
@@ -517,10 +587,18 @@ app.get('/gmail/auth-url', requireUser, (req, res) => {
 
 // Hit directly by Google's redirect in the system browser, not by an
 // authenticated app request — req.userId isn't available here, so the
-// user id travels through the OAuth "state" param instead.
+// user id travels through the OAuth "state" param instead. state is
+// HMAC-signed with an expiry (see googleOAuth.js) so this route can trust
+// the id it gets back without also trusting the request itself.
 app.get('/auth/google/callback', async (req, res) => {
-  const { code, state: userId, error } = req.query;
-  if (error || !code || !userId) {
+  const { code, state, error } = req.query;
+  if (error || !code || !state) {
+    return res.redirect(`${GMAIL_LINKED_REDIRECT}?error=1`);
+  }
+
+  const userId = verifyState(state);
+  if (!userId) {
+    console.error('Gmail OAuth callback rejected: invalid, forged, or expired state param.');
     return res.redirect(`${GMAIL_LINKED_REDIRECT}?error=1`);
   }
 
@@ -579,7 +657,19 @@ app.get('/receipts', requireUser, async (req, res) => {
       return res.status(404).json({ error: 'No linked email account' });
     }
 
-    await scanForReceipts(req.userId, account);
+    // A Gmail-scan hiccup (rate limit, a malformed Claude response, a
+    // transient DB error) shouldn't 500 the whole request and hide
+    // receipts the user could otherwise still see - same non-fatal
+    // treatment /transactions already gives this call. DecryptionError is
+    // the one exception: that means the *stored Gmail token itself* is
+    // unusable, which the outer catch below needs to see so it can tell
+    // the user to re-link, rather than silently showing stale receipts.
+    try {
+      await scanForReceipts(req.userId, account);
+    } catch (err) {
+      if (err instanceof DecryptionError) throw err;
+      logError('Gmail receipt scan failed (non-fatal):', err);
+    }
 
     const { data: receipts, error: rxError } = await supabaseAdmin
       .from('receipts')
@@ -597,7 +687,7 @@ app.get('/receipts', requireUser, async (req, res) => {
         code: 'RELINK_REQUIRED',
       });
     }
-    console.error(err.response?.data || err);
+    logError('Failed to fetch receipts:', err);
     res.status(500).json({ error: 'Failed to fetch receipts' });
   }
 });
@@ -658,9 +748,29 @@ async function scanForReceipts(userId, account) {
 
   const extracted = await extractReceipts(emails);
 
-  if (extracted.length > 0) {
+  // extractReceipts() returns whatever Claude produced, parsed as JSON but
+  // not otherwise checked - a malformed response (wrong type, a missing
+  // field, a non-numeric total) would otherwise go straight into the DB.
+  // Discarded receipts still get recorded in scanned_emails below so a
+  // permanently-malformed response doesn't get re-sent to Claude (and
+  // re-billed) on every future scan.
+  const validExtracted = extracted.filter((r) => {
+    const valid =
+      r &&
+      typeof r.id === 'string' &&
+      typeof r.merchant === 'string' &&
+      typeof r.date === 'string' &&
+      typeof r.total === 'number' &&
+      Number.isFinite(r.total) &&
+      r.total >= 0 &&
+      Array.isArray(r.items);
+    if (!valid) console.error('Discarding malformed receipt extraction result:', r);
+    return valid;
+  });
+
+  if (validExtracted.length > 0) {
     const { error } = await supabaseAdmin.from('receipts').upsert(
-      extracted.map((r) => ({
+      validExtracted.map((r) => ({
         user_id: userId,
         gmail_message_id: r.id,
         merchant: r.merchant,
