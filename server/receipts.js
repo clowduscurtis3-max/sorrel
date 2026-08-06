@@ -1,5 +1,5 @@
 const Anthropic = require('@anthropic-ai/sdk');
-const { FRIENDLY_CATEGORIES } = require('./categorize');
+const { SPEND_CATEGORIES } = require('./categorize');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -30,7 +30,10 @@ async function extractReceipts(emails) {
         `Ignore shipping/tracking notices with no prices, promotional emails, newsletters, and anything that isn't a completed purchase. ` +
         `For each email that IS a real receipt, extract: merchant name, purchase date (YYYY-MM-DD), total amount (number), ` +
         `and a list of line items with a name and amount. If individual items aren't listed, return a single item using the merchant name and total amount. ` +
-        `For every line item, also assign exactly one category from this fixed list: ${FRIENDLY_CATEGORIES.join(', ')}. ` +
+        // Spend categories only, not the full list - a receipt line item
+        // is always a purchase, so "Income"/"Transfers" (money in/moving
+        // between accounts) never make sense here.
+        `For every line item, also assign exactly one category from this fixed list: ${SPEND_CATEGORIES.join(', ')}. ` +
         `Respond with ONLY a JSON array, one object per email that IS a receipt (skip non-receipts entirely), each shaped like: ` +
         `{"id": "<email id>", "merchant": "...", "date": "YYYY-MM-DD", "total": 0, "items": [{"name": "...", "amount": 0, "category": "..."}]}. No other text.`,
       messages: [{ role: 'user', content: JSON.stringify(items) }],

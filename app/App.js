@@ -6,6 +6,8 @@ import {
   Button,
   ActivityIndicator,
   SectionList,
+  TextInput,
+  ScrollView,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as WebBrowser from 'expo-web-browser';
@@ -29,6 +31,31 @@ const redirectTo = makeRedirectUri();
 // Fixed scheme the backend redirects to once Gmail linking finishes —
 // must match GMAIL_LINKED_REDIRECT in server/index.js exactly.
 const GMAIL_REDIRECT = 'pocketaccountant://gmail-linked';
+
+// Must match FRIENDLY_CATEGORIES in server/categorize.js.
+const CATEGORIES = [
+  'Groceries',
+  'Dining',
+  'Transportation',
+  'Bills & Utilities',
+  'Subscriptions',
+  'Shopping',
+  'Entertainment',
+  'Health & Personal Care',
+  'Travel',
+  'Other',
+  'Income',
+  'Transfers',
+];
+
+// Must match GOAL_TYPES in server/index.js.
+const GOAL_TYPES = [
+  { value: 'house', label: 'Save for a house' },
+  { value: 'debt', label: 'Pay off debt' },
+  { value: 'emergency_fund', label: 'Build an emergency fund' },
+  { value: 'general', label: 'Just be smarter with money' },
+  { value: 'other', label: 'Something else' },
+];
 
 async function createSessionFromUrl(url) {
   const { params, errorCode } = QueryParams.getQueryParams(url);
@@ -100,18 +127,24 @@ function groupByCategory(transactions) {
 
   for (const t of transactions) {
     if (t.items && t.items.length > 0) {
+      // Receipt line items don't carry their own transaction_id to correct
+      // against (they're itemized parts of one bank transaction) - the
+      // "needs review" flow below only applies to plain transactions.
       t.items.forEach((item, i) => {
         addTo(item.category, {
           key: `${t.transaction_id}-${i}`,
           name: item.name,
           amount: item.amount,
+          needsReview: false,
         });
       });
     } else {
       addTo(t.category, {
         key: t.transaction_id,
+        transactionId: t.transaction_id,
         name: t.merchant_name || t.name,
         amount: t.amount,
+        needsReview: t.category === 'Uncategorized' || t.category_confidence !== 'high',
       });
     }
   }
@@ -132,6 +165,20 @@ export default function App() {
   const [gmailEmail, setGmailEmail] = useState(null);
   const [gmailLinking, setGmailLinking] = useState(false);
   const [showGmailExplainer, setShowGmailExplainer] = useState(false);
+  const [goal, setGoal] = useState(null);
+  const [checkingGoal, setCheckingGoal] = useState(true);
+  const [editingGoal, setEditingGoal] = useState(false);
+  const [goalType, setGoalType] = useState('house');
+  const [goalAmount, setGoalAmount] = useState('');
+  const [goalTimeframe, setGoalTimeframe] = useState('');
+  const [goalNotes, setGoalNotes] = useState('');
+  const [savingGoal, setSavingGoal] = useState(false);
+  const [showBudget, setShowBudget] = useState(false);
+  const [budgetStatus, setBudgetStatus] = useState(null);
+  const [loadingBudget, setLoadingBudget] = useState(false);
+  const [generatingBudget, setGeneratingBudget] = useState(false);
+  const [reviewingTransactionId, setReviewingTransactionId] = useState(null);
+  const [correctingCategory, setCorrectingCategory] = useState(false);
   const url = Linking.useLinkingURL();
 
   useEffect(() => {
@@ -157,8 +204,76 @@ export default function App() {
     if (session) {
       fetchTransactions();
       fetchGmailStatus();
+      fetchGoal();
     }
   }, [session]);
+
+  // Doubles as "does this user already have a goal saved?" — 404 means
+  // setup hasn't captured one yet, so the intake screen opens automatically
+  // (see the render logic below). Also used to prefill the "Edit goal"
+  // screen with whatever's currently saved.
+  async function fetchGoal() {
+    setCheckingGoal(true);
+    try {
+      const res = await apiFetch('/goal');
+      if (res.status === 404) {
+        setGoal(null);
+        setEditingGoal(true);
+        return;
+      }
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const data = await res.json();
+      setGoal(data);
+      setGoalType(data.goal_type);
+      setGoalAmount(data.target_amount != null ? String(data.target_amount) : '');
+      setGoalTimeframe(
+        data.target_timeframe_months != null ? String(data.target_timeframe_months) : ''
+      );
+      setGoalNotes(data.notes || '');
+    } catch (err) {
+      console.error(err);
+      setError(apiErrorMessage(err));
+    } finally {
+      setCheckingGoal(false);
+    }
+  }
+
+  async function saveGoal(overrides = {}) {
+    setSavingGoal(true);
+    setError(null);
+    const body = {
+      goal_type: overrides.goal_type ?? goalType,
+      target_amount: goalAmount ? Number(goalAmount) : null,
+      target_timeframe_months: goalTimeframe ? Number(goalTimeframe) : null,
+      notes: goalNotes || null,
+      ...overrides,
+    };
+    try {
+      const res = await apiFetch('/goal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      setGoal(body);
+      setEditingGoal(false);
+    } catch (err) {
+      console.error(err);
+      setError(apiErrorMessage(err));
+    } finally {
+      setSavingGoal(false);
+    }
+  }
+
+  // The spec's "no specific goal" default path — 'general' plus no
+  // target/timeframe, so budget generation later just optimizes for
+  // smarter spending instead of a concrete savings number.
+  function skipGoal() {
+    setGoalAmount('');
+    setGoalTimeframe('');
+    setGoalNotes('');
+    saveGoal({ goal_type: 'general', target_amount: null, target_timeframe_months: null, notes: null });
+  }
 
   async function fetchGmailStatus() {
     try {
@@ -224,6 +339,17 @@ export default function App() {
         setTransactions([]);
         return;
       }
+      // The backend's connection to this bank account can't be decrypted
+      // (e.g. linked before encryption was added, or after a key
+      // rotation) - reuse the existing "not linked" screen/button rather
+      // than a dead-end error, since re-linking is the actual fix.
+      if (res.status === 409) {
+        const body = await res.json().catch(() => ({}));
+        setLinked(false);
+        setTransactions([]);
+        setError(body.error || 'Your bank connection needs to be re-linked.');
+        return;
+      }
       if (!res.ok) throw new Error('SERVER_ERROR');
       const data = await res.json();
       setTransactions(data.transactions || []);
@@ -233,6 +359,75 @@ export default function App() {
       setError(apiErrorMessage(err));
     } finally {
       setLoadingTransactions(false);
+    }
+  }
+
+  // Step 6: user-driven correction for a transaction the AI wasn't
+  // confident about. Re-fetches the whole list afterward rather than
+  // patching local state, so the section it now belongs to (grouping is by
+  // category) updates correctly too.
+  async function correctCategory(transactionId, category) {
+    setCorrectingCategory(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/transactions/${transactionId}/category`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category }),
+      });
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      setReviewingTransactionId(null);
+      await fetchTransactions();
+    } catch (err) {
+      console.error(err);
+      setError(apiErrorMessage(err));
+    } finally {
+      setCorrectingCategory(false);
+    }
+  }
+
+  // Step 5: current month's budgeted vs. actual per category. `budgeted`
+  // comes back null for a category that's never had a budget generated,
+  // which the render below shows as "not budgeted" rather than "$0".
+  async function fetchBudgetStatus() {
+    setLoadingBudget(true);
+    setError(null);
+    try {
+      const res = await apiFetch('/budget/status');
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const data = await res.json();
+      setBudgetStatus(data.status || []);
+    } catch (err) {
+      console.error(err);
+      setError(apiErrorMessage(err));
+    } finally {
+      setLoadingBudget(false);
+    }
+  }
+
+  // Step 4: manual trigger, matches the rest of this app's "build in small
+  // testable steps" style rather than auto-generating behind the scenes.
+  async function generateBudget() {
+    setGeneratingBudget(true);
+    setError(null);
+    try {
+      const res = await apiFetch('/budget/generate', { method: 'POST' });
+      if (!res.ok) {
+        // A 400 here is a specific, actionable message from the backend
+        // (e.g. "sync your transactions first") - show it as-is rather
+        // than the generic apiErrorMessage fallback.
+        if (res.status === 400) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || 'SERVER_ERROR');
+        }
+        throw new Error('SERVER_ERROR');
+      }
+      await fetchBudgetStatus();
+    } catch (err) {
+      console.error(err);
+      setError(err.message === 'SERVER_ERROR' ? apiErrorMessage(err) : err.message);
+    } finally {
+      setGeneratingBudget(false);
     }
   }
 
@@ -325,10 +520,89 @@ export default function App() {
     );
   }
 
+  if (checkingGoal) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  // Shown once automatically right after sign-in (fetchGoal sets
+  // editingGoal when GET /goal 404s), and reopened later via "Edit goal".
+  // Feeds Step 4's budget generation directly, so it needs to happen before
+  // the user gets much further, but "skip" is always one tap away.
+  if (editingGoal) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.goalScreen}>
+          <Text style={styles.text}>
+            What are you hoping to achieve financially?
+          </Text>
+          <View style={styles.goalTypeRow}>
+            {GOAL_TYPES.map((g) => (
+              <Button
+                key={g.value}
+                title={goalType === g.value ? `> ${g.label}` : g.label}
+                onPress={() => setGoalType(g.value)}
+              />
+            ))}
+          </View>
+
+          {goalType === 'other' && (
+            <TextInput
+              style={styles.input}
+              placeholder="Describe your goal"
+              value={goalNotes}
+              onChangeText={setGoalNotes}
+            />
+          )}
+
+          <Text style={styles.smallText}>
+            Specific savings target or timeline? (optional)
+          </Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Target amount, e.g. 10000"
+            keyboardType="numeric"
+            value={goalAmount}
+            onChangeText={setGoalAmount}
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Timeframe in months, e.g. 24"
+            keyboardType="numeric"
+            value={goalTimeframe}
+            onChangeText={setGoalTimeframe}
+          />
+
+          {error && <Text style={styles.errorText}>{error}</Text>}
+
+          {savingGoal ? (
+            <ActivityIndicator />
+          ) : (
+            <>
+              <Button title="Save goal" onPress={() => saveGoal()} />
+              <Button
+                title="Skip — just be smarter with money"
+                onPress={skipGoal}
+              />
+              {goal && (
+                <Button title="Cancel" onPress={() => setEditingGoal(false)} />
+              )}
+            </>
+          )}
+        </View>
+        <StatusBar style="auto" />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.text}>Signed in as {session.user.email}</Text>
+        <Button title="Edit goal" onPress={() => setEditingGoal(true)} />
         <Button title="Sign out" onPress={signOut} />
       </View>
 
@@ -367,6 +641,49 @@ export default function App() {
         )}
       </View>
 
+      <View style={styles.budgetSection}>
+        <Button
+          title={showBudget ? 'Hide budget status' : 'View budget status'}
+          onPress={() => {
+            const next = !showBudget;
+            setShowBudget(next);
+            if (next && !budgetStatus) fetchBudgetStatus();
+          }}
+        />
+        {showBudget && (
+          <>
+            {generatingBudget ? (
+              <ActivityIndicator />
+            ) : (
+              <Button
+                title={
+                  budgetStatus?.some((s) => s.budgeted != null)
+                    ? 'Regenerate budget from spending history'
+                    : 'Generate budget from spending history'
+                }
+                onPress={generateBudget}
+              />
+            )}
+            {loadingBudget ? (
+              <ActivityIndicator />
+            ) : (
+              <ScrollView style={styles.budgetList}>
+                {budgetStatus?.map((s) => (
+                  <View key={s.category} style={styles.budgetRow}>
+                    <Text style={styles.rowName}>{s.category}</Text>
+                    <Text style={styles.smallText}>
+                      {s.budgeted == null
+                        ? `spent $${s.actual.toFixed(2)} (not budgeted yet)`
+                        : `spent $${s.actual.toFixed(2)} of $${s.budgeted.toFixed(2)} ($${s.remaining.toFixed(2)} left)`}
+                    </Text>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+          </>
+        )}
+      </View>
+
       {error && (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>{error}</Text>
@@ -396,8 +713,43 @@ export default function App() {
           )}
           renderItem={({ item }) => (
             <View style={styles.row}>
-              <Text style={styles.rowName}>{item.name}</Text>
-              <Text style={styles.rowAmount}>${item.amount.toFixed(2)}</Text>
+              <View style={styles.rowMain}>
+                <Text style={styles.rowName}>{item.name}</Text>
+                <Text style={styles.rowAmount}>${item.amount.toFixed(2)}</Text>
+              </View>
+
+              {item.needsReview &&
+                (reviewingTransactionId === item.transactionId ? (
+                  correctingCategory ? (
+                    <ActivityIndicator />
+                  ) : (
+                    <View style={styles.categoryPicker}>
+                      {CATEGORIES.map((c) => (
+                        <Button
+                          key={c}
+                          title={c}
+                          onPress={() => correctCategory(item.transactionId, c)}
+                        />
+                      ))}
+                      <Button
+                        title="Cancel"
+                        onPress={() => setReviewingTransactionId(null)}
+                      />
+                    </View>
+                  )
+                ) : (
+                  <View style={styles.reviewRow}>
+                    <Text style={styles.reviewText}>
+                      We couldn't confidently categorize this purchase. Help
+                      us out by choosing the correct category. We'll use
+                      your feedback to improve future matches.
+                    </Text>
+                    <Button
+                      title="Choose category"
+                      onPress={() => setReviewingTransactionId(item.transactionId)}
+                    />
+                  </View>
+                ))}
             </View>
           )}
           ListEmptyComponent={
@@ -415,6 +767,36 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
     paddingTop: 60,
+  },
+  goalScreen: {
+    flex: 1,
+    gap: 12,
+    paddingHorizontal: 24,
+    paddingTop: 40,
+  },
+  goalTypeRow: {
+    gap: 8,
+  },
+  input: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#999',
+    borderRadius: 4,
+    padding: 8,
+    fontSize: 15,
+  },
+  budgetSection: {
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  budgetList: {
+    maxHeight: 280,
+    alignSelf: 'stretch',
+  },
+  budgetRow: {
+    alignItems: 'center',
+    paddingVertical: 6,
   },
   centered: {
     flex: 1,
@@ -463,12 +845,14 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   row: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#ddd',
+  },
+  rowMain: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
   rowName: {
     fontSize: 15,
@@ -478,5 +862,20 @@ const styles = StyleSheet.create({
   rowAmount: {
     fontSize: 15,
     fontWeight: '500',
+  },
+  reviewRow: {
+    gap: 6,
+    marginTop: 6,
+    alignItems: 'flex-start',
+  },
+  reviewText: {
+    fontSize: 12,
+    color: '#a06600',
+  },
+  categoryPicker: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 6,
   },
 });
