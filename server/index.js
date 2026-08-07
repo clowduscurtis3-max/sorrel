@@ -23,7 +23,12 @@ const {
 } = require('./gmail');
 const { extractReceipts } = require('./receipts');
 const { matchReceiptsToTransactions } = require('./matching');
-const { generateBudget, currentMonthRange, NoHistoryError } = require('./budget');
+const {
+  generateBudget,
+  recomputeBudgetActuals,
+  currentMonthRange,
+  NoHistoryError,
+} = require('./budget');
 const { detectRecurringTransactions } = require('./recurring');
 const { logError } = require('./safeLog');
 
@@ -417,6 +422,15 @@ app.patch('/transactions/:transaction_id/category', requireUser, async (req, res
 app.post('/budget/generate', requireUser, async (req, res) => {
   try {
     const budget = await generateBudget(req.userId);
+    // Best-effort: refreshes budget_actuals immediately so /budget/status
+    // is accurate right after generating, without waiting for the next
+    // sync cycle. A hiccup here shouldn't fail budget generation, which
+    // already succeeded above - the next sync will catch actuals up anyway.
+    try {
+      await recomputeBudgetActuals(req.userId);
+    } catch (err) {
+      logError('Failed to recompute budget actuals after generation (non-fatal):', err);
+    }
     res.json({ budget });
   } catch (err) {
     if (err instanceof NoHistoryError) {
@@ -427,11 +441,27 @@ app.post('/budget/generate', requireUser, async (req, res) => {
   }
 });
 
-// Step 5: budgeted vs. actual per category for the current calendar month.
-// `budgeted` is null (not 0) when no budget row exists yet for a category,
-// so the client can tell "never budgeted" apart from "budgeted $0".
+// Step 5 (Phase 2) / Step 3 (Phase 3): budgeted vs. actual per category for
+// the current calendar month. `budgeted` is null (not 0) when no budget row
+// exists yet for a category, so the client can tell "never budgeted" apart
+// from "budgeted $0". As of Phase 3 Step 3, `actual` is read from
+// budget_actuals (kept current as transactions land - see
+// recomputeBudgetActuals in server/budget.js and its call sites) rather
+// than re-scanning every transaction on every request.
 app.get('/budget/status', requireUser, async (req, res) => {
   try {
+    // Defensive, not just the sync-triggered path above: guarantees
+    // freshness even the very first time this is called for an account
+    // that was already synced before budget_actuals existed (nothing would
+    // otherwise ever backfill it, since a repeat sync against unchanged
+    // transactions has no delta to trigger a recompute from). Cheap - one
+    // indexed query + an upsert of a fixed, small category set.
+    try {
+      await recomputeBudgetActuals(req.userId);
+    } catch (err) {
+      logError('Failed to recompute budget actuals before status read (non-fatal):', err);
+    }
+
     const { period_start, period_end } = currentMonthRange();
 
     const { data: budgets, error: budgetError } = await supabaseAdmin
@@ -441,29 +471,26 @@ app.get('/budget/status', requireUser, async (req, res) => {
       .eq('period_start', period_start);
     if (budgetError) throw budgetError;
 
-    const { data: transactions, error: txError } = await supabaseAdmin
-      .from('transactions')
-      .select('category, amount')
+    const { data: actuals, error: actualsError } = await supabaseAdmin
+      .from('budget_actuals')
+      .select('category, actual_amount')
       .eq('user_id', req.userId)
-      .gte('date', period_start)
-      .lte('date', period_end);
-    if (txError) throw txError;
+      .eq('period_start', period_start);
+    if (actualsError) throw actualsError;
 
     const budgetByCategory = Object.fromEntries(
       (budgets || []).map((b) => [b.category, b])
     );
+    const actualByCategory = Object.fromEntries(
+      (actuals || []).map((a) => [a.category, a.actual_amount])
+    );
 
-    const actualByCategory = {};
-    for (const t of transactions) {
-      // Only spend categories (+ Uncategorized, shown for transparency so
-      // unreviewed spend isn't silently missing from the picture) count
-      // toward "actual" - Income/Transfers are money movement, not spend.
-      if (!SPEND_CATEGORIES.includes(t.category) && t.category !== 'Uncategorized') continue;
-      actualByCategory[t.category] = (actualByCategory[t.category] || 0) + t.amount;
-    }
-
+    // Uncategorized only shown when there's actually unreviewed spend this
+    // period, same as before - budget_actuals always carries a $0 row for
+    // it otherwise (see recomputeBudgetActuals), so this checks the value
+    // rather than presence.
     const categories = [...SPEND_CATEGORIES];
-    if (actualByCategory['Uncategorized'] != null) categories.push('Uncategorized');
+    if (actualByCategory['Uncategorized']) categories.push('Uncategorized');
 
     const status = categories
       .map((category) => ({
@@ -665,6 +692,20 @@ async function syncTransactions(userId, access_token, cursor, attempt = 1) {
       .update({ cursor: nextCursor })
       .eq('user_id', userId);
     if (cursorError) throw cursorError;
+
+    // Phase 3 Step 3: keep budget_actuals current the moment transactions
+    // actually land, not just when /budget/status happens to be requested.
+    // Skipped when nothing changed this cycle (the common case for the
+    // 30-minute background sync against static Sandbox data) to avoid
+    // needless writes. Best-effort - a tracking-table hiccup shouldn't fail
+    // the sync itself, which already succeeded above.
+    if (added.length > 0 || modified.length > 0 || removed.length > 0) {
+      try {
+        await recomputeBudgetActuals(userId);
+      } catch (err) {
+        logError('Failed to recompute budget actuals (non-fatal):', err);
+      }
+    }
   } catch (err) {
     const code = err.response?.data?.error_code;
     if (code === 'PRODUCT_NOT_READY' && attempt < 5) {

@@ -660,6 +660,9 @@ export default function App() {
       <View style={styles.header}>
         <Text style={styles.text}>Signed in as {session.user.email}</Text>
         <Button title="Edit goal" onPress={() => setEditingGoal(true)} />
+        {linked && !linking && (
+          <Button title="Re-link bank account" onPress={linkBankAccount} />
+        )}
         <Button title="Sign out" onPress={signOut} />
       </View>
 
@@ -704,7 +707,12 @@ export default function App() {
           onPress={() => {
             const next = !showBudget;
             setShowBudget(next);
-            if (next && !budgetStatus) fetchBudgetStatus();
+            // Always refetch on open, not just the first time - budget
+            // status is meant to be live (Phase 3 Step 3), so re-showing
+            // a previously-cached result after new data has landed (a
+            // sync, a re-link, a category correction) would silently
+            // undercut the entire point of this step.
+            if (next) fetchBudgetStatus();
           }}
         />
         {showBudget && (

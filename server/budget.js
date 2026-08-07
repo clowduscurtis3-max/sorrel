@@ -214,4 +214,55 @@ async function generateBudget(userId) {
   return rows;
 }
 
-module.exports = { generateBudget, currentMonthRange, NoHistoryError };
+// Phase 3 Step 3: recomputes this user's actual spend per category for the
+// current period and upserts it into budget_actuals, so /budget/status can
+// read a maintained table instead of re-scanning every transaction on every
+// request. Called whenever transactions actually change during a sync (see
+// syncTransactions in index.js) - "continuously as transactions land" - and
+// once more right after a fresh budget is generated, so status is accurate
+// immediately even before the next sync.
+//
+// Sends a row for every SPEND_CATEGORY plus Uncategorized on every call
+// (via upsert, never delete-then-insert): unlike generateBudget's Claude
+// response, this set is our own fixed enumeration, never partial, so there's
+// no risk of a stale leftover row the way delete-then-insert guards against
+// above - upsert alone already keeps this table exactly in sync every time,
+// with no transient-empty window for a concurrent /budget/status read.
+async function recomputeBudgetActuals(userId) {
+  const { period_start, period_end } = currentMonthRange();
+
+  const { data: transactions, error: txError } = await supabaseAdmin
+    .from('transactions')
+    .select('category, amount')
+    .eq('user_id', userId)
+    .gte('date', period_start)
+    .lte('date', period_end);
+  if (txError) throw txError;
+
+  const actualByCategory = Object.fromEntries(SPEND_CATEGORIES.map((c) => [c, 0]));
+  actualByCategory['Uncategorized'] = 0;
+  for (const t of transactions) {
+    // Only spend categories (+ Uncategorized, tracked for transparency so
+    // unreviewed spend isn't silently missing) count as "actual" - Income/
+    // Transfers are money movement, not spend.
+    if (!Object.prototype.hasOwnProperty.call(actualByCategory, t.category)) continue;
+    actualByCategory[t.category] += t.amount;
+  }
+
+  const round2 = (n) => Math.round(n * 100) / 100;
+  const rows = Object.entries(actualByCategory).map(([category, amount]) => ({
+    user_id: userId,
+    category,
+    period_start,
+    period_end,
+    actual_amount: round2(amount),
+    updated_at: new Date().toISOString(),
+  }));
+
+  const { error: upsertError } = await supabaseAdmin
+    .from('budget_actuals')
+    .upsert(rows, { onConflict: 'user_id,category,period_start' });
+  if (upsertError) throw upsertError;
+}
+
+module.exports = { generateBudget, recomputeBudgetActuals, currentMonthRange, NoHistoryError };
