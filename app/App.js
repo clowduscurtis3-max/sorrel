@@ -6,6 +6,7 @@ import {
   Button,
   ActivityIndicator,
   SectionList,
+  RefreshControl,
   TextInput,
   ScrollView,
 } from 'react-native';
@@ -154,6 +155,8 @@ function groupByCategory(transactions) {
         name: t.merchant_name || t.name,
         amount: t.amount,
         needsReview: t.category === 'Uncategorized' || t.category_confidence !== 'high',
+        isRecurring: !!t.is_recurring,
+        recurringInterval: t.recurring_interval,
       });
     }
   }
@@ -170,6 +173,7 @@ export default function App() {
   const [linked, setLinked] = useState(false);
   const [transactions, setTransactions] = useState([]);
   const [loadingTransactions, setLoadingTransactions] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const [gmailEmail, setGmailEmail] = useState(null);
   const [gmailLinking, setGmailLinking] = useState(false);
@@ -338,8 +342,12 @@ export default function App() {
 
   // Doubles as "does this user already have a linked account?" — the
   // backend returns 404 until /exchange-token has run at least once.
-  async function fetchTransactions() {
-    setLoadingTransactions(true);
+  // `silent` skips the full-screen loading spinner - used by pull-to-refresh
+  // below, which shows its own inline spinner via RefreshControl and would
+  // otherwise have the whole list flash to a blank loading screen on every
+  // pull instead of staying visible underneath it.
+  async function fetchTransactions({ silent = false } = {}) {
+    if (!silent) setLoadingTransactions(true);
     setError(null);
     try {
       const res = await apiFetch('/transactions');
@@ -367,8 +375,14 @@ export default function App() {
       console.error(err);
       setError(apiErrorMessage(err));
     } finally {
-      setLoadingTransactions(false);
+      if (!silent) setLoadingTransactions(false);
     }
+  }
+
+  async function onRefresh() {
+    setRefreshing(true);
+    await fetchTransactions({ silent: true });
+    setRefreshing(false);
   }
 
   // Step 6: user-driven correction for a transaction the AI wasn't
@@ -717,6 +731,9 @@ export default function App() {
           style={styles.list}
           sections={groupByCategory(transactions)}
           keyExtractor={(item) => item.key}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
           renderSectionHeader={({ section: { title } }) => (
             <Text style={styles.sectionHeader}>{title}</Text>
           )}
@@ -726,6 +743,12 @@ export default function App() {
                 <Text style={styles.rowName}>{item.name}</Text>
                 <Text style={styles.rowAmount}>{formatAmount(item.amount)}</Text>
               </View>
+
+              {item.isRecurring && (
+                <Text style={styles.recurringTag}>
+                  Recurring · {item.recurringInterval}
+                </Text>
+              )}
 
               {item.needsReview &&
                 (reviewingTransactionId === item.transactionId ? (
@@ -871,6 +894,11 @@ const styles = StyleSheet.create({
   rowAmount: {
     fontSize: 15,
     fontWeight: '500',
+  },
+  recurringTag: {
+    fontSize: 11,
+    color: '#3a6b3a',
+    marginTop: 2,
   },
   reviewRow: {
     gap: 6,

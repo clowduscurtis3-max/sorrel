@@ -24,6 +24,7 @@ const {
 const { extractReceipts } = require('./receipts');
 const { matchReceiptsToTransactions } = require('./matching');
 const { generateBudget, currentMonthRange, NoHistoryError } = require('./budget');
+const { detectRecurringTransactions } = require('./recurring');
 const { logError } = require('./safeLog');
 
 // Where we send the system browser once Gmail linking finishes, so the app
@@ -39,6 +40,31 @@ app.set('etag', false);
 app.use(cors());
 app.use(express.json());
 
+// Google Sign-In (via Supabase Auth) otherwise accepts any Google account,
+// and the backend is necessarily reachable from the public internet while
+// developing (the ngrok tunnel - see CLAUDE.md's local dev setup). Someone
+// who found that URL couldn't read another user's data (every query is
+// scoped by user_id and RLS is enabled with zero client-access policies on
+// every table), but they could sign in as themselves and spend against the
+// Anthropic/Plaid usage this app pays for. This closes that off at the
+// source - checked in requireUser below, after the token itself is already
+// cryptographically verified, so it's the real Google-verified email being
+// checked, not anything a client could spoof via a header.
+// Fails closed: if ALLOWED_EMAILS is unset/empty, every request is
+// rejected rather than silently letting anyone through.
+const ALLOWED_EMAILS = new Set(
+  (process.env.ALLOWED_EMAILS || '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean)
+);
+if (ALLOWED_EMAILS.size === 0) {
+  console.error(
+    'ALLOWED_EMAILS is not set in .env - no one will be able to use this app. ' +
+      'Set it to a comma-separated list of allowed email addresses.'
+  );
+}
+
 // Identifies which signed-in user is calling, using the same Supabase
 // session token the app already has from Google sign-in.
 async function requireUser(req, res, next) {
@@ -48,6 +74,12 @@ async function requireUser(req, res, next) {
 
   const { data, error } = await supabaseAdmin.auth.getUser(token);
   if (error || !data.user) return res.status(401).json({ error: 'Invalid session' });
+
+  const email = (data.user.email || '').toLowerCase();
+  if (!ALLOWED_EMAILS.has(email)) {
+    console.error('Rejected request from non-allowlisted email:', email);
+    return res.status(403).json({ error: 'This account is not authorized to use this app.' });
+  }
 
   req.userId = data.user.id;
   next();
@@ -219,6 +251,16 @@ app.get('/transactions', requireUser, async (req, res) => {
       }
     }
 
+    // Best-effort, same treatment as the Gmail scan above: re-detects
+    // recurring patterns (server/recurring.js) against whatever's freshest
+    // right after a sync, but a detection hiccup shouldn't block the
+    // transaction list itself from loading.
+    try {
+      await detectRecurringTransactions(req.userId);
+    } catch (err) {
+      logError('Recurring transaction detection failed (non-fatal):', err);
+    }
+
     const { data: transactions, error: txError } = await supabaseAdmin
       .from('transactions')
       .select('*')
@@ -227,7 +269,8 @@ app.get('/transactions', requireUser, async (req, res) => {
     if (txError) throw txError;
 
     const enriched = await attachMatchedReceipts(req.userId, transactions);
-    res.json({ transactions: enriched });
+    const withRecurring = await attachRecurringInfo(req.userId, enriched);
+    res.json({ transactions: withRecurring });
   } catch (err) {
     if (err instanceof DecryptionError) {
       console.error('Stored Plaid token failed to decrypt for user', req.userId, '-', err.message);
@@ -429,6 +472,45 @@ app.get('/budget/status', requireUser, async (req, res) => {
     res.status(500).json({ error: 'Failed to load budget status' });
   }
 });
+
+// Re-runs recurring-pattern detection over this user's stored transactions
+// on demand (normally happens automatically after every sync - see
+// /transactions above). Useful for testing/debugging without needing a
+// fresh Plaid delta to trigger it.
+app.post('/admin/detect-recurring', requireUser, async (req, res) => {
+  try {
+    const result = await detectRecurringTransactions(req.userId);
+    res.json(result);
+  } catch (err) {
+    logError('Failed to detect recurring transactions:', err);
+    res.status(500).json({ error: 'Failed to detect recurring transactions' });
+  }
+});
+
+// Joins each transaction to its recurring_series row (if any) so the app
+// can show "fixed" vs "variable" without a second round trip - and so this
+// distinction is a plain field on the data the client already has, not
+// something only derivable from a separate admin call.
+async function attachRecurringInfo(userId, transactions) {
+  const { data: series, error } = await supabaseAdmin
+    .from('recurring_series')
+    .select('id, interval, next_expected_date')
+    .eq('user_id', userId);
+  if (error) throw error;
+  if (!series || series.length === 0) return transactions;
+
+  const seriesById = Object.fromEntries(series.map((s) => [s.id, s]));
+  return transactions.map((t) => {
+    const s = t.recurring_series_id && seriesById[t.recurring_series_id];
+    if (!s) return t;
+    return {
+      ...t,
+      is_recurring: true,
+      recurring_interval: s.interval,
+      recurring_next_expected_date: s.next_expected_date,
+    };
+  });
+}
 
 // Matches any unmatched receipts against this transaction list, persists
 // new matches so they stay stable, and attaches each matched receipt's
