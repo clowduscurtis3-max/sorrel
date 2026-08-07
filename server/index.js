@@ -221,45 +221,54 @@ app.post('/goal', requireUser, async (req, res) => {
   }
 });
 
+class NoLinkedAccountError extends Error {}
+
+// The full "bring this user's data up to date" bundle: Plaid sync,
+// then the same two best-effort passes (Gmail receipts, recurring
+// detection) that used to live inline in GET /transactions. Pulled out so
+// both the manual on-open path (GET /transactions) and the unattended
+// background job (runBackgroundSync, below) run identical logic instead of
+// two copies drifting apart over time.
+async function syncUserData(userId) {
+  const { data: item, error } = await supabaseAdmin
+    .from('plaid_items')
+    .select('access_token, cursor')
+    .eq('user_id', userId)
+    .single();
+
+  if (error || !item) throw new NoLinkedAccountError('No linked bank account');
+
+  await syncTransactionsLocked(userId, decrypt(item.access_token), item.cursor);
+
+  // Best-effort: if Gmail is linked, pull in any new receipts too, so the
+  // itemized view stays fresh without a separate manual step. A Gmail
+  // hiccup here shouldn't block the rest of the sync.
+  const { data: gmailAccount } = await supabaseAdmin
+    .from('gmail_accounts')
+    .select('access_token, refresh_token, expires_at')
+    .eq('user_id', userId)
+    .single();
+  if (gmailAccount) {
+    try {
+      await scanForReceipts(userId, gmailAccount);
+    } catch (err) {
+      logError('Gmail receipt scan failed (non-fatal):', err);
+    }
+  }
+
+  // Best-effort, same treatment as the Gmail scan above: re-detects
+  // recurring patterns (server/recurring.js) against whatever's freshest
+  // right after a sync, but a detection hiccup shouldn't block the rest.
+  try {
+    await detectRecurringTransactions(userId);
+  } catch (err) {
+    logError('Recurring transaction detection failed (non-fatal):', err);
+  }
+}
+
 app.get('/transactions', requireUser, async (req, res) => {
   try {
-    const { data: item, error } = await supabaseAdmin
-      .from('plaid_items')
-      .select('access_token, cursor')
-      .eq('user_id', req.userId)
-      .single();
-
-    if (error || !item) {
-      return res.status(404).json({ error: 'No linked bank account' });
-    }
-
-    await syncTransactionsLocked(req.userId, decrypt(item.access_token), item.cursor);
-
-    // Best-effort: if Gmail is linked, pull in any new receipts too, so the
-    // itemized view stays fresh without a separate manual step. A Gmail
-    // hiccup here shouldn't block the bank transaction list from loading.
-    const { data: gmailAccount } = await supabaseAdmin
-      .from('gmail_accounts')
-      .select('access_token, refresh_token, expires_at')
-      .eq('user_id', req.userId)
-      .single();
-    if (gmailAccount) {
-      try {
-        await scanForReceipts(req.userId, gmailAccount);
-      } catch (err) {
-        logError('Gmail receipt scan failed (non-fatal):', err);
-      }
-    }
-
-    // Best-effort, same treatment as the Gmail scan above: re-detects
-    // recurring patterns (server/recurring.js) against whatever's freshest
-    // right after a sync, but a detection hiccup shouldn't block the
-    // transaction list itself from loading.
-    try {
-      await detectRecurringTransactions(req.userId);
-    } catch (err) {
-      logError('Recurring transaction detection failed (non-fatal):', err);
-    }
+    await syncUserData(req.userId);
 
     const { data: transactions, error: txError } = await supabaseAdmin
       .from('transactions')
@@ -272,6 +281,9 @@ app.get('/transactions', requireUser, async (req, res) => {
     const withRecurring = await attachRecurringInfo(req.userId, enriched);
     res.json({ transactions: withRecurring });
   } catch (err) {
+    if (err instanceof NoLinkedAccountError) {
+      return res.status(404).json({ error: 'No linked bank account' });
+    }
     if (err instanceof DecryptionError) {
       console.error('Stored Plaid token failed to decrypt for user', req.userId, '-', err.message);
       return res.status(409).json({
@@ -871,6 +883,47 @@ async function scanForReceipts(userId, account) {
   );
   if (scannedError) throw scannedError;
 }
+
+// Phase 3 Step 2: automatic re-sync. Runs independent of any request, so
+// data (and, eventually, alerts built on top of it) stays current even
+// while the app is closed - "sync on open" alone can never support a real
+// notification, since nothing runs unless a user happens to be looking at
+// the app. Every linked user is synced in turn, reusing syncUserData so
+// this is exactly the same logic GET /transactions already runs - one code
+// path, not a second copy that can drift.
+const BACKGROUND_SYNC_INTERVAL_MS = 30 * 60 * 1000;
+
+async function runBackgroundSync() {
+  const { data: items, error } = await supabaseAdmin.from('plaid_items').select('user_id');
+  if (error) {
+    logError('Background sync: failed to list linked accounts:', error);
+    return;
+  }
+
+  for (const { user_id } of items || []) {
+    try {
+      await syncUserData(user_id);
+    } catch (err) {
+      if (err instanceof DecryptionError) {
+        // Same as the on-request path: a token stored before encryption
+        // existed can't be recovered here, the user has to re-link. Just
+        // skip and move on to the next user rather than erroring the loop.
+        console.error(
+          'Background sync: stored Plaid token failed to decrypt for user',
+          user_id,
+          '- needs re-link.'
+        );
+        continue;
+      }
+      logError(`Background sync failed for user ${user_id}:`, err);
+    }
+  }
+}
+
+setInterval(runBackgroundSync, BACKGROUND_SYNC_INTERVAL_MS);
+// Also run once shortly after startup, so a dev session doesn't have to
+// wait a full 30 minutes to see the background job work at all.
+setTimeout(runBackgroundSync, 60 * 1000);
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Server listening on port ${port}`));

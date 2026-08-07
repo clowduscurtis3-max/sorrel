@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -9,6 +9,7 @@ import {
   RefreshControl,
   TextInput,
   ScrollView,
+  AppState,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as WebBrowser from 'expo-web-browser';
@@ -221,6 +222,29 @@ export default function App() {
     }
   }, [session]);
 
+  // Phase 3 Step 2: refresh on returning to the foreground, not just on
+  // cold launch. The backend's background job (server/index.js) is what
+  // actually keeps data fresh while the app is closed - this just makes
+  // sure the screen reflects that the moment you look at your phone again,
+  // instead of whatever was loaded before you backgrounded the app.
+  const appState = useRef(AppState.currentState);
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (appState.current.match(/inactive|background/) && nextState === 'active' && session) {
+        // Small delay: the OS network stack can still be reconnecting right
+        // at the 'active' transition (confirmed via tap-testing - firing
+        // immediately intermittently hit a transient network error that
+        // then succeeded a moment later on its own). Waiting briefly avoids
+        // firing into that window in the first place.
+        setTimeout(() => {
+          fetchTransactions({ silent: true, suppressErrorBanner: true });
+        }, 1500);
+      }
+      appState.current = nextState;
+    });
+    return () => subscription.remove();
+  }, [session]);
+
   // Doubles as "does this user already have a goal saved?" — 404 means
   // setup hasn't captured one yet, so the intake screen opens automatically
   // (see the render logic below). Also used to prefill the "Edit goal"
@@ -346,7 +370,7 @@ export default function App() {
   // below, which shows its own inline spinner via RefreshControl and would
   // otherwise have the whole list flash to a blank loading screen on every
   // pull instead of staying visible underneath it.
-  async function fetchTransactions({ silent = false } = {}) {
+  async function fetchTransactions({ silent = false, suppressErrorBanner = false } = {}) {
     if (!silent) setLoadingTransactions(true);
     setError(null);
     try {
@@ -373,7 +397,17 @@ export default function App() {
       setLinked(true);
     } catch (err) {
       console.error(err);
-      setError(apiErrorMessage(err));
+      // suppressErrorBanner: used by the AppState foreground-resume refresh
+      // (see below) - tap-testing surfaced that the OS network stack
+      // sometimes hasn't reconnected yet at the exact moment the app
+      // becomes active, so this specific call can fail transiently and
+      // succeed moments later on its own. That's not something the user
+      // needs to be interrupted by for a background refresh they never
+      // asked for - existing data just stays visible until the next
+      // successful sync. Pull-to-refresh (also `silent`, but user-
+      // initiated) still surfaces real errors, since the user is actively
+      // waiting on that one.
+      if (!suppressErrorBanner) setError(apiErrorMessage(err));
     } finally {
       if (!silent) setLoadingTransactions(false);
     }
