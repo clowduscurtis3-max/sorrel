@@ -25,3 +25,4 @@ web-build/
 # editors
 .vscode/
 .idea/
+*.swp

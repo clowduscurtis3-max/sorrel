@@ -26,6 +26,8 @@ const { matchReceiptsToTransactions } = require('./matching');
 const {
   generateBudget,
   recomputeBudgetActuals,
+  proposeRebalance,
+  applyBudgetEdit,
   currentMonthRange,
   NoHistoryError,
 } = require('./budget');
@@ -509,6 +511,40 @@ app.get('/budget/status', requireUser, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load budget status' });
+  }
+});
+
+// Step 4: preview only, nothing persisted - given a category and its new
+// amount, returns the AI's proposed offsetting reductions elsewhere (with
+// reasoning), so the app can show it before the user decides to apply,
+// adjust, or reject it. Safe to call repeatedly (e.g. as the user types).
+app.post('/budget/rebalance-proposal', requireUser, async (req, res) => {
+  const { category, budgeted_amount } = req.body;
+  if (typeof budgeted_amount !== 'number' || !Number.isFinite(budgeted_amount) || budgeted_amount < 0) {
+    return res.status(400).json({ error: 'budgeted_amount must be a finite, non-negative number' });
+  }
+  try {
+    const proposal = await proposeRebalance(req.userId, category, budgeted_amount);
+    res.json({ proposal });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to generate re-balance proposal' });
+  }
+});
+
+// Step 4: actually persists a budget edit, plus whichever offsetting
+// adjustments the user accepted (as-is, overridden, or an empty array to
+// reject the rebalance and keep just the one edit) - the only endpoint in
+// this step that writes anything. Every category touched here is marked
+// is_user_set so a future /budget/generate leaves it alone.
+app.post('/budget/edit', requireUser, async (req, res) => {
+  const { category, budgeted_amount, adjustments } = req.body;
+  try {
+    const rows = await applyBudgetEdit(req.userId, category, budgeted_amount, adjustments || []);
+    res.json({ updated: rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to save budget edit' });
   }
 });
 
