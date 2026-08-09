@@ -12,6 +12,7 @@
     },
     "android": {
       "package": "com.curt182.pocketaccountant",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -30,6 +31,12 @@
           "android": {
             "minSdkVersion": 26
           }
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#E6F4FE"
         }
       ]
     ],

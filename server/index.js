@@ -34,6 +34,7 @@ const {
 const { detectRecurringTransactions } = require('./recurring');
 const { recomputeOverspendAlerts } = require('./alerts');
 const { getGoalProgress } = require('./goalProgress');
+const { registerDevice } = require('./notifications');
 const { logError } = require('./safeLog');
 
 // Where we send the system browser once Gmail linking finishes, so the app
@@ -243,6 +244,29 @@ app.get('/goal/progress', requireUser, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load goal progress' });
+  }
+});
+
+// Phase 4 Step A: device registration. `requireUser` already established
+// who's calling from a cryptographically-verified session token, so this
+// writes to req.userId only - a client can never register (or overwrite) a
+// device against a different user's account, no matter what it sends.
+// Best-effort by design at the call site in the app - a failure here must
+// never block sign-in or the rest of the app from working.
+app.post('/notifications/register-device', requireUser, async (req, res) => {
+  const { expo_push_token, platform, timezone } = req.body || {};
+  try {
+    await registerDevice(req.userId, { expoPushToken: expo_push_token, platform, timezone });
+    res.json({ ok: true });
+  } catch (err) {
+    if (err.message === 'INVALID_PUSH_TOKEN' || err.message === 'INVALID_PLATFORM') {
+      return res.status(400).json({ error: err.message });
+    }
+    // Never log err directly here or anywhere near this route - err could
+    // echo the invalid token back in a Postgres constraint-violation
+    // message, and push tokens are treated as sensitive per CLAUDE.md.
+    logError('Device registration failed:', err);
+    res.status(500).json({ error: 'Failed to register device' });
   }
 });
 

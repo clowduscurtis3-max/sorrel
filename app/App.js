@@ -10,6 +10,7 @@ import {
   TextInput,
   ScrollView,
   AppState,
+  Platform,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as WebBrowser from 'expo-web-browser';
@@ -18,6 +19,7 @@ import { makeRedirectUri } from 'expo-auth-session';
 import * as QueryParams from 'expo-auth-session/build/QueryParams';
 import { createPlaidLinkSession } from 'react-native-plaid-link-sdk';
 import { supabase } from './lib/supabase';
+import { registerForPushNotificationsAsync, getDeviceTimezone } from './lib/notifications';
 
 // Our own backend, reachable through the ngrok tunnel while developing.
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
@@ -102,6 +104,29 @@ async function apiFetch(path, options = {}) {
   }
 
   return res;
+}
+
+// Phase 4 Step A: best-effort push registration. Failure here (permission
+// denied, no physical device, a network hiccup) must never block sign-in or
+// anything else the app does - same non-fatal treatment as the Gmail scan/
+// recurring detection on the backend. Nothing is sent to the device yet;
+// this only stores the token so a later phase can.
+async function registerDeviceForPushNotifications() {
+  try {
+    const token = await registerForPushNotificationsAsync();
+    if (!token) return;
+    await apiFetch('/notifications/register-device', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expo_push_token: token,
+        platform: Platform.OS,
+        timezone: getDeviceTimezone(),
+      }),
+    });
+  } catch (err) {
+    console.error('Push registration failed (non-fatal):', err?.message);
+  }
 }
 
 function apiErrorMessage(err) {
@@ -236,6 +261,7 @@ export default function App() {
       fetchGoal();
       fetchAlerts();
       fetchGoalProgress();
+      registerDeviceForPushNotifications();
     }
   }, [session]);
 

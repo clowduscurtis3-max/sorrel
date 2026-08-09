@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "36895633455",
+    "project_id": "pocket-accountant-app",
+    "storage_bucket": "pocket-accountant-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:36895633455:android:269aaa710318f0608a96da",
+        "android_client_info": {
+          "package_name": "com.curt182.pocketaccountant"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBimFBPIcjX7mqBfG5CAdvt0f3wqZo5Gfg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
