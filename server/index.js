@@ -32,6 +32,8 @@ const {
   NoHistoryError,
 } = require('./budget');
 const { detectRecurringTransactions } = require('./recurring');
+const { recomputeOverspendAlerts } = require('./alerts');
+const { getGoalProgress } = require('./goalProgress');
 const { logError } = require('./safeLog');
 
 // Where we send the system browser once Gmail linking finishes, so the app
@@ -225,6 +227,22 @@ app.post('/goal', requireUser, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to save goal' });
+  }
+});
+
+// Phase 3 Step 6: goal progress. Stateless read, computed fresh on every
+// call (see getGoalProgress in server/goalProgress.js) rather than
+// persisted like budget_alerts - it's a cheap single query (transactions
+// since the goal was set) and doesn't need to survive until the app is
+// next opened, unlike an alert that has to be caught by a background sync.
+app.get('/goal/progress', requireUser, async (req, res) => {
+  try {
+    const progress = await getGoalProgress(req.userId);
+    if (!progress) return res.status(404).json({ error: 'No goal set' });
+    res.json({ progress });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load goal progress' });
   }
 });
 
@@ -433,6 +451,11 @@ app.post('/budget/generate', requireUser, async (req, res) => {
     } catch (err) {
       logError('Failed to recompute budget actuals after generation (non-fatal):', err);
     }
+    try {
+      await recomputeOverspendAlerts(req.userId);
+    } catch (err) {
+      logError('Failed to recompute overspend alerts after generation (non-fatal):', err);
+    }
     res.json({ budget });
   } catch (err) {
     if (err instanceof NoHistoryError) {
@@ -462,6 +485,11 @@ app.get('/budget/status', requireUser, async (req, res) => {
       await recomputeBudgetActuals(req.userId);
     } catch (err) {
       logError('Failed to recompute budget actuals before status read (non-fatal):', err);
+    }
+    try {
+      await recomputeOverspendAlerts(req.userId);
+    } catch (err) {
+      logError('Failed to recompute overspend alerts before status read (non-fatal):', err);
     }
 
     const { period_start, period_end } = currentMonthRange();
@@ -514,6 +542,27 @@ app.get('/budget/status', requireUser, async (req, res) => {
   }
 });
 
+// Phase 3 Step 5: currently-active overspend alerts for this period, kept
+// current by recomputeOverspendAlerts (see its call sites above and in
+// syncTransactions) rather than computed fresh on this request - a plain
+// read, same shape as /budget/status.
+app.get('/budget/alerts', requireUser, async (req, res) => {
+  try {
+    const { period_start } = currentMonthRange();
+    const { data: alerts, error } = await supabaseAdmin
+      .from('budget_alerts')
+      .select('category, budgeted_amount, actual_amount, projected_amount, message, suggested_action')
+      .eq('user_id', req.userId)
+      .eq('period_start', period_start)
+      .order('category');
+    if (error) throw error;
+    res.json({ alerts: alerts || [] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load budget alerts' });
+  }
+});
+
 // Step 4: preview only, nothing persisted - given a category and its new
 // amount, returns the AI's proposed offsetting reductions elsewhere (with
 // reasoning), so the app can show it before the user decides to apply,
@@ -541,6 +590,15 @@ app.post('/budget/edit', requireUser, async (req, res) => {
   const { category, budgeted_amount, adjustments } = req.body;
   try {
     const rows = await applyBudgetEdit(req.userId, category, budgeted_amount, adjustments || []);
+    // Best-effort, same treatment as every other recomputeOverspendAlerts
+    // call site: an edit changes the exact numbers alerts are projected
+    // from, so a category just fixed by the user shouldn't keep showing a
+    // stale alert until the next sync cycle catches up.
+    try {
+      await recomputeOverspendAlerts(req.userId);
+    } catch (err) {
+      logError('Failed to recompute overspend alerts after edit (non-fatal):', err);
+    }
     res.json({ updated: rows });
   } catch (err) {
     console.error(err);
@@ -740,6 +798,15 @@ async function syncTransactions(userId, access_token, cursor, attempt = 1) {
         await recomputeBudgetActuals(userId);
       } catch (err) {
         logError('Failed to recompute budget actuals (non-fatal):', err);
+      }
+      // Phase 3 Step 5: re-check overspend pace right after actuals change,
+      // so an alert is never more than one sync cycle stale - including the
+      // 30-minute background sync, which is what actually lets this fire
+      // while the app is closed (see runBackgroundSync below).
+      try {
+        await recomputeOverspendAlerts(userId);
+      } catch (err) {
+        logError('Failed to recompute overspend alerts (non-fatal):', err);
       }
     }
   } catch (err) {

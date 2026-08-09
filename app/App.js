@@ -200,6 +200,14 @@ export default function App() {
   const [budgetAdjustments, setBudgetAdjustments] = useState([]);
   const [loadingProposal, setLoadingProposal] = useState(false);
   const [applyingBudgetEdit, setApplyingBudgetEdit] = useState(false);
+  // Phase 3 Step 5: overspend & insight alerts. Shown unprompted (not
+  // gated behind a toggle like budget status) per the "Product voice"
+  // principle - red flags are meant to surface on their own, not only once
+  // the user goes looking.
+  const [alerts, setAlerts] = useState([]);
+  // Phase 3 Step 6: goal progress. Shown unprompted near the goal header,
+  // same reasoning as alerts above - "shows real progress" is the point.
+  const [goalProgress, setGoalProgress] = useState(null);
   const url = Linking.useLinkingURL();
 
   useEffect(() => {
@@ -226,6 +234,8 @@ export default function App() {
       fetchTransactions();
       fetchGmailStatus();
       fetchGoal();
+      fetchAlerts();
+      fetchGoalProgress();
     }
   }, [session]);
 
@@ -245,6 +255,8 @@ export default function App() {
         // firing into that window in the first place.
         setTimeout(() => {
           fetchTransactions({ silent: true, suppressErrorBanner: true });
+          fetchAlerts();
+          fetchGoalProgress();
         }, 1500);
       }
       appState.current = nextState;
@@ -301,6 +313,7 @@ export default function App() {
       if (!res.ok) throw new Error('SERVER_ERROR');
       setGoal(body);
       setEditingGoal(false);
+      await fetchGoalProgress();
     } catch (err) {
       console.error(err);
       setError(apiErrorMessage(err));
@@ -469,6 +482,43 @@ export default function App() {
     }
   }
 
+  // Phase 3 Step 5: currently-active overspend alerts, kept fresh server-
+  // side by recomputeOverspendAlerts (see its call sites in index.js) -
+  // this is just a plain read, same shape/spirit as fetchBudgetStatus.
+  // Silent by design at every call site below: an alert-fetch hiccup
+  // shouldn't interrupt the user with an error banner over something
+  // that isn't the primary action they're waiting on.
+  async function fetchAlerts() {
+    try {
+      const res = await apiFetch('/budget/alerts');
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const data = await res.json();
+      setAlerts(data.alerts || []);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  // Phase 3 Step 6: current progress toward the saved goal (or general
+  // smarter-spending framing if no target was set) - computed fresh server-
+  // side on every call (see getGoalProgress), so this is just a plain read.
+  // Silent by design, same as fetchAlerts - a hiccup here shouldn't
+  // interrupt the user with an error banner.
+  async function fetchGoalProgress() {
+    try {
+      const res = await apiFetch('/goal/progress');
+      if (res.status === 404) {
+        setGoalProgress(null);
+        return;
+      }
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const data = await res.json();
+      setGoalProgress(data.progress);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   // Step 4: manual trigger, matches the rest of this app's "build in small
   // testable steps" style rather than auto-generating behind the scenes.
   async function generateBudget() {
@@ -487,6 +537,7 @@ export default function App() {
         throw new Error('SERVER_ERROR');
       }
       await fetchBudgetStatus();
+      await fetchAlerts();
     } catch (err) {
       console.error(err);
       setError(err.message === 'SERVER_ERROR' ? apiErrorMessage(err) : err.message);
@@ -576,6 +627,7 @@ export default function App() {
       if (!res.ok) throw new Error('SERVER_ERROR');
       cancelEditBudget();
       await fetchBudgetStatus();
+      await fetchAlerts();
     } catch (err) {
       console.error(err);
       setError(apiErrorMessage(err));
@@ -762,6 +814,12 @@ export default function App() {
         <Button title="Sign out" onPress={signOut} />
       </View>
 
+      {goalProgress && (
+        <View style={styles.goalProgressSection}>
+          <Text style={styles.smallText}>{goalProgress.message}</Text>
+        </View>
+      )}
+
       <View style={styles.gmailSection}>
         {gmailEmail ? (
           <>
@@ -796,6 +854,19 @@ export default function App() {
           />
         )}
       </View>
+
+      {alerts.length > 0 && (
+        <View style={styles.alertsSection}>
+          {alerts.map((a) => (
+            <View key={a.category} style={styles.alertRow}>
+              <Text style={styles.alertText}>{a.message}</Text>
+              {a.suggested_action && (
+                <Text style={styles.smallText}>{a.suggested_action}</Text>
+              )}
+            </View>
+          ))}
+        </View>
+      )}
 
       <View style={styles.budgetSection}>
         <Button
@@ -1028,6 +1099,27 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 16,
     paddingBottom: 16,
+  },
+  goalProgressSection: {
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingBottom: 12,
+  },
+  alertsSection: {
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  alertRow: {
+    borderLeftWidth: 3,
+    borderLeftColor: '#b8860b',
+    paddingLeft: 10,
+    paddingVertical: 2,
+    gap: 2,
+  },
+  alertText: {
+    fontSize: 14,
+    color: '#7a5c00',
   },
   budgetList: {
     maxHeight: 280,
