@@ -18,6 +18,7 @@ import * as Linking from 'expo-linking';
 import { makeRedirectUri } from 'expo-auth-session';
 import * as QueryParams from 'expo-auth-session/build/QueryParams';
 import { createPlaidLinkSession } from 'react-native-plaid-link-sdk';
+import * as Notifications from 'expo-notifications';
 import { supabase } from './lib/supabase';
 import { registerForPushNotificationsAsync, getDeviceTimezone } from './lib/notifications';
 
@@ -289,6 +290,44 @@ export default function App() {
     });
     return () => subscription.remove();
   }, [session]);
+
+  // Phase 4 Step F: deep linking - routes a tapped push notification to the
+  // relevant part of the screen, using the `data` payload server/
+  // pushDelivery.js already attaches to every send. This app has no router
+  // (one screen, toggled sections), so "deep link" means "make sure the
+  // relevant content is open and current," not a URL/route.
+  function handleNotificationTap(response) {
+    const data = response?.notification?.request?.content?.data;
+    if (!data) return;
+    if (data.event_type === 'overspend_pace') {
+      // The alert itself is already always visible unprompted (Phase 3
+      // Step 5), but the per-category budget breakdown behind it is gated
+      // behind the "View budget status" toggle - open it and fetch fresh,
+      // same as tapping that button directly, so tapping the notification
+      // actually lands on the detail it's about instead of just foregrounding
+      // the app onto whatever was already on screen.
+      setShowBudget(true);
+      fetchBudgetStatus();
+    }
+    // goal_milestone needs no navigation - goal progress is already always
+    // shown unprompted (Phase 3 Step 6), and both the cold-start data load
+    // and the foreground-resume effect already keep it current.
+  }
+
+  useEffect(() => {
+    // Cold start: the app was launched by tapping a notification (wasn't
+    // already running). Checked once on mount.
+    Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (response) handleNotificationTap(response);
+    });
+
+    // Warm/backgrounded: the app was already running when the notification
+    // was tapped.
+    const subscription = Notifications.addNotificationResponseReceivedListener(
+      handleNotificationTap
+    );
+    return () => subscription.remove();
+  }, []);
 
   // Doubles as "does this user already have a goal saved?" — 404 means
   // setup hasn't captured one yet, so the intake screen opens automatically
