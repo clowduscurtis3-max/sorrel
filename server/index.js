@@ -34,6 +34,7 @@ const {
 const { detectRecurringTransactions } = require('./recurring');
 const { recomputeOverspendAlerts } = require('./alerts');
 const { getGoalProgress } = require('./goalProgress');
+const { recomputeNotificationEvents } = require('./notificationEvents');
 const { registerDevice } = require('./notifications');
 const { logError } = require('./safeLog');
 
@@ -224,6 +225,15 @@ app.post('/goal', requireUser, async (req, res) => {
       { onConflict: 'user_id' }
     );
     if (error) throw error;
+    // Best-effort: a changed target/type can immediately cross (or
+    // invalidate) a goal milestone - see the targetSignature logic in
+    // server/notificationEvents.js - so this shouldn't wait for the next
+    // sync to catch up. A hiccup here shouldn't fail the goal save itself.
+    try {
+      await recomputeNotificationEvents(req.userId);
+    } catch (err) {
+      logError('Failed to recompute notification events after goal save (non-fatal):', err);
+    }
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -267,6 +277,40 @@ app.post('/notifications/register-device', requireUser, async (req, res) => {
     // message, and push tokens are treated as sensitive per CLAUDE.md.
     logError('Device registration failed:', err);
     res.status(500).json({ error: 'Failed to register device' });
+  }
+});
+
+// Phase 4 Step B: plain read of this user's notification events (pending,
+// sent, and resolved) - kept current by recomputeNotificationEvents at the
+// call sites below. Nothing is actually pushed to a device yet (Step D/E) -
+// this exists so the event/state model can be verified directly without
+// reaching into Supabase by hand.
+app.get('/notifications/events', requireUser, async (req, res) => {
+  try {
+    const { data: events, error } = await supabaseAdmin
+      .from('notification_events')
+      .select('id, event_type, category, period_start, status, title, body, data, created_at, sent_at, resolved_at')
+      .eq('user_id', req.userId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ events: events || [] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load notification events' });
+  }
+});
+
+// Re-runs notification-event reconciliation on demand (normally happens
+// automatically alongside recomputeOverspendAlerts - see its call sites).
+// Useful for testing without needing a fresh sync/budget change to trigger
+// it, same purpose as /admin/detect-recurring.
+app.post('/admin/detect-notification-events', requireUser, async (req, res) => {
+  try {
+    await recomputeNotificationEvents(req.userId);
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to recompute notification events' });
   }
 });
 
@@ -480,6 +524,11 @@ app.post('/budget/generate', requireUser, async (req, res) => {
     } catch (err) {
       logError('Failed to recompute overspend alerts after generation (non-fatal):', err);
     }
+    try {
+      await recomputeNotificationEvents(req.userId);
+    } catch (err) {
+      logError('Failed to recompute notification events after generation (non-fatal):', err);
+    }
     res.json({ budget });
   } catch (err) {
     if (err instanceof NoHistoryError) {
@@ -514,6 +563,11 @@ app.get('/budget/status', requireUser, async (req, res) => {
       await recomputeOverspendAlerts(req.userId);
     } catch (err) {
       logError('Failed to recompute overspend alerts before status read (non-fatal):', err);
+    }
+    try {
+      await recomputeNotificationEvents(req.userId);
+    } catch (err) {
+      logError('Failed to recompute notification events before status read (non-fatal):', err);
     }
 
     const { period_start, period_end } = currentMonthRange();
@@ -622,6 +676,11 @@ app.post('/budget/edit', requireUser, async (req, res) => {
       await recomputeOverspendAlerts(req.userId);
     } catch (err) {
       logError('Failed to recompute overspend alerts after edit (non-fatal):', err);
+    }
+    try {
+      await recomputeNotificationEvents(req.userId);
+    } catch (err) {
+      logError('Failed to recompute notification events after edit (non-fatal):', err);
     }
     res.json({ updated: rows });
   } catch (err) {
@@ -831,6 +890,16 @@ async function syncTransactions(userId, access_token, cursor, attempt = 1) {
         await recomputeOverspendAlerts(userId);
       } catch (err) {
         logError('Failed to recompute overspend alerts (non-fatal):', err);
+      }
+      // Phase 4 Step B: reconcile the notification-event/state model right
+      // after alerts (and, incidentally, goal progress - see
+      // recomputeNotificationEvents) are current, so the same 30-minute
+      // background sync that lets an alert fire while the app is closed
+      // also queues its notification event, not just the in-app alert.
+      try {
+        await recomputeNotificationEvents(userId);
+      } catch (err) {
+        logError('Failed to recompute notification events (non-fatal):', err);
       }
     }
   } catch (err) {
