@@ -67,7 +67,14 @@ async function sendExpoPush(messages) {
 // Re-validates and delivers this one user's currently-pending notification
 // events, only if right now is an allowed time for them. Best-effort per
 // event - one bad send shouldn't block the rest of this user's queue.
-async function deliverPendingEventsForUser(userId, now = new Date()) {
+// Not called directly outside this file - always go through
+// deliverPendingEventsForUser below so concurrent callers (the 5-minute
+// background job overlapping a manual /admin/deliver-notifications call,
+// or a slow cycle still running when the next one fires) can't both query
+// the same pending event before either has marked it sent, and double-push
+// it to the device. Same in-memory-lock pattern as syncTransactionsLocked
+// in server/index.js, for the same reason.
+async function deliverPendingEventsForUserUnlocked(userId, now = new Date()) {
   const { data: preferences } = await supabaseAdmin
     .from('notification_preferences')
     .select('enabled, timezone, quiet_hours_start, quiet_hours_end')
@@ -166,6 +173,22 @@ async function deliverPendingEventsForUser(userId, now = new Date()) {
   }
 
   return { sent: sentCount };
+}
+
+// Same shape as activeSyncs/syncTransactionsLocked in server/index.js: a
+// second concurrent caller for the same user just awaits the first one's
+// in-flight delivery instead of starting its own and risking a duplicate
+// send.
+const activeDeliveries = new Map();
+
+function deliverPendingEventsForUser(userId, now = new Date()) {
+  if (activeDeliveries.has(userId)) return activeDeliveries.get(userId);
+
+  const promise = deliverPendingEventsForUserUnlocked(userId, now).finally(() => {
+    activeDeliveries.delete(userId);
+  });
+  activeDeliveries.set(userId, promise);
+  return promise;
 }
 
 // Background job: every user with at least one pending event gets a

@@ -112,10 +112,14 @@ async function apiFetch(path, options = {}) {
 // anything else the app does - same non-fatal treatment as the Gmail scan/
 // recurring detection on the backend. Nothing is sent to the device yet;
 // this only stores the token so a later phase can.
+// Returns the registered token (or null) so the caller can hang onto it -
+// needed at sign-out time (see unregisterDevice below) since a push token
+// is tied to the device+install, not something worth re-requesting
+// permission for a second time just to get the same value back.
 async function registerDeviceForPushNotifications() {
   try {
     const token = await registerForPushNotificationsAsync();
-    if (!token) return;
+    if (!token) return null;
     await apiFetch('/notifications/register-device', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -125,8 +129,10 @@ async function registerDeviceForPushNotifications() {
         timezone: getDeviceTimezone(),
       }),
     });
+    return token;
   } catch (err) {
     console.error('Push registration failed (non-fatal):', err?.message);
+    return null;
   }
 }
 
@@ -255,6 +261,9 @@ export default function App() {
     if (url) createSessionFromUrl(url).catch((err) => console.error(err));
   }, [url]);
 
+  // Phase 4 Step G: held onto so signOut() can unregister this exact
+  // device/token pair without re-requesting push permission a second time.
+  const pushTokenRef = useRef(null);
   useEffect(() => {
     if (session) {
       fetchTransactions();
@@ -262,7 +271,9 @@ export default function App() {
       fetchGoal();
       fetchAlerts();
       fetchGoalProgress();
-      registerDeviceForPushNotifications();
+      registerDeviceForPushNotifications().then((token) => {
+        pushTokenRef.current = token;
+      });
     }
   }, [session]);
 
@@ -727,6 +738,24 @@ export default function App() {
   }
 
   async function signOut() {
+    // Phase 4 Step G: unregister this device's push token before the
+    // session is cleared - otherwise, on a shared device, whoever signs in
+    // next would keep receiving this account's financial notifications
+    // (the token is tied to the device+install, not the account). Runs
+    // while the session is still valid, since the endpoint requires auth;
+    // best-effort like every other push-related call - a failure here
+    // must never block sign-out itself.
+    if (pushTokenRef.current) {
+      try {
+        await apiFetch('/notifications/unregister-device', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ expo_push_token: pushTokenRef.current }),
+        });
+      } catch (err) {
+        console.error('Push unregistration failed (non-fatal):', err?.message);
+      }
+    }
     await supabase.auth.signOut();
   }
 

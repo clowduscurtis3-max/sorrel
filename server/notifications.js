@@ -45,4 +45,23 @@ async function registerDevice(userId, { expoPushToken, platform, timezone }) {
   if (prefsError) throw prefsError;
 }
 
-module.exports = { registerDevice };
+// Phase 4 Step G: an Expo push token is tied to the physical device+app
+// install, not the signed-in account - on a shared device where one user
+// signs out and a different user signs in, the old row would otherwise
+// keep receiving that first user's financial notifications on what is now
+// someone else's session (a real privacy leak, not just a stale-data
+// nuisance). Called from the app's sign-out flow, before the Supabase
+// session itself is cleared. Deleting zero rows (token never registered,
+// already removed) is not an error - same idempotent spirit as
+// registerDevice's own upsert.
+async function unregisterDevice(userId, expoPushToken) {
+  if (typeof expoPushToken !== 'string' || !expoPushToken) return;
+  const { error } = await supabaseAdmin
+    .from('notification_devices')
+    .delete()
+    .eq('user_id', userId)
+    .eq('expo_push_token', expoPushToken);
+  if (error) throw error;
+}
+
+module.exports = { registerDevice, unregisterDevice };

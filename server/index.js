@@ -36,7 +36,7 @@ const { recomputeOverspendAlerts } = require('./alerts');
 const { getGoalProgress } = require('./goalProgress');
 const { recomputeNotificationEvents } = require('./notificationEvents');
 const { deliverPendingEventsForUser, runNotificationDelivery } = require('./pushDelivery');
-const { registerDevice } = require('./notifications');
+const { registerDevice, unregisterDevice } = require('./notifications');
 const { logError } = require('./safeLog');
 
 // Where we send the system browser once Gmail linking finishes, so the app
@@ -278,6 +278,23 @@ app.post('/notifications/register-device', requireUser, async (req, res) => {
     // message, and push tokens are treated as sensitive per CLAUDE.md.
     logError('Device registration failed:', err);
     res.status(500).json({ error: 'Failed to register device' });
+  }
+});
+
+// Phase 4 Step G: called from the app's sign-out flow, before the session
+// itself is cleared - see unregisterDevice in server/notifications.js for
+// why this matters (a shared device switching accounts would otherwise
+// keep getting the previous user's financial notifications).
+app.post('/notifications/unregister-device', requireUser, async (req, res) => {
+  const { expo_push_token } = req.body || {};
+  try {
+    await unregisterDevice(req.userId, expo_push_token);
+    res.json({ ok: true });
+  } catch (err) {
+    // Same logging discipline as register-device above - never log err
+    // directly, it could echo the token back.
+    logError('Device unregistration failed:', err);
+    res.status(500).json({ error: 'Failed to unregister device' });
   }
 });
 
