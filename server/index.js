@@ -35,6 +35,7 @@ const { detectRecurringTransactions } = require('./recurring');
 const { recomputeOverspendAlerts } = require('./alerts');
 const { getGoalProgress } = require('./goalProgress');
 const { recomputeNotificationEvents } = require('./notificationEvents');
+const { deliverPendingEventsForUser, runNotificationDelivery } = require('./pushDelivery');
 const { registerDevice } = require('./notifications');
 const { logError } = require('./safeLog');
 
@@ -311,6 +312,23 @@ app.post('/admin/detect-notification-events', requireUser, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message || 'Failed to recompute notification events' });
+  }
+});
+
+// Phase 4 Step C: re-runs delivery for just this user on demand, same
+// purpose as the other /admin/* routes - lets the quiet-hours gate and
+// condition-re-check-at-delivery-time be tested without waiting for the
+// background job's own interval. Goes through the exact same
+// deliverPendingEventsForUser path the background job uses (see
+// runNotificationDelivery below) - not a separate/bypassed code path, so a
+// successful test here means the real thing works too.
+app.post('/admin/deliver-notifications', requireUser, async (req, res) => {
+  try {
+    const result = await deliverPendingEventsForUser(req.userId);
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to deliver notifications' });
   }
 });
 
@@ -1161,6 +1179,14 @@ setInterval(runBackgroundSync, BACKGROUND_SYNC_INTERVAL_MS);
 // Also run once shortly after startup, so a dev session doesn't have to
 // wait a full 30 minutes to see the background job work at all.
 setTimeout(runBackgroundSync, 60 * 1000);
+
+// Phase 4 Step C: a separate, tighter interval from the 30-minute sync -
+// quiet-hours boundaries matter at a finer grain than transaction syncing
+// does (a user whose quiet hours end at 8am shouldn't wait up to 30 more
+// minutes for a notification that's been ready since before then).
+const NOTIFICATION_DELIVERY_INTERVAL_MS = 5 * 60 * 1000;
+setInterval(runNotificationDelivery, NOTIFICATION_DELIVERY_INTERVAL_MS);
+setTimeout(runNotificationDelivery, 90 * 1000);
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Server listening on port ${port}`));
