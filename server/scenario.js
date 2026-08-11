@@ -78,6 +78,31 @@ function toDateOnly(d) {
   return d.toISOString().slice(0, 10);
 }
 
+// A projected finish date is only meaningful if it can actually be written
+// as a plain YYYY-MM-DD. Two ways it can't:
+//
+//  - Date overflow. A sliver of remaining savings pace (say $0.01/month
+//    against a $50,000 target) pushes the projection past the ±8.64e15 ms
+//    Date range, and toISOString() throws RangeError - a 500 out of what is
+//    supposed to be a read-only calculation.
+//  - Expanded-year form. Past year 9999, toISOString() emits
+//    "+018053-10-04T..." and a naive slice(0, 10) yields "+018053-10" -
+//    a year-month with the DAY silently dropped, which then flows into date
+//    subtraction and produces a confidently wrong "N days later".
+//
+// Both collapse to the same honest answer: there is no sane finish date to
+// report, so report none. A goal centuries out is not a number a user can
+// act on anyway.
+function toDateOnlyOrNull(d) {
+  if (!(d instanceof Date) || !Number.isFinite(d.getTime())) return null;
+  const iso = d.toISOString();
+  return /^\d{4}-\d{2}-\d{2}T/.test(iso) ? iso.slice(0, 10) : null;
+}
+
+function isPlainDateString(s) {
+  return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+}
+
 function parseDateOnly(s) {
   return new Date(s + 'T00:00:00Z');
 }
@@ -90,14 +115,31 @@ function money(n) {
   return `$${Math.abs(n).toFixed(2)}`;
 }
 
-// A recurring commitment's cost per average month, so a weekly $25 and a
-// $1,200 annual renewal can be compared against a monthly budget and a
-// monthly savings pace on the same footing. AVG_DAYS_PER_MONTH is reused
-// from goalProgress.js rather than redefined, so scenario math and goal math
-// agree on how long a month is.
+// How many times each cadence occurs in an average month.
+//
+// Deliberately NOT derived from INTERVAL_DAYS. That table exists to step a
+// detected series forward on the calendar and says monthly = 30 days, which
+// matches how recurring.js itself computed next_expected_date. Using it to
+// normalize *cost* instead divides by 30 while multiplying by a 30.44-day
+// month, which quietly inflates every monthly commitment by 1.47% - enough
+// to report that a $100/month subscription breaks a $100/month budget.
+//
+// For cost, "monthly" means once per month, exactly. Weekly and biweekly
+// genuinely do drift against a calendar month, so those stay day-derived.
+const OCCURRENCES_PER_MONTH = {
+  weekly: AVG_DAYS_PER_MONTH / 7,
+  biweekly: AVG_DAYS_PER_MONTH / 14,
+  monthly: 1,
+  quarterly: 1 / 3,
+  annual: 1 / 12,
+};
+
+// A recurring commitment's cost per month, so a weekly $25 and a $1,200
+// annual renewal can be compared against a monthly budget and a monthly
+// savings pace on the same footing.
 function monthlyEquivalent(amount, recurrence) {
   if (recurrence === 'once') return 0;
-  return round2((amount * AVG_DAYS_PER_MONTH) / INTERVAL_DAYS[recurrence]);
+  return round2(amount * OCCURRENCES_PER_MONTH[recurrence]);
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +165,12 @@ function normalizeScenario(scenario, now) {
   if (date !== null && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     throw new Error('date must be a YYYY-MM-DD string');
   }
+  // A what-if about a purchase in the past isn't a decision anyone can still
+  // make, and letting one through charges it against the current period's
+  // budget as though it were upcoming - a real distortion of the answer.
+  if (date !== null && date < toDateOnly(now)) {
+    throw new Error('date cannot be in the past');
+  }
 
   return {
     amount: round2(amount),
@@ -146,6 +194,17 @@ function normalizeScenario(scenario, now) {
 // Every consumer of this object has to keep that distinction visible to the
 // user. Saying "you have $840 available" would be fabricating the one number
 // this app does not have.
+// How many times a purchase bills between two dates, inclusive of both ends.
+// A one-time purchase is always exactly one. Day-stepped via INTERVAL_DAYS
+// (not calendar months) to match how the obligations it's compared against
+// are projected.
+function countOccurrencesInWindow({ from, to, recurrence }) {
+  if (recurrence === 'once') return 1;
+  const span = daysBetween(from, to);
+  if (span < 0) return 0;
+  return Math.floor(span / INTERVAL_DAYS[recurrence]) + 1;
+}
+
 function computeCashPosition({ context, normalized }) {
   const today = toDateOnly(context.now);
   const series = context.recurringSeries || [];
@@ -175,7 +234,19 @@ function computeCashPosition({ context, normalized }) {
   // because intra-day ordering isn't something this data can settle and
   // over-counting an obligation is the safer direction to be wrong in.
   const purchaseInWindow = income ? normalized.date < income.date : normalized.date <= windowEnd;
-  const committed = round2(obligations.total + (purchaseInWindow ? normalized.amount : 0));
+
+  // A recurring commitment can bill more than once before the money arrives -
+  // a weekly $200 over a four-week wait is $800 of pressure, not $200.
+  // Counted the same way the obligations themselves are: fixed day steps
+  // from the first occurrence, inclusive of the window end.
+  const purchaseOccurrences = purchaseInWindow
+    ? countOccurrencesInWindow({
+        from: normalized.date,
+        to: windowEnd,
+        recurrence: normalized.recurrence,
+      })
+    : 0;
+  const committed = round2(obligations.total + normalized.amount * purchaseOccurrences);
 
   const pressureRatio =
     income && income.amount > 0 ? round2(committed / income.amount) : null;
@@ -237,12 +308,13 @@ function computeBudgetImpact({ context, normalized }) {
   const chargeThisPeriod =
     normalized.recurrence === 'once' ? normalized.amount : normalized.monthly_equivalent;
 
-  const totalBudgeted = round2(budgets.reduce((sum, b) => sum + Number(b.budgeted_amount), 0));
-  const totalActual = round2(
-    actuals
-      .filter((a) => SPEND_CATEGORIES.includes(a.category))
-      .reduce((sum, a) => sum + Number(a.actual_amount), 0)
-  );
+  // Totalled from budgetStatus - the same rows GET /budget/status shows -
+  // rather than re-filtering the raw actuals. Filtering on SPEND_CATEGORIES
+  // drops 'Uncategorized', which computeBudgetStatus deliberately includes,
+  // so the two would report different remaining money from identical data.
+  const status = context.budgetStatus || [];
+  const totalBudgeted = round2(status.reduce((sum, s) => sum + (s.budgeted ?? 0), 0));
+  const totalActual = round2(status.reduce((sum, s) => sum + s.actual, 0));
   const totalRemaining = round2(totalBudgeted - totalActual);
 
   const base = {
@@ -254,11 +326,24 @@ function computeBudgetImpact({ context, normalized }) {
       totalRemaining > 0 ? round2(chargeThisPeriod / totalRemaining) : null,
   };
 
+  // Mapping alone silently drops the charge when budget_actuals has no row
+  // for the category - and it often won't, since scenarioContext deliberately
+  // doesn't run recomputeBudgetActuals (that's a write). Append in that case
+  // so identical financial inputs can't produce opposite answers depending on
+  // whether a $0 row happens to exist.
+  const hasActualRow =
+    normalized.category !== null && actuals.some((a) => a.category === normalized.category);
   const scenarioActuals = actuals.map((a) =>
     a.category === normalized.category
       ? { ...a, actual_amount: round2(Number(a.actual_amount) + chargeThisPeriod) }
       : a
   );
+  if (normalized.category !== null && !hasActualRow) {
+    scenarioActuals.push({
+      category: normalized.category,
+      actual_amount: round2(chargeThisPeriod),
+    });
+  }
 
   const alertsBefore = computeOverspendAlerts({
     budgets,
@@ -355,6 +440,15 @@ function computeGoalImpact({ context, normalized }) {
     now: context.now,
   });
 
+  // A one-time purchase reduces what's been saved. A recurring commitment
+  // instead reduces the *rate* of saving from here on - two genuinely
+  // different shapes of harm, and collapsing them would understate an
+  // ongoing subscription badly. Decided up front because even the branches
+  // that can't project a date still have to report the right one.
+  const isRecurring = normalized.recurrence !== 'once';
+  const savedBefore = before.saved_amount;
+  const savedAfter = isRecurring ? savedBefore : round2(savedBefore - normalized.amount);
+
   if (!hasTarget) {
     return {
       available: false,
@@ -362,28 +456,45 @@ function computeGoalImpact({ context, normalized }) {
       verb,
       detail:
         'This goal has no dollar target, so there is no finish date for this purchase to move.',
-      net_saved_before: before.saved_amount,
-      net_saved_after: round2(before.saved_amount - normalized.amount),
+      net_saved_before: savedBefore,
+      net_saved_after: savedAfter,
     };
   }
 
-  // A one-time purchase reduces what's been saved. A recurring commitment
-  // instead reduces the *rate* of saving from here on - two genuinely
-  // different shapes of harm, and collapsing them would understate an
-  // ongoing subscription badly.
-  const isRecurring = normalized.recurrence !== 'once';
-  const saved = before.saved_amount;
   const monthsElapsed = monthsBetween(goalCreatedAt, context.now);
-  const paceBefore = monthsElapsed > 0 ? round2(saved / monthsElapsed) : null;
+  // Kept at full precision for the projection itself and only rounded for
+  // display. Rounding first lets a genuinely positive pace under half a cent
+  // a month collapse to 0.00, which makes projectFinishDate return null and
+  // reports a *one-time* purchase as having stalled the goal - even though a
+  // one-time purchase never touches the pace at all.
+  const paceBefore = monthsElapsed > 0 ? savedBefore / monthsElapsed : null;
 
-  if (!before.projected_date) {
+  // computeGoalProgress omits projected_date on two different branches:
+  // "too early / nothing saved yet" and "target already reached". They mean
+  // opposite things, so collapsing both into one reason would silently drop
+  // the goal tradeoff for a purchase that pushes a finished goal back under
+  // its target.
+  if (savedBefore >= goal.target_amount) {
+    return {
+      available: false,
+      reason: 'goal_reached',
+      verb,
+      detail: before.message,
+      target_amount: goal.target_amount,
+      net_saved_before: savedBefore,
+      net_saved_after: savedAfter,
+      drops_below_target: savedAfter < goal.target_amount,
+    };
+  }
+
+  if (!before.projected_date || !isPlainDateString(before.projected_date)) {
     return {
       available: false,
       reason: 'no_projection_yet',
       verb,
       detail: before.message,
-      net_saved_before: saved,
-      net_saved_after: isRecurring ? saved : round2(saved - normalized.amount),
+      net_saved_before: savedBefore,
+      net_saved_after: savedAfter,
     };
   }
 
@@ -400,16 +511,7 @@ function computeGoalImpact({ context, normalized }) {
   //
   // - A RECURRING commitment genuinely does change the rate, every month,
   //   for as long as it's held. There the pace drops and the balance doesn't.
-  let paceAfter;
-  let savedAfter;
-
-  if (isRecurring) {
-    paceAfter = round2(paceBefore - normalized.monthly_equivalent);
-    savedAfter = saved;
-  } else {
-    paceAfter = paceBefore;
-    savedAfter = round2(saved - normalized.amount);
-  }
+  const paceAfter = isRecurring ? paceBefore - normalized.monthly_equivalent : paceBefore;
 
   const dateAfter = projectFinishDate({
     saved: savedAfter,
@@ -418,14 +520,16 @@ function computeGoalImpact({ context, normalized }) {
     now: context.now,
   });
 
-  const projectedAfter = dateAfter ? toDateOnly(dateAfter) : null;
+  // Null covers both "no pace left to project from" and "the projection ran
+  // off the end of the representable calendar" - see toDateOnlyOrNull.
+  const projectedAfter = toDateOnlyOrNull(dateAfter);
 
   return {
     available: true,
     verb,
     goal_type: goal.goal_type,
     target_amount: goal.target_amount,
-    net_saved_before: saved,
+    net_saved_before: savedBefore,
     net_saved_after: savedAfter,
     projected_date_before: before.projected_date,
     projected_date_after: projectedAfter,
@@ -434,8 +538,8 @@ function computeGoalImpact({ context, normalized }) {
     // reporting a number there would be worse than reporting nothing.
     delay_days: projectedAfter ? daysBetween(before.projected_date, projectedAfter) : null,
     stalls_goal: projectedAfter === null,
-    monthly_pace_before: paceBefore,
-    monthly_pace_after: paceAfter,
+    monthly_pace_before: round2(paceBefore),
+    monthly_pace_after: round2(paceAfter),
     on_pace_before: before.on_pace,
   };
 }
@@ -462,9 +566,20 @@ function determineStatus({ cash, budgetImpact, goalImpact, confidence }) {
       budgetImpact.share_of_category_remaining !== null &&
       budgetImpact.share_of_category_remaining > MATERIAL_BUDGET_SHARE,
     budgetImpact.available && (budgetImpact.newly_flagged_categories || []).length > 0,
+    // Whole-budget rules. Without these the table only ever reads
+    // category-level keys, so a purchase with no category - or in a category
+    // with no budget line - sails through as "comfortable" no matter how far
+    // past the total budget it goes.
+    budgetImpact.available && budgetImpact.total_remaining_after < 0,
+    budgetImpact.available &&
+      budgetImpact.share_of_total_remaining !== null &&
+      budgetImpact.share_of_total_remaining > MATERIAL_BUDGET_SHARE,
     goalImpact.available && goalImpact.stalls_goal,
     goalImpact.available && goalImpact.delay_days !== null &&
       goalImpact.delay_days >= MATERIAL_GOAL_DELAY_DAYS,
+    // A purchase that pushes an already-met goal back under its target is a
+    // real consequence even though there's no finish date left to move.
+    goalImpact.reason === 'goal_reached' && goalImpact.drops_below_target,
   ];
 
   return tradeoffs.some(Boolean) ? 'affordable_with_tradeoff' : 'comfortable';
@@ -500,10 +615,15 @@ function buildTradeoffs({ normalized, cash, budgetImpact, goalImpact }) {
     tradeoffs.push({
       kind: 'goal',
       severity: 'high',
+      // "a month" only belongs on a recurring commitment - saying it about a
+      // single purchase describes a cost the user never agreed to.
       text:
-        `At ${money(normalized.monthly_equivalent || normalized.amount)} a month, ${noun} would ` +
-        `absorb everything currently being ${goalImpact.verb} — your goal would stop moving ` +
-        `closer at the current pace.`,
+        normalized.recurrence === 'once'
+          ? `${money(normalized.amount)} at your current pace pushes the goal out further than ` +
+            `can be projected — it would stop moving meaningfully closer.`
+          : `At ${money(normalized.monthly_equivalent)} a month, ${noun} would absorb ` +
+            `everything currently being ${goalImpact.verb} — your goal would stop moving ` +
+            `closer at the current pace.`,
     });
   } else if (goalImpact.available && goalImpact.delay_days >= MATERIAL_GOAL_DELAY_DAYS) {
     tradeoffs.push({
@@ -541,6 +661,40 @@ function buildTradeoffs({ normalized, cash, budgetImpact, goalImpact }) {
         `This uses about ${Math.round(budgetImpact.share_of_category_remaining * 100)}% of what's ` +
         `left in your ${budgetImpact.category} budget this period ` +
         `(${money(budgetImpact.category_remaining_before)} remaining).`,
+    });
+  }
+
+  if (budgetImpact.available && budgetImpact.total_remaining_after < 0) {
+    tradeoffs.push({
+      kind: 'budget',
+      severity: 'high',
+      text:
+        `This is ${money(budgetImpact.total_remaining_after)} more than the ` +
+        `${money(budgetImpact.total_remaining_before)} left across your whole budget for this ` +
+        `period.`,
+    });
+  } else if (
+    budgetImpact.available &&
+    budgetImpact.share_of_total_remaining !== null &&
+    budgetImpact.share_of_total_remaining > MATERIAL_BUDGET_SHARE
+  ) {
+    tradeoffs.push({
+      kind: 'budget',
+      severity: 'medium',
+      text:
+        `This uses about ${Math.round(budgetImpact.share_of_total_remaining * 100)}% of the ` +
+        `${money(budgetImpact.total_remaining_before)} left across your whole budget for this ` +
+        `period.`,
+    });
+  }
+
+  if (goalImpact.reason === 'goal_reached' && goalImpact.drops_below_target) {
+    tradeoffs.push({
+      kind: 'goal',
+      severity: 'high',
+      text:
+        `You've already reached your ${money(goalImpact.target_amount)} target — this would put ` +
+        `you back under it, at ${money(goalImpact.net_saved_after)}.`,
     });
   }
 

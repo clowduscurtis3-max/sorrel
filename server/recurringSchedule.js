@@ -40,16 +40,44 @@ function round2(n) {
   return Math.round(n * 100) / 100;
 }
 
-// Plaid's sign convention (negative = money in, positive = money out) is the
-// only real signal for income vs. expense - recurring_series has no direction
-// column (see the schema in 20260806075537_recurring_transactions.sql). The
-// category check is a secondary corroboration for the case where an income
-// transaction somehow carries a non-negative amount; it is deliberately an
-// OR, since either signal alone is enough to keep a paycheck out of the
-// "bills you still owe" bucket, and a false positive there is much safer
-// than mistakenly counting income as an obligation.
+// Transfers are money moving between the user's own accounts - neither
+// income nor a bill. computeNetSaved (goalProgress.js) already excludes them
+// from goal progress for exactly this reason, and both halves of the engine
+// have to agree about what a transfer is: a recurring $500 auto-transfer to
+// savings is not a bill the user owes, and a recurring transfer in is not a
+// paycheck.
+function isTransferSeries(series) {
+  return series.category === 'Transfers';
+}
+
+// Income is the categorizer's judgment, NOT merely a negative amount.
+//
+// Sign alone is dangerously wrong here. Plaid stores every credit as
+// negative, so a $5 monthly cashback, a recurring refund and an incoming
+// transfer all look identical to a paycheck. Since nextExpectedIncome takes
+// the *soonest* income series, a trivial credit would beat the real paycheck,
+// drag the near-term window back to its date, hide every bill falling after
+// it, and produce a self-contradictory "risky timing" warning built on $0.00
+// of obligations.
+//
+// Requiring category === 'Income' means a mis-categorized paycheck simply
+// isn't detected, and the engine honestly reports having no payday to reason
+// about rather than confidently reasoning from the wrong one. A zero-amount
+// series is excluded too: it can't fund anything, but it would still shorten
+// the window and count toward confidence.
 function isIncomeSeries(series) {
-  return Number(series.typical_amount) < 0 || series.category === 'Income';
+  if (isTransferSeries(series)) return false;
+  return series.category === 'Income' && Number(series.typical_amount) !== 0;
+}
+
+// A bill the user is expected to owe: money out, not a transfer between their
+// own accounts, and not income. A recurring credit that isn't income (a
+// cashback, a refund) is deliberately neither - it isn't a paycheck and it
+// isn't an obligation, so it stays out of both totals rather than being
+// forced into one.
+function isObligationSeries(series) {
+  if (isTransferSeries(series) || series.category === 'Income') return false;
+  return Number(series.typical_amount) > 0;
 }
 
 // Expands one detected series into its expected occurrences inside
@@ -107,7 +135,7 @@ function upcomingObligations({ series, from, to }) {
   const staleSeries = [];
 
   for (const s of series || []) {
-    if (isIncomeSeries(s)) continue;
+    if (!isObligationSeries(s)) continue;
     const { occurrences: found, stale } = expandOccurrences({ series: s, from, to });
     if (stale) {
       staleSeries.push({ display_name: s.display_name, interval: s.interval });
@@ -141,6 +169,10 @@ function nextExpectedIncome({ series, from, horizonDays = 45 }) {
     if (stale || occurrences.length === 0) continue;
 
     const first = occurrences[0];
+    // Money-in is stored negative, so a genuine paycheck has a non-zero
+    // magnitude here. Guard anyway rather than letting a $0 series win the
+    // race and produce a window with no fundable income behind it.
+    if (Math.abs(first.amount) <= 0) continue;
     if (!soonest || first.date < soonest.date) {
       soonest = {
         date: first.date,
@@ -158,6 +190,8 @@ function nextExpectedIncome({ series, from, horizonDays = 45 }) {
 
 module.exports = {
   isIncomeSeries,
+  isObligationSeries,
+  isTransferSeries,
   expandOccurrences,
   upcomingObligations,
   nextExpectedIncome,

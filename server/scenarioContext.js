@@ -31,7 +31,10 @@ function num(value) {
 }
 
 async function loadScenarioContext(userId, now = new Date()) {
-  const period = currentMonthRange();
+  // Derived from the same `now` the engine will reason with. Reading the wall
+  // clock here instead lets context.now and context.period disagree, which
+  // silently corrupts the elapsed/remaining-day math in computeOverspendAlerts.
+  const period = currentMonthRange(now);
 
   const [
     { data: budgets, error: budgetError },

@@ -102,13 +102,35 @@ test('rejects an unknown category or cadence', () => {
 test('defaults the purchase date to today and computes a monthly equivalent', () => {
   assert.equal(normalizeScenario({ amount: 100 }, NOW).date, '2026-08-11');
   assert.equal(normalizeScenario({ amount: 100 }, NOW).monthly_equivalent, 0);
-  assert.equal(normalizeScenario({ amount: 100, recurrence: 'monthly' }, NOW).monthly_equivalent, 101.47);
+  assert.equal(normalizeScenario({ amount: 100, recurrence: 'monthly' }, NOW).monthly_equivalent, 100);
 });
 
-test('monthlyEquivalent normalizes every cadence onto an average month', () => {
+test('monthlyEquivalent normalizes every cadence onto a month', () => {
   assert.equal(monthlyEquivalent(100, 'once'), 0);
   assert.equal(monthlyEquivalent(25, 'weekly'), 108.71);
-  assert.equal(monthlyEquivalent(1200, 'annual'), 100.08);
+  assert.equal(monthlyEquivalent(100, 'biweekly'), 217.43);
+  assert.equal(monthlyEquivalent(1200, 'annual'), 100);
+  assert.equal(monthlyEquivalent(300, 'quarterly'), 100);
+});
+
+test('a monthly commitment costs exactly its amount per month', () => {
+  // Regression: deriving this from INTERVAL_DAYS (monthly = 30) while
+  // multiplying by a 30.44-day month inflated every monthly commitment by
+  // 1.47%, which reported a $100/mo subscription as breaking a $100/mo
+  // budget.
+  assert.equal(monthlyEquivalent(100, 'monthly'), 100);
+
+  const context = baseContext({
+    budgets: [{ category: 'Subscriptions', budgeted_amount: 100, reasoning: null }],
+    actuals: [{ category: 'Subscriptions', actual_amount: 0 }],
+  });
+  const result = evaluateScenario({
+    context,
+    scenario: { amount: 100, category: 'Subscriptions', recurrence: 'monthly' },
+  });
+
+  assert.equal(result.budget_impact.category_remaining_after, 0);
+  assert.equal(result.budget_impact.pushes_category_over, false);
 });
 
 // ---------------------------------------------------------------------------
@@ -221,7 +243,7 @@ test('a recurring commitment cuts the savings pace rather than the balance', () 
   const goal = result.goal_impact;
   assert.equal(goal.net_saved_after, goal.net_saved_before); // balance untouched
   assert.ok(
-    Math.abs(goal.monthly_pace_after - (goal.monthly_pace_before - 101.47)) < 0.01,
+    Math.abs(goal.monthly_pace_after - (goal.monthly_pace_before - 100)) < 0.01,
     `pace should drop by the monthly equivalent, got ${goal.monthly_pace_after}`
   );
   assert.ok(goal.delay_days > 0);

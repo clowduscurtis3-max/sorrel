@@ -31,8 +31,10 @@ function extractJson(text) {
 // year ago.
 const HISTORY_DAYS = 90;
 
-function currentMonthRange() {
-  const now = new Date();
+// `now` is injectable so a caller that already has a fixed clock (the Phase 5
+// scenario context) gets a period consistent with it. Defaults to the real
+// clock, so every existing call site is unchanged.
+function currentMonthRange(now = new Date()) {
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0));
   const toDateStr = (d) => d.toISOString().slice(0, 10);
