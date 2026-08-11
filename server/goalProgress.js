@@ -15,6 +15,23 @@ function monthsBetween(from, to) {
   return (to - from) / (1000 * 60 * 60 * 24 * AVG_DAYS_PER_MONTH);
 }
 
+// Pure: extrapolates a realized monthly saving pace out to the target and
+// returns the date it would be reached. Extracted verbatim from the math
+// that used to sit inline in computeGoalProgress below - Phase 5's scenario
+// engine needs to re-run this same projection against a *hypothetical* pace
+// (what the pace would become after a purchase), and the one thing that
+// must not happen is two slightly different copies of the goal-date formula
+// disagreeing with each other.
+//
+// Returns null rather than a date when the pace isn't positive: there is no
+// honest finish date to project when nothing is being saved, and an
+// Infinity/negative date would be worse than saying "can't project this."
+function projectFinishDate({ saved, target, monthlyPace, now }) {
+  if (!(monthlyPace > 0)) return null;
+  const monthsRemaining = (target - saved) / monthlyPace;
+  return new Date(now.getTime() + monthsRemaining * AVG_DAYS_PER_MONTH * 86400000);
+}
+
 // Pure, no I/O - takes the goal row and the net amount saved (income minus
 // spend) since the goal was set, returns a progress summary. Isolated/
 // testable per the same discipline as computeOverspendAlerts in alerts.js.
@@ -76,8 +93,10 @@ function computeGoalProgress({ goal, netSaved, goalCreatedAt, now = new Date() }
 
   const monthsElapsed = monthsBetween(goalCreatedAt, now);
   const monthlyPace = saved / monthsElapsed;
-  const monthsRemaining = (target - saved) / monthlyPace;
-  const projectedDate = new Date(now.getTime() + monthsRemaining * AVG_DAYS_PER_MONTH * 86400000);
+  // saved > 0 is guaranteed by the branch above, so monthlyPace is always
+  // positive here and projectFinishDate never returns null on this path -
+  // the behaviour is identical to the inline math this replaced.
+  const projectedDate = projectFinishDate({ saved, target, monthlyPace, now });
   const projectedDateStr = projectedDate.toISOString().slice(0, 10);
 
   let onPace = null;
@@ -98,6 +117,29 @@ function computeGoalProgress({ goal, netSaved, goalCreatedAt, now = new Date() }
       `$${saved.toFixed(2)} ${verb} toward your $${target.toFixed(2)} target (${percent.toFixed(0)}%), ` +
       `on pace for around ${projectedDateStr}${deadlineClause}.`,
   };
+}
+
+// Pure: income minus spend across the given transactions.
+//
+// Income is stored as a negative amount, every other category as positive
+// (Plaid convention: negative = money in, positive = money out) -
+// subtracting the signed amount adds income and subtracts spend in one step,
+// no separate branch needed. Transfers are excluded (money moving between
+// the user's own accounts, not real spend/income); Uncategorized is still
+// counted (it's real money out, just not yet reviewed - excluding it would
+// understate spend).
+//
+// Extracted from getGoalProgress below so Phase 5's scenario context can
+// derive the same net-saved figure the goal panel shows without a second
+// copy of the sign convention, which is exactly the kind of detail two
+// implementations would eventually disagree on.
+function computeNetSaved(transactions) {
+  let netSaved = 0;
+  for (const t of transactions || []) {
+    if (t.category === 'Transfers') continue;
+    netSaved -= t.amount;
+  }
+  return netSaved;
 }
 
 // Sums income minus spend across every transaction dated on/after the goal
@@ -124,17 +166,15 @@ async function getGoalProgress(userId) {
     .gte('date', sinceDate);
   if (txError) throw txError;
 
-  // Income is stored as a negative amount, every other category as
-  // positive (Plaid convention: negative = money in, positive = money
-  // out) - subtracting the signed amount adds income and subtracts spend
-  // in one step, no separate branch needed.
-  let netSaved = 0;
-  for (const t of transactions || []) {
-    if (t.category === 'Transfers') continue;
-    netSaved -= t.amount;
-  }
-
-  return computeGoalProgress({ goal, netSaved, goalCreatedAt });
+  return computeGoalProgress({ goal, netSaved: computeNetSaved(transactions), goalCreatedAt });
 }
 
-module.exports = { computeGoalProgress, getGoalProgress };
+module.exports = {
+  computeGoalProgress,
+  getGoalProgress,
+  computeNetSaved,
+  projectFinishDate,
+  monthsBetween,
+  AVG_DAYS_PER_MONTH,
+  MIN_DAYS_FOR_PROJECTION,
+};

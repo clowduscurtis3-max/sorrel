@@ -300,6 +300,46 @@ async function generateBudget(userId) {
 }
 
 // Phase 3 Step 3: recomputes this user's actual spend per category for the
+// Pure, no I/O: joins this period's budget rows against its actuals and
+// returns budgeted/actual/remaining per category. Extracted (unchanged)
+// from the inline map that used to live in GET /budget/status in index.js,
+// because Phase 5's scenario engine needs the exact same "how much room is
+// left in this category" numbers to reason about a hypothetical purchase -
+// and a second copy of that subtraction is exactly the duplicated financial
+// logic this project's conventions warn against.
+//
+// `budgeted`/`remaining` are deliberately null (never 0) when nothing has
+// been budgeted for a category: "no budget set" and "budgeted zero" are
+// genuinely different states, and collapsing them would let the engine
+// report a confident $0 of room where it actually has no baseline at all.
+function computeBudgetStatus({ budgets, actuals }) {
+  const budgetByCategory = Object.fromEntries((budgets || []).map((b) => [b.category, b]));
+  const actualByCategory = Object.fromEntries(
+    (actuals || []).map((a) => [a.category, a.actual_amount])
+  );
+
+  // Uncategorized only appears when there's actually unreviewed spend this
+  // period - budget_actuals always carries a $0 row for it otherwise (see
+  // recomputeBudgetActuals), so this checks the value rather than presence.
+  const categories = [...SPEND_CATEGORIES];
+  if (actualByCategory['Uncategorized']) categories.push('Uncategorized');
+
+  return categories
+    .map((category) => ({
+      category,
+      budgeted: budgetByCategory[category]?.budgeted_amount ?? null,
+      actual: Math.round((actualByCategory[category] || 0) * 100) / 100,
+      remaining:
+        budgetByCategory[category]?.budgeted_amount != null
+          ? Math.round(
+              (budgetByCategory[category].budgeted_amount - (actualByCategory[category] || 0)) * 100
+            ) / 100
+          : null,
+      reasoning: budgetByCategory[category]?.reasoning ?? null,
+    }))
+    .sort((a, b) => a.category.localeCompare(b.category));
+}
+
 // current period and upserts it into budget_actuals, so /budget/status can
 // read a maintained table instead of re-scanning every transaction on every
 // request. Called whenever transactions actually change during a sync (see
@@ -554,6 +594,7 @@ async function applyBudgetEdit(userId, category, newAmount, adjustments = []) {
 
 module.exports = {
   generateBudget,
+  computeBudgetStatus,
   recomputeBudgetActuals,
   proposeRebalance,
   applyBudgetEdit,

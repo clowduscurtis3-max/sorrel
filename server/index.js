@@ -6,7 +6,6 @@ const supabaseAdmin = require('./supabaseAdmin');
 const { encrypt, decrypt, DecryptionError } = require('./crypto');
 const {
   categorizeTransactions,
-  SPEND_CATEGORIES,
   FRIENDLY_CATEGORIES,
   normalizeMerchantKey,
 } = require('./categorize');
@@ -25,6 +24,7 @@ const { extractReceipts } = require('./receipts');
 const { matchReceiptsToTransactions } = require('./matching');
 const {
   generateBudget,
+  computeBudgetStatus,
   recomputeBudgetActuals,
   proposeRebalance,
   applyBudgetEdit,
@@ -621,32 +621,11 @@ app.get('/budget/status', requireUser, async (req, res) => {
       .eq('period_start', period_start);
     if (actualsError) throw actualsError;
 
-    const budgetByCategory = Object.fromEntries(
-      (budgets || []).map((b) => [b.category, b])
-    );
-    const actualByCategory = Object.fromEntries(
-      (actuals || []).map((a) => [a.category, a.actual_amount])
-    );
-
-    // Uncategorized only shown when there's actually unreviewed spend this
-    // period, same as before - budget_actuals always carries a $0 row for
-    // it otherwise (see recomputeBudgetActuals), so this checks the value
-    // rather than presence.
-    const categories = [...SPEND_CATEGORIES];
-    if (actualByCategory['Uncategorized']) categories.push('Uncategorized');
-
-    const status = categories
-      .map((category) => ({
-        category,
-        budgeted: budgetByCategory[category]?.budgeted_amount ?? null,
-        actual: Math.round((actualByCategory[category] || 0) * 100) / 100,
-        remaining:
-          budgetByCategory[category]?.budgeted_amount != null
-            ? Math.round((budgetByCategory[category].budgeted_amount - (actualByCategory[category] || 0)) * 100) / 100
-            : null,
-        reasoning: budgetByCategory[category]?.reasoning ?? null,
-      }))
-      .sort((a, b) => a.category.localeCompare(b.category));
+    // Same join/subtraction this handler always did, now living in
+    // budget.js as a shared pure function so the Phase 5 scenario engine
+    // reasons about "remaining budget" from the identical numbers rather
+    // than its own copy. Response shape is unchanged.
+    const status = computeBudgetStatus({ budgets, actuals });
 
     res.json({ period_start, period_end, status });
   } catch (err) {

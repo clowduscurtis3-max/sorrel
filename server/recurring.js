@@ -25,6 +25,13 @@ const AMOUNT_TOLERANCE_RATIO = 0.15;
 
 const MS_PER_DAY = 86_400_000;
 
+// Cadence name -> day count, derived from INTERVALS above so there is only
+// one place a cadence length is ever defined. Phase 5's scenario engine
+// needs to step a detected series forward in time (recurringSchedule.js);
+// without this it would have to keep its own copy of these numbers, and the
+// two could silently drift apart.
+const INTERVAL_DAYS = Object.fromEntries(INTERVALS.map((i) => [i.name, i.days]));
+
 function median(nums) {
   const sorted = [...nums].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
@@ -188,4 +195,4 @@ async function detectRecurringTransactions(userId) {
   return { seriesCount: upsertedSeries.length, taggedCount };
 }
 
-module.exports = { detectRecurringTransactions };
+module.exports = { detectRecurringTransactions, INTERVAL_DAYS };
