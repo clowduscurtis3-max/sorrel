@@ -93,9 +93,12 @@ function computeGoalProgress({ goal, netSaved, goalCreatedAt, now = new Date() }
 
   const monthsElapsed = monthsBetween(goalCreatedAt, now);
   const monthlyPace = saved / monthsElapsed;
-  // saved > 0 is guaranteed by the branch above, so monthlyPace is always
-  // positive here and projectFinishDate never returns null on this path -
-  // the behaviour is identical to the inline math this replaced.
+  // saved > 0 and daysElapsed >= 7 are both guaranteed by the branch above,
+  // so monthlyPace is always positive here and projectFinishDate never
+  // returns null for well-formed input - identical to the inline math this
+  // replaced. (A NaN netSaved or an Invalid Date goalCreatedAt can still
+  // reach it, but those threw here before this extraction too, and no
+  // caller discriminates on the error type.)
   const projectedDate = projectFinishDate({ saved, target, monthlyPace, now });
   const projectedDateStr = projectedDate.toISOString().slice(0, 10);
 
