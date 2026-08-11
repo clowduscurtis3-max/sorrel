@@ -718,13 +718,19 @@ function buildTradeoffs({ normalized, cash, budgetImpact, goalImpact }) {
   }
 
   if (normalized.recurrence !== 'once') {
+    // A monthly commitment already *is* its own monthly figure - restating it
+    // ("$100.00 monthly works out to about $100.00 a month") reads as a
+    // glitch. Only the cadences that genuinely convert say so.
     tradeoffs.push({
       kind: 'recurring',
       severity: 'medium',
       text:
-        `${money(normalized.amount)} ${normalized.recurrence} works out to about ` +
-        `${money(normalized.monthly_equivalent)} a month, which keeps applying after this period ` +
-        `rather than being a one-time hit.`,
+        normalized.recurrence === 'monthly'
+          ? `${money(normalized.amount)} a month keeps applying after this period rather than ` +
+            `being a one-time hit.`
+          : `${money(normalized.amount)} ${normalized.recurrence} works out to about ` +
+            `${money(normalized.monthly_equivalent)} a month, which keeps applying after this ` +
+            `period rather than being a one-time hit.`,
     });
   }
 
