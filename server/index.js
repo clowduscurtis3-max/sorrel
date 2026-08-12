@@ -34,7 +34,9 @@ const {
 const { detectRecurringTransactions } = require('./recurring');
 const { recomputeOverspendAlerts } = require('./alerts');
 const { getGoalProgress } = require('./goalProgress');
+const { getSubscriptionAudit } = require('./subscriptionAudit');
 const { recomputeNotificationEvents } = require('./notificationEvents');
+const { recomputeSubscriptionAuditEvents } = require('./subscriptionAuditEvents');
 const { deliverPendingEventsForUser, runNotificationDelivery } = require('./pushDelivery');
 const { registerDevice, unregisterDevice } = require('./notifications');
 const { logError } = require('./safeLog');
@@ -258,6 +260,25 @@ app.get('/goal/progress', requireUser, async (req, res) => {
   }
 });
 
+// Phase 6 Step 1: subscription/recurring-spend audit. Stateless read,
+// computed fresh on every call (see getSubscriptionAudit in
+// server/subscriptionAudit.js), same reasoning as /goal/progress above -
+// nothing here needs to survive until the app is next opened or be
+// deduplicated for push delivery, so there's nothing to persist yet.
+// Returns getSubscriptionAudit's result verbatim under `audit` - no
+// transforming, filtering, or advisor messaging at the route layer, so the
+// pure function's contract and the wire contract can never silently drift
+// apart.
+app.get('/subscriptions/audit', requireUser, async (req, res) => {
+  try {
+    const audit = await getSubscriptionAudit(req.userId);
+    res.json({ audit });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to compute subscription audit' });
+  }
+});
+
 // Phase 4 Step A: device registration. `requireUser` already established
 // who's calling from a cryptographically-verified session token, so this
 // writes to req.userId only - a client can never register (or overwrite) a
@@ -319,12 +340,14 @@ app.get('/notifications/events', requireUser, async (req, res) => {
 });
 
 // Re-runs notification-event reconciliation on demand (normally happens
-// automatically alongside recomputeOverspendAlerts - see its call sites).
-// Useful for testing without needing a fresh sync/budget change to trigger
-// it, same purpose as /admin/detect-recurring.
+// automatically alongside recomputeOverspendAlerts - see its call sites, and
+// alongside detectRecurringTransactions for the subscription-audit half
+// added in Phase 6 Step 2). Useful for testing without needing a fresh
+// sync/budget change to trigger it, same purpose as /admin/detect-recurring.
 app.post('/admin/detect-notification-events', requireUser, async (req, res) => {
   try {
     await recomputeNotificationEvents(req.userId);
+    await recomputeSubscriptionAuditEvents(req.userId);
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -391,6 +414,18 @@ async function syncUserData(userId) {
     await detectRecurringTransactions(userId);
   } catch (err) {
     logError('Recurring transaction detection failed (non-fatal):', err);
+  }
+
+  // Phase 6 Step 2: reconcile subscription-audit findings (price creep,
+  // lapsed subscriptions) into the same notification_events model Phase 4
+  // built. Must run AFTER detectRecurringTransactions above, not alongside
+  // recomputeNotificationEvents earlier in syncTransactions - that runs
+  // before recurring_series is refreshed for this cycle, which would
+  // reconcile against stale data.
+  try {
+    await recomputeSubscriptionAuditEvents(userId);
+  } catch (err) {
+    logError('Failed to recompute subscription audit events (non-fatal):', err);
   }
 }
 
