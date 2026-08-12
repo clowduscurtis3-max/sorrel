@@ -155,6 +155,57 @@ function formatAmount(amount) {
   return amount < 0 ? `+$${Math.abs(amount).toFixed(2)}` : `$${amount.toFixed(2)}`;
 }
 
+// Phase 6 Step 3: display text for a subscription-audit price-change
+// finding (server/subscriptionAudit.js's gradual_increases/price_jumps -
+// same shape, same wording either way). computeSubscriptionAudit
+// deliberately returns structured facts only, not advisor-voice text (see
+// its own comments) - this mirrors the phrasing server/
+// subscriptionAuditEvents.js already uses for the push-notification body,
+// by hand, so what a notification says and what this screen shows for the
+// same finding read the same rather than drifting apart - same "explains,
+// doesn't announce," second-person/neutral, never-"I" voice as everywhere
+// else in this app.
+function formatPriceChangeText(item) {
+  const pct = Math.round(item.increase_ratio * 100);
+  // Found by /code-review: previous_amount/current_amount are raw per-
+  // occurrence figures, not monthly-normalized - hardcoding "a month" here
+  // overstated a quarterly/annual charge's real cost by several times.
+  // "$X / interval" matches the phrasing already used for the
+  // subscriptions-list rows below (renderRecurringRow).
+  return (
+    `${item.display_name} is now $${item.current_amount.toFixed(2)} / ${item.interval}, up from ` +
+    `$${item.previous_amount.toFixed(2)} — about ${pct}% more.`
+  );
+}
+
+// Phase 6 Step 3: one row in the recurring-spend list, shared across all
+// three groups below (subscriptions/recurring_bills/other_recurring) - a
+// plain top-level function rather than tripling this JSX, same style as
+// formatAmount/groupByCategory above.
+function renderRecurringRow(s) {
+  return (
+    <View key={s.id} style={styles.budgetRow}>
+      <Text style={styles.rowName}>{s.display_name}</Text>
+      <Text style={styles.smallText}>
+        ${s.typical_amount.toFixed(2)} / {s.interval} (~${s.monthly_equivalent_amount.toFixed(2)}/mo) · next
+        expected {s.next_expected_date}
+      </Text>
+    </View>
+  );
+}
+
+// Phase 6 Step 3: display text for a lapsed recurring series (server/
+// subscriptionAudit.js's `lapsed` list) - same wording as server/
+// subscriptionAuditEvents.js's push-notification body, for the same reason
+// as formatPriceChangeText above.
+function formatLapsedText(item) {
+  const days = item.days_overdue;
+  return (
+    `${item.display_name} hasn't charged in ${days} day${days === 1 ? '' : 's'}, past its usual ` +
+    `${item.interval} schedule — worth checking if it's still something you want.`
+  );
+}
+
 // Groups transactions into the shape SectionList expects, one section per
 // category. A transaction with matched receipt items is exploded into its
 // individual line items (each under its own category) instead of showing
@@ -240,6 +291,16 @@ export default function App() {
   // Phase 3 Step 6: goal progress. Shown unprompted near the goal header,
   // same reasoning as alerts above - "shows real progress" is the point.
   const [goalProgress, setGoalProgress] = useState(null);
+  // Phase 6 Step 3: subscription/recurring-spend audit (server/
+  // subscriptionAudit.js). Fetched proactively like alerts/goalProgress
+  // (not only on toggle-open like budgetStatus) since its price-creep/
+  // price-jump/lapsed findings feed an unprompted "red flag" section below,
+  // same "Product voice" reasoning as alerts - the full subscriptions list
+  // is also shown behind a toggle, same pattern as budget status, reusing
+  // this same fetched state rather than a second endpoint call.
+  const [subscriptionAudit, setSubscriptionAudit] = useState(null);
+  const [showSubscriptions, setShowSubscriptions] = useState(false);
+  const [loadingSubscriptions, setLoadingSubscriptions] = useState(false);
   const url = Linking.useLinkingURL();
 
   useEffect(() => {
@@ -271,6 +332,7 @@ export default function App() {
       fetchGoal();
       fetchAlerts();
       fetchGoalProgress();
+      fetchSubscriptionAudit({ silent: true });
       registerDeviceForPushNotifications().then((token) => {
         pushTokenRef.current = token;
       });
@@ -295,6 +357,7 @@ export default function App() {
           fetchTransactions({ silent: true, suppressErrorBanner: true });
           fetchAlerts();
           fetchGoalProgress();
+          fetchSubscriptionAudit({ silent: true });
         }, 1500);
       }
       appState.current = nextState;
@@ -323,6 +386,21 @@ export default function App() {
     // goal_milestone needs no navigation - goal progress is already always
     // shown unprompted (Phase 3 Step 6), and both the cold-start data load
     // and the foreground-resume effect already keep it current.
+
+    // Phase 6 Step 3: the three subscription-audit event types (server/
+    // subscriptionAuditEvents.js) all point at the same detail view - same
+    // "open the thing behind the alert" treatment as overspend_pace above,
+    // since the findings themselves are already always visible unprompted
+    // (see the section below) but the full per-subscription list they refer
+    // to is gated behind "View subscriptions".
+    if (
+      data.event_type === 'subscription_price_creep' ||
+      data.event_type === 'subscription_price_jump' ||
+      data.event_type === 'subscription_lapsed'
+    ) {
+      setShowSubscriptions(true);
+      fetchSubscriptionAudit();
+    }
   }
 
   useEffect(() => {
@@ -592,6 +670,33 @@ export default function App() {
       setGoalProgress(data.progress);
     } catch (err) {
       console.error(err);
+    }
+  }
+
+  // Phase 6 Step 3: subscription/recurring-spend audit, kept fresh server-
+  // side by recomputeSubscriptionAuditEvents (see its call sites in
+  // index.js/pushDelivery.js) - this is just a plain read of
+  // GET /subscriptions/audit, same shape/spirit as fetchBudgetStatus. Used
+  // in two contexts unlike fetchAlerts/fetchGoalProgress (always silent) or
+  // fetchBudgetStatus (never silent) - proactively in the background to
+  // feed the unprompted findings section below (silent: true, same
+  // reasoning as fetchAlerts: a hiccup here shouldn't interrupt the user
+  // with a banner over something they didn't ask for), and on-demand when
+  // "View subscriptions" is opened (not silent, so a slow load shows a
+  // spinner and a real failure is visible, since the user is actively
+  // waiting on that one) - same `silent` option shape as fetchTransactions.
+  async function fetchSubscriptionAudit({ silent = false } = {}) {
+    if (!silent) setLoadingSubscriptions(true);
+    try {
+      const res = await apiFetch('/subscriptions/audit');
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const data = await res.json();
+      setSubscriptionAudit(data.audit);
+    } catch (err) {
+      console.error(err);
+      if (!silent) setError(apiErrorMessage(err));
+    } finally {
+      if (!silent) setLoadingSubscriptions(false);
     }
   }
 
@@ -962,6 +1067,38 @@ export default function App() {
         </View>
       )}
 
+      {/* Phase 6 Step 3: subscription-audit findings (price creep, price
+          jumps, lapsed subscriptions) - shown unprompted, same "red flags
+          surfaced on their own" reasoning and same visual treatment as the
+          overspend alerts section above, not gated behind a toggle. The
+          full per-subscription list is separately available behind "View
+          subscriptions" below. */}
+      {subscriptionAudit &&
+        (subscriptionAudit.gradual_increases.length > 0 ||
+          subscriptionAudit.price_jumps.length > 0 ||
+          subscriptionAudit.lapsed.length > 0) && (
+          <View style={styles.alertsSection}>
+            {subscriptionAudit.gradual_increases.map((item) => (
+              <View key={`creep-${item.series_id}`} style={styles.alertRow}>
+                <Text style={styles.alertText}>{formatPriceChangeText(item)}</Text>
+              </View>
+            ))}
+            {subscriptionAudit.price_jumps.map((item) => (
+              <View
+                key={`jump-${item.previous_series_id}-${item.current_series_id}`}
+                style={styles.alertRow}
+              >
+                <Text style={styles.alertText}>{formatPriceChangeText(item)}</Text>
+              </View>
+            ))}
+            {subscriptionAudit.lapsed.map((item) => (
+              <View key={`lapsed-${item.id}`} style={styles.alertRow}>
+                <Text style={styles.alertText}>{formatLapsedText(item)}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
       <View style={styles.budgetSection}>
         <Button
           title={showBudget ? 'Hide budget status' : 'View budget status'}
@@ -1077,6 +1214,69 @@ export default function App() {
             )}
           </>
         )}
+      </View>
+
+      {/* Phase 6 Step 3: full recurring-spend list, same toggle/refetch-on-
+          open pattern as budgetSection above - reuses the same fetched
+          state the findings section above already draws from, refetched
+          again here on open for the same "meant to be live" reasoning
+          fetchBudgetStatus already established. Split into three groups by
+          the category already assigned during transaction categorization
+          (server/subscriptionAudit.js) rather than one flat list - not
+          every detected recurring pattern is actually a subscription (a
+          real bug caught against live Sandbox data: McDonald's/Starbucks/
+          KFC were all showing up as "subscriptions" purely because Plaid
+          Sandbox happens to repeat them monthly). */}
+      <View style={styles.budgetSection}>
+        <Button
+          title={showSubscriptions ? 'Hide recurring spend' : 'View recurring spend'}
+          onPress={() => {
+            const next = !showSubscriptions;
+            setShowSubscriptions(next);
+            if (next) fetchSubscriptionAudit();
+          }}
+        />
+        {showSubscriptions &&
+          (loadingSubscriptions ? (
+            <ActivityIndicator />
+          ) : (
+            <ScrollView style={styles.budgetList}>
+              {subscriptionAudit && (
+                <Text style={styles.smallText}>
+                  ~${subscriptionAudit.total_monthly_equivalent.toFixed(2)}/month across{' '}
+                  {subscriptionAudit.subscriptions.length +
+                    subscriptionAudit.recurring_bills.length +
+                    subscriptionAudit.other_recurring.length}{' '}
+                  recurring charges
+                </Text>
+              )}
+              {subscriptionAudit &&
+                subscriptionAudit.subscriptions.length === 0 &&
+                subscriptionAudit.recurring_bills.length === 0 &&
+                subscriptionAudit.other_recurring.length === 0 && (
+                  <Text style={styles.smallText}>No recurring charges detected yet.</Text>
+                )}
+
+              {subscriptionAudit?.subscriptions.length > 0 && (
+                <>
+                  <Text style={styles.recurringGroupHeader}>Subscriptions</Text>
+                  {subscriptionAudit.subscriptions.map(renderRecurringRow)}
+                </>
+              )}
+              {subscriptionAudit?.recurring_bills.length > 0 && (
+                <>
+                  <Text style={styles.recurringGroupHeader}>Recurring bills</Text>
+                  {subscriptionAudit.recurring_bills.map(renderRecurringRow)}
+                </>
+              )}
+              {subscriptionAudit?.other_recurring.length > 0 && (
+                <>
+                  <Text style={styles.recurringGroupHeader}>Other recurring charges</Text>
+                  {subscriptionAudit.other_recurring.map(renderRecurringRow)}
+                </>
+              )}
+            </ScrollView>
+          ))}
       </View>
 
       {error && (
@@ -1222,6 +1422,17 @@ const styles = StyleSheet.create({
   budgetRow: {
     alignItems: 'center',
     paddingVertical: 6,
+  },
+  // Phase 6 Step 3: distinguishes the three recurring-spend groups within
+  // the same scrollable list, lighter-weight than the SectionList
+  // sectionHeader style below since this is a subsection within an already
+  // secondary, opt-in panel, not a top-level list.
+  recurringGroupHeader: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666',
+    marginTop: 10,
+    marginBottom: 2,
   },
   centered: {
     flex: 1,

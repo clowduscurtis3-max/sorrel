@@ -231,5 +231,6 @@ module.exports = {
   categorizeTransactions,
   FRIENDLY_CATEGORIES,
   SPEND_CATEGORIES,
+  FLOW_CATEGORIES,
   normalizeMerchantKey,
 };

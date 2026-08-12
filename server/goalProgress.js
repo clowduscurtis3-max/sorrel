@@ -137,4 +137,4 @@ async function getGoalProgress(userId) {
   return computeGoalProgress({ goal, netSaved, goalCreatedAt });
 }
 
-module.exports = { computeGoalProgress, getGoalProgress };
+module.exports = { computeGoalProgress, getGoalProgress, AVG_DAYS_PER_MONTH };

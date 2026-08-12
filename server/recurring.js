@@ -81,9 +81,15 @@ function toDateOnly(d) {
 
 // Re-scans this user's full transaction history and rebuilds recurring_series
 // from scratch each run (rather than incrementally), tagging matching
-// transactions via recurring_series_id. Simpler and self-healing - a
-// cancelled subscription's series naturally stops being detected and gets
-// cleaned up below, without needing separate "series ended" bookkeeping.
+// transactions via recurring_series_id. Simpler than incremental bookkeeping,
+// but NOT self-healing the way an earlier version of this comment claimed:
+// every check here compares historical transactions to each other, never to
+// "now", so a cancelled subscription's cluster keeps satisfying the
+// occurrence/interval check on every future re-scan too - the row is not
+// pruned just because time has passed (server/subscriptionAudit.js's
+// "lapsed" detection relies on exactly this - see Phase 6 Step 1). A series
+// only disappears if its own underlying transactions stop forming a valid
+// cluster (e.g. a Plaid delta correction), not from staleness.
 // Cheap enough at real-account transaction volumes to re-run on every sync;
 // revisit with an incremental approach if that stops being true.
 async function detectRecurringTransactions(userId) {
@@ -188,4 +194,4 @@ async function detectRecurringTransactions(userId) {
   return { seriesCount: upsertedSeries.length, taggedCount };
 }
 
-module.exports = { detectRecurringTransactions };
+module.exports = { detectRecurringTransactions, INTERVALS, AMOUNT_TOLERANCE_RATIO };

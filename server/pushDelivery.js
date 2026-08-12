@@ -1,6 +1,7 @@
 const supabaseAdmin = require('./supabaseAdmin');
 const { recomputeOverspendAlerts } = require('./alerts');
 const { recomputeNotificationEvents } = require('./notificationEvents');
+const { recomputeSubscriptionAuditEvents } = require('./subscriptionAuditEvents');
 const { getGoalProgress } = require('./goalProgress');
 const { logError } = require('./safeLog');
 
@@ -91,17 +92,37 @@ async function deliverPendingEventsForUserUnlocked(userId, now = new Date()) {
   // rather than blindly sent"). For overspend, this reuses Step B's own
   // reconcile machinery - if the alert cleared since it was queued, this
   // flips the event to 'resolved' and it's simply excluded from the
-  // pending query below, no special-case logic needed here.
-  try {
-    await recomputeOverspendAlerts(userId);
-  } catch (err) {
-    logError('Failed to refresh overspend alerts before delivery (non-fatal):', err);
-  }
-  try {
-    await recomputeNotificationEvents(userId);
-  } catch (err) {
-    logError('Failed to refresh notification events before delivery (non-fatal):', err);
-  }
+  // pending query below, no special-case logic needed here. Phase 6 Step
+  // 2's subscription-audit re-check (same reasoning - a price creep/jump/
+  // lapsed series that resolved since it was queued, e.g. a lapsed
+  // subscription resumed, is excluded from the pending query below) has no
+  // data dependency on the overspend/notification-events pair - it only
+  // reads recurring_series/transactions - so it runs concurrently with
+  // them via Promise.all instead of needlessly adding to this cycle's
+  // latency (found by /code-review). The overspend->notification pair
+  // stays sequential between themselves, since the second genuinely
+  // depends on the first having just run.
+  await Promise.all([
+    (async () => {
+      try {
+        await recomputeOverspendAlerts(userId);
+      } catch (err) {
+        logError('Failed to refresh overspend alerts before delivery (non-fatal):', err);
+      }
+      try {
+        await recomputeNotificationEvents(userId);
+      } catch (err) {
+        logError('Failed to refresh notification events before delivery (non-fatal):', err);
+      }
+    })(),
+    (async () => {
+      try {
+        await recomputeSubscriptionAuditEvents(userId);
+      } catch (err) {
+        logError('Failed to refresh subscription audit events before delivery (non-fatal):', err);
+      }
+    })(),
+  ]);
 
   const { data: pendingEvents, error: eventsError } = await supabaseAdmin
     .from('notification_events')
