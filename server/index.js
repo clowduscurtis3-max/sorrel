@@ -35,6 +35,7 @@ const { detectRecurringTransactions } = require('./recurring');
 const { recomputeOverspendAlerts } = require('./alerts');
 const { getGoalProgress } = require('./goalProgress');
 const { getSubscriptionAudit } = require('./subscriptionAudit');
+const { refreshAccountBalances, getAccountsSummary } = require('./accounts');
 const { recomputeNotificationEvents } = require('./notificationEvents');
 const { recomputeSubscriptionAuditEvents } = require('./subscriptionAuditEvents');
 const { deliverPendingEventsForUser, runNotificationDelivery } = require('./pushDelivery');
@@ -146,6 +147,20 @@ app.post('/exchange-token', requireUser, async (req, res) => {
         .delete()
         .eq('user_id', req.userId);
       if (deleteError) throw deleteError;
+
+      // Real bug found by adversarial review, 2026-08-13: `accounts` had
+      // the identical staleness problem as `transactions` above (same
+      // root cause - a new Plaid item means new account_ids too), just
+      // never fixed alongside it. refreshAccountBalances only ever
+      // upserts, so without this, a re-link to a different bank/account
+      // set left the old item's account rows in place forever -
+      // GET /accounts would sum stale depository balances alongside the
+      // new ones, overstating the user's real available cash.
+      const { error: deleteAccountsError } = await supabaseAdmin
+        .from('accounts')
+        .delete()
+        .eq('user_id', req.userId);
+      if (deleteAccountsError) throw deleteAccountsError;
     }
 
     // Encrypted before it ever reaches Supabase - see server/crypto.js.
@@ -166,6 +181,22 @@ app.post('/exchange-token', requireUser, async (req, res) => {
         { onConflict: 'user_id' }
       );
     if (error) throw error;
+
+    // Real bug found by adversarial review, 2026-08-13: nothing here ever
+    // called refreshAccountBalances for the freshly-exchanged token -
+    // account data only ever refreshes as part of syncUserData (a manual
+    // GET /transactions or the 30-min background job), so right after a
+    // (re-)link the account list still showed whatever was cached before
+    // (stale balances, or the just-deleted rows above for a re-link,
+    // meaning an empty list) until the user separately triggered a sync.
+    // Best-effort/non-fatal, same treatment as every other post-sync step
+    // in syncUserData - a balance-fetch hiccup here must not fail the
+    // link itself, which already succeeded.
+    try {
+      await refreshAccountBalances(req.userId, access_token);
+    } catch (err) {
+      logError('Account balance refresh failed after link (non-fatal):', err);
+    }
 
     res.json({ success: true });
   } catch (err) {
@@ -279,6 +310,21 @@ app.get('/subscriptions/audit', requireUser, async (req, res) => {
   }
 });
 
+// Phase 7 Step 2: cached account balances. Stateless read, no live Plaid
+// call at request time - refreshAccountBalances (called from syncUserData)
+// is what keeps the cache current, same reasoning as /goal/progress and
+// /subscriptions/audit not calling their own external APIs on every
+// request either.
+app.get('/accounts', requireUser, async (req, res) => {
+  try {
+    const summary = await getAccountsSummary(req.userId);
+    res.json(summary);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load account balances' });
+  }
+});
+
 // Phase 4 Step A: device registration. `requireUser` already established
 // who's calling from a cryptographically-verified session token, so this
 // writes to req.userId only - a client can never register (or overwrite) a
@@ -389,7 +435,32 @@ async function syncUserData(userId) {
 
   if (error || !item) throw new NoLinkedAccountError('No linked bank account');
 
-  await syncTransactionsLocked(userId, decrypt(item.access_token), item.cursor);
+  const accessToken = decrypt(item.access_token);
+
+  // Phase 7 Step 2: refresh cached account balances alongside the
+  // transaction sync, same cadence as everything else that stays fresh via
+  // the regular sync cycle rather than a live Plaid call on every
+  // Home-tab render. Best-effort, same treatment as the Gmail scan below -
+  // a balance-fetch hiccup must never block transactions from landing.
+  // Reuses the access token already decrypted above rather than
+  // re-fetching/re-decrypting it a second time.
+  //
+  // Latency fix from adversarial review, 2026-08-13: this used to run
+  // sequentially *after* syncTransactionsLocked resolved, even though it
+  // has no data dependency on the transaction sync - only accessToken,
+  // already available above. Run concurrently instead (the same
+  // Promise.all-for-independent-work pattern this codebase already
+  // established in pushDelivery.js for an analogous case). Error
+  // semantics are unchanged: syncTransactionsLocked's rejection still
+  // propagates out of syncUserData same as before (nothing catches it
+  // here), while refreshAccountBalances catches its own failure and never
+  // rejects, so it can't affect the other promise via Promise.all.
+  await Promise.all([
+    syncTransactionsLocked(userId, accessToken, item.cursor),
+    refreshAccountBalances(userId, accessToken).catch((err) => {
+      logError('Account balance refresh failed (non-fatal):', err);
+    }),
+  ]);
 
   // Best-effort: if Gmail is linked, pull in any new receipts too, so the
   // itemized view stays fresh without a separate manual step. A Gmail

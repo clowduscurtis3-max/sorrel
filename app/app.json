@@ -38,7 +38,9 @@
         {
           "color": "#E6F4FE"
         }
-      ]
+      ],
+      "expo-router",
+      "@react-native-community/datetimepicker"
     ],
     "extra": {
       "eas": {
