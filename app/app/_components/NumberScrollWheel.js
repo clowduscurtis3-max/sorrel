@@ -88,7 +88,15 @@ export default function NumberScrollWheel({
   useAnimatedReaction(
     () => position.value,
     (current, previous) => {
-      if (previous !== null && Math.round(current / step) === Math.round(previous / step)) return;
+      // Reanimated's mapper always fires once at registration with
+      // `previous === null` - a real bug found by /code-review (2026-08-14):
+      // the old guard only compared rounded current/previous when previous
+      // wasn't null, so that first, gesture-less call fell through and
+      // called commit() on every mount, silently reporting `value` right
+      // back to the caller before any drag. Skip that initial call outright
+      // rather than trying to make it compare equal to something.
+      if (previous === null) return;
+      if (Math.round(current / step) === Math.round(previous / step)) return;
       runOnJS(commit)(current);
     }
   );

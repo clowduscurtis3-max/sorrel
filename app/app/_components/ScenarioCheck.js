@@ -32,6 +32,63 @@ const PURCHASE_CATEGORIES = CATEGORIES.filter((c) => c !== 'Income' && c !== 'Tr
 // everywhere else.
 const SEVERITY_MARKER = { high: '!! ', medium: '! ', low: '' };
 
+// Step 4's difference summary, deterministic/template-based rather than a
+// Claude call - matches this project's existing cost-conscious default
+// (alerts.js/subscriptionAuditEvents.js do the same) and leaves Step 5's
+// actual Claude wording layer for phrasing a template genuinely can't
+// cover. `diff` is one entry from compareScenarios' `differences` array;
+// `buyNowResult`/`waitResult` are the two sides' own already-worded
+// `status_label`s, reused rather than re-deriving a label from the raw
+// status string.
+function describeComparisonDifference({ diff, buyNowResult, waitResult }) {
+  const parts = [];
+  if (diff.status_changes) {
+    parts.push(
+      `Waiting changes the outcome from "${buyNowResult.status_label}" to "${waitResult.status_label}".`
+    );
+  }
+  if (diff.goal_days_recovered > 0) {
+    parts.push(
+      `It also moves your goal date about ${diff.goal_days_recovered} day${
+        diff.goal_days_recovered === 1 ? '' : 's'
+      } earlier.`
+    );
+  } else if (diff.goal_days_recovered < 0) {
+    parts.push(
+      `It moves your goal date about ${Math.abs(diff.goal_days_recovered)} day${
+        Math.abs(diff.goal_days_recovered) === 1 ? '' : 's'
+      } later.`
+    );
+  } else if (diff.goal_days_recovered === 0 && !diff.status_changes) {
+    parts.push('Waiting doesn’t meaningfully change this purchase’s impact.');
+  }
+  return parts.join(' ');
+}
+
+// Reused for both the single-check result and each side of the buy-now-vs-
+// wait comparison below, so the two don't drift into two slightly
+// different renderings of the same result shape.
+function ScenarioResult({ label, result }) {
+  return (
+    <View style={styles.reviewRow}>
+      {label && <Text style={styles.smallText}>{label}</Text>}
+      <Text style={styles.rowName}>{result.status_label}</Text>
+      <Text style={styles.smallText}>Confidence: {result.confidence}</Text>
+      {result.tradeoffs.map((t, i) => (
+        <Text key={`t-${i}`} style={styles.smallText}>
+          {SEVERITY_MARKER[t.severity]}
+          {t.text}
+        </Text>
+      ))}
+      {result.limitations.map((l, i) => (
+        <Text key={`l-${i}`} style={styles.smallText}>
+          {l}
+        </Text>
+      ))}
+    </View>
+  );
+}
+
 export default function ScenarioCheck() {
   const [amount, setAmount] = useState(1);
   const [category, setCategory] = useState(null);
@@ -39,6 +96,22 @@ export default function ScenarioCheck() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
+
+  // Step 4: "buy now vs. wait until your next paycheck" - its own separate
+  // loading/error/result state rather than reusing the single-check state
+  // above, since a user might want to compare without having run a plain
+  // check first (or vice versa), and the two results render differently.
+  const [comparing, setComparing] = useState(false);
+  const [comparisonError, setComparisonError] = useState(null);
+  const [comparison, setComparison] = useState(null);
+
+  function scenarioBody() {
+    return {
+      amount,
+      category,
+      recurrence: recurring ? 'monthly' : 'once',
+    };
+  }
 
   async function checkScenario() {
     setLoading(true);
@@ -48,11 +121,7 @@ export default function ScenarioCheck() {
       const res = await apiFetch('/scenarios/evaluate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          amount,
-          category,
-          recurrence: recurring ? 'monthly' : 'once',
-        }),
+        body: JSON.stringify(scenarioBody()),
       });
       if (!res.ok) {
         // A 400 here is a specific, actionable validation message from the
@@ -72,6 +141,39 @@ export default function ScenarioCheck() {
       setError(err.message === 'SERVER_ERROR' ? apiErrorMessage(err) : err.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  // Step 4: wraps POST /scenarios/compare-buy-now-vs-wait (built in Step 2,
+  // never called from the app until now). `available: false` (200, not an
+  // error) is the correct, honest response when no recurring income has
+  // been detected for this account yet - there's no real payday to compare
+  // against, and the brief prohibits inventing one. Rendered as a plain
+  // message below, not treated as an error.
+  async function checkComparison() {
+    setComparing(true);
+    setComparisonError(null);
+    setComparison(null);
+    try {
+      const res = await apiFetch('/scenarios/compare-buy-now-vs-wait', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(scenarioBody()),
+      });
+      if (!res.ok) {
+        if (res.status === 400) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || 'SERVER_ERROR');
+        }
+        throw new Error('SERVER_ERROR');
+      }
+      const body = await res.json();
+      setComparison(body);
+    } catch (err) {
+      console.error(err);
+      setComparisonError(err.message === 'SERVER_ERROR' ? apiErrorMessage(err) : err.message);
+    } finally {
+      setComparing(false);
     }
   }
 
@@ -106,21 +208,49 @@ export default function ScenarioCheck() {
 
       {error && <Text style={styles.errorText}>{error}</Text>}
 
-      {result && (
+      {result && <ScenarioResult result={result} />}
+
+      {/* Step 4: standalone from the plain Check above - a user may want
+          this without ever running a single check first. */}
+      {comparing ? (
+        <ActivityIndicator />
+      ) : (
+        <Button title="Compare: buy now vs. wait" onPress={checkComparison} />
+      )}
+
+      {comparisonError && <Text style={styles.errorText}>{comparisonError}</Text>}
+
+      {comparison && comparison.available === false && (
+        <Text style={styles.smallText}>
+          No recurring income has been detected yet, so there's no real payday to compare
+          waiting against.
+        </Text>
+      )}
+
+      {comparison && comparison.available === true && (
         <View style={styles.reviewRow}>
-          <Text style={styles.rowName}>{result.status_label}</Text>
-          <Text style={styles.smallText}>Confidence: {result.confidence}</Text>
-          {result.tradeoffs.map((t, i) => (
-            <Text key={`t-${i}`} style={styles.smallText}>
-              {SEVERITY_MARKER[t.severity]}
-              {t.text}
-            </Text>
-          ))}
-          {result.limitations.map((l, i) => (
-            <Text key={`l-${i}`} style={styles.smallText}>
-              {l}
-            </Text>
-          ))}
+          {(() => {
+            const [buyNow, wait] = comparison.comparison.scenarios;
+            const [diff] = comparison.comparison.differences;
+            return (
+              <>
+                <ScenarioResult label="Buy now" result={buyNow.result} />
+                <ScenarioResult
+                  label={`Wait until your paycheck on ${wait.result.scenario.date}`}
+                  result={wait.result}
+                />
+                {diff && (
+                  <Text style={styles.smallText}>
+                    {describeComparisonDifference({
+                      diff,
+                      buyNowResult: buyNow.result,
+                      waitResult: wait.result,
+                    })}
+                  </Text>
+                )}
+              </>
+            );
+          })()}
         </View>
       )}
     </View>
