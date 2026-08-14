@@ -74,17 +74,28 @@ function ScenarioResult({ label, result }) {
       {label && <Text style={styles.smallText}>{label}</Text>}
       <Text style={styles.rowName}>{result.status_label}</Text>
       <Text style={styles.smallText}>Confidence: {result.confidence}</Text>
-      {result.tradeoffs.map((t, i) => (
-        <Text key={`t-${i}`} style={styles.smallText}>
-          {SEVERITY_MARKER[t.severity]}
-          {t.text}
-        </Text>
-      ))}
-      {result.limitations.map((l, i) => (
-        <Text key={`l-${i}`} style={styles.smallText}>
-          {l}
-        </Text>
-      ))}
+      {/* Step 5: when Claude's paragraph is available it already covers the
+          same ground as the tradeoffs/limitations bullets below (direct
+          user feedback, on-device - showing both read as redundant). The
+          bullets are the fallback for when `explanation` is null (the
+          call failed), not a permanent second copy of the same facts. */}
+      {result.explanation ? (
+        <Text style={styles.text}>{result.explanation}</Text>
+      ) : (
+        <>
+          {result.tradeoffs.map((t, i) => (
+            <Text key={`t-${i}`} style={styles.smallText}>
+              {SEVERITY_MARKER[t.severity]}
+              {t.text}
+            </Text>
+          ))}
+          {result.limitations.map((l, i) => (
+            <Text key={`l-${i}`} style={styles.smallText}>
+              {l}
+            </Text>
+          ))}
+        </>
+      )}
     </View>
   );
 }

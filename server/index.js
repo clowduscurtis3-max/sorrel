@@ -48,6 +48,7 @@ const {
   ScenarioValidationError,
 } = require('./scenario');
 const { loadScenarioContext } = require('./scenarioContext');
+const { explainScenario, explainComparison } = require('./scenarioExplain');
 
 // Where we send the system browser once Gmail linking finishes, so the app
 // (watching for this scheme via WebBrowser.openAuthSessionAsync) resolves.
@@ -782,6 +783,12 @@ app.post('/scenarios/evaluate', requireUser, async (req, res) => {
     normalizeScenario(req.body, now);
     const context = await loadScenarioContext(req.userId, now);
     const result = evaluateScenario({ context, scenario: req.body });
+    // Step 5: Claude-powered plain-language layer over the already-computed
+    // facts above - best-effort, non-fatal. A failure here (timeout, rate
+    // limit) leaves `explanation: null`; the client already falls back to
+    // the deterministic tradeoffs/limitations text, which is always present
+    // regardless of this call's outcome.
+    result.explanation = await explainScenario(result);
     res.json({ result });
   } catch (err) {
     if (err instanceof ScenarioValidationError) {
@@ -810,6 +817,8 @@ app.post('/scenarios/compare-buy-now-vs-wait', requireUser, async (req, res) => 
     if (!comparison) {
       return res.json({ available: false });
     }
+    // Step 5, same best-effort treatment as /scenarios/evaluate above.
+    comparison.explanation = await explainComparison(comparison);
     res.json({ available: true, comparison });
   } catch (err) {
     if (err instanceof ScenarioValidationError) {
