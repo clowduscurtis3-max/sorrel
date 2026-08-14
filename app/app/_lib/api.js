@@ -120,12 +120,25 @@ export async function apiFetch(path, options = {}) {
   // case below, this branch doesn't call signOut() - the actual session
   // is fine, so throwing straight to SESSION_EXPIRED here was showing a
   // wrong "Your session expired" banner on Home right after a successful
-  // sign-in. One short retry before giving up: a truly expired/signed-out
-  // session is still null on the second check too, so this can't mask a
-  // real SESSION_EXPIRED, it just stops treating this one specific
-  // startup timing gap as one.
-  if (!currentSession) {
-    await new Promise((resolve) => setTimeout(resolve, 300));
+  // sign-in.
+  //
+  // A single fixed 300ms retry turned out to consistently, not just
+  // occasionally, still lose this race (confirmed on-device 2026-08-13 -
+  // the console error fired on every login, not intermittently). Root
+  // cause: AppDataProvider mounts the instant (tabs) does and immediately
+  // fires 4-5 concurrent apiFetch calls (alerts/goalProgress/
+  // subscriptionAudit/accounts/push-registration) at the same moment as
+  // Home's own fetchTransactions - that burst of simultaneous
+  // supabase.auth.getSession() calls right as the session has just been
+  // set is real contention, not a one-off timing fluke, so a single fixed
+  // wait needed to be a bounded poll instead: keep re-checking every
+  // 250ms up to ~1s total before concluding the session is genuinely
+  // gone. A truly expired/signed-out session is still null after every
+  // check, so this can't mask a real SESSION_EXPIRED - it just gives a
+  // genuinely-fine-but-still-settling session more real chances to catch
+  // up instead of one guess.
+  for (let attempt = 0; !currentSession && attempt < 4; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
     ({
       data: { session: currentSession },
     } = await supabase.auth.getSession());

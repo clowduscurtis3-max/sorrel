@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import * as Notifications from 'expo-notifications';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { supabase } from '../lib/supabase';
 import { apiFetch } from './_lib/api';
 import { SessionContext } from './_lib/session';
@@ -253,13 +254,28 @@ export default function RootLayout() {
     return () => clearTimeout(timeout);
   }, [ready]);
 
-  if (!ready || target) {
-    return <Splash />;
-  }
-
+  // Real bug found on-device, 2026-08-13: NumberScrollWheel.js's
+  // GestureDetector (react-native-gesture-handler) crashed immediately
+  // with "GestureDetector must be used as a descendant of
+  // GestureHandlerRootView" - a hard requirement of the library, not
+  // something specific to this component, and something this app had never
+  // needed before since nothing used a raw gesture (react-native-screens'
+  // own navigation transitions, already relying on gesture-handler since
+  // Phase 7, apparently set this up internally for its own purposes without
+  // it ever being exposed/required at the app level until a component
+  // reached for the Gesture API directly). Wrapped as close to the true
+  // root as this app has - outside the ready/target Splash-vs-real-content
+  // branch below, so gestures would work regardless of which renders -
+  // rather than duplicating the wrapper in both return paths.
   return (
-    <SessionContext.Provider value={{ session, goal, refetchGoal: fetchGoal, signOut }}>
-      <Slot />
-    </SessionContext.Provider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      {!ready || target ? (
+        <Splash />
+      ) : (
+        <SessionContext.Provider value={{ session, goal, refetchGoal: fetchGoal, signOut }}>
+          <Slot />
+        </SessionContext.Provider>
+      )}
+    </GestureHandlerRootView>
   );
 }

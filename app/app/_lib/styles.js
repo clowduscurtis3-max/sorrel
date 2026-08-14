@@ -52,6 +52,23 @@ export const styles = StyleSheet.create({
     padding: 8,
     fontSize: 15,
   },
+  // Without an explicit height, @react-native-picker/picker's Android
+  // native view can render with zero measured height inside a flex/scroll
+  // layout (confirmed on-device, ScenarioCheck.js's category dropdown) -
+  // give it the same bordered-box look as `input` above so it's not just
+  // invisible, functionally-zero-sized space. `color`/`backgroundColor`
+  // are also explicit - the native Android Picker's closed-state text has
+  // no color set by default and rendered effectively invisible against
+  // this screen's white background (confirmed on-device).
+  picker: {
+    height: 50,
+    width: '100%',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#999',
+    borderRadius: 4,
+    color: '#000',
+    backgroundColor: '#fff',
+  },
   centered: {
     flex: 1,
     alignItems: 'center',

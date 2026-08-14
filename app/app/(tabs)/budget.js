@@ -5,6 +5,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { apiFetch, apiErrorMessage } from '../_lib/api';
 import { styles } from '../_lib/styles';
 import { useAppData } from '../_lib/appData';
+import ScenarioCheck from '../_components/ScenarioCheck';
 
 // Phase 7 Step 1 sub-step 1.4: the real Budget tab, replacing the sub-step
 // 1.2 placeholder. `budgetStatus` and its whole edit/proposal sub-state
@@ -189,6 +190,13 @@ export default function Budget() {
         </View>
       ) : (
         <ScrollView style={styles.budgetScreen}>
+          {/* Phase 5 Step 3: "Can I buy this?" - decided in Phase 7 to live
+              in this tab, since it's fundamentally a budget/goal-impact
+              question, not a fifth destination of its own. Placed above the
+              budget-status list since it's a standalone question, not part
+              of the generate/edit flow below it. */}
+          <ScenarioCheck />
+
           {generatingBudget ? (
             <ActivityIndicator />
           ) : (

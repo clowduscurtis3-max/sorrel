@@ -50,6 +50,29 @@ function isTransferSeries(series) {
   return series.category === 'Transfers';
 }
 
+// Real bug found running this against the live linked Sandbox account
+// (Phase 5 Step 2, 2026-08-13) - the category check alone wasn't enough.
+// That account's only recurring series genuinely categorized `Income` is a
+// $4.22/month interest payment; its real ~$5,850/month payroll deposit is
+// inconsistently categorized (`Income` some months, `Transfers` others -
+// Plaid Sandbox's own personal_finance_category disagreeing with itself
+// across the same canned template, not a bug in this project's
+// categorizer). With only the category+nonzero guard, that $4.22 credit won
+// "soonest income" outright, and the resulting near-term cash window was
+// then judged against it - producing a real, live tradeoff string reading
+// "...comes to about 132192% of that expected $4.22", which is not a
+// usable answer for anyone.
+//
+// $MIN_INCOME_AMOUNT below is the same reasoning as the existing
+// zero-amount guard, just extended: a credit this small can't meaningfully
+// fund a purchase decision either, even though it is genuinely, correctly
+// categorized as Income. Deliberately conservative (a real paycheck, even
+// part-time or gig income, clears this by a wide margin) so a legitimate
+// secondary income stream is never excluded - the goal is filtering out
+// interest/cashback/rebate-sized credits specifically, not raising the bar
+// on what counts as a real income source.
+const MIN_INCOME_AMOUNT = 50;
+
 // Income is the categorizer's judgment, NOT merely a negative amount.
 //
 // Sign alone is dangerously wrong here. Plaid stores every credit as
@@ -62,12 +85,12 @@ function isTransferSeries(series) {
 //
 // Requiring category === 'Income' means a mis-categorized paycheck simply
 // isn't detected, and the engine honestly reports having no payday to reason
-// about rather than confidently reasoning from the wrong one. A zero-amount
-// series is excluded too: it can't fund anything, but it would still shorten
-// the window and count toward confidence.
+// about rather than confidently reasoning from the wrong one. A trivial-size
+// series is excluded too, per MIN_INCOME_AMOUNT above: it can't meaningfully
+// fund anything, but it would still win "soonest" and shorten the window.
 function isIncomeSeries(series) {
   if (isTransferSeries(series)) return false;
-  return series.category === 'Income' && Number(series.typical_amount) !== 0;
+  return series.category === 'Income' && Math.abs(Number(series.typical_amount)) >= MIN_INCOME_AMOUNT;
 }
 
 // A bill the user is expected to owe: money out, not a transfer between their
@@ -196,4 +219,5 @@ module.exports = {
   upcomingObligations,
   nextExpectedIncome,
   STALE_INTERVALS_THRESHOLD,
+  MIN_INCOME_AMOUNT,
 };

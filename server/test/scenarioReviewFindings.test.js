@@ -3,13 +3,19 @@ require('./setupEnv');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { evaluateScenario, compareBuyNowVsWait, normalizeScenario } = require('../scenario');
+const {
+  evaluateScenario,
+  compareBuyNowVsWait,
+  normalizeScenario,
+  PRESSURE_RATIO_PERCENT_DISPLAY_CAP,
+} = require('../scenario');
 const { computeBudgetStatus, currentMonthRange } = require('../budget');
 const {
   isIncomeSeries,
   isObligationSeries,
   nextExpectedIncome,
   upcomingObligations,
+  MIN_INCOME_AMOUNT,
 } = require('../recurringSchedule');
 
 // One test per defect found by the adversarial review of the first cut of
@@ -127,6 +133,56 @@ test('#1 an outgoing recurring transfer is not counted as a bill owed', () => {
     to: '2026-08-21',
   });
   assert.equal(result.total, 1200);
+});
+
+// --- 15 & 16. Found running Step 2 live against the real Sandbox account,
+// 2026-08-13 (not part of the original 14) - a legitimately Income-
+// categorized but trivial recurring credit (a $4.22/month interest payment
+// on the real account) was winning "soonest income" over the account's own
+// much larger, but inconsistently-categorized, payroll deposit, and the
+// resulting tradeoff text read "...comes to about 132192% of that expected
+// $4.22" - a real, live, nonsensical number a user would have actually seen.
+
+test('#15 a trivial recurring credit is not mistaken for a payday even when genuinely categorized Income', () => {
+  const interestPayment = {
+    id: 'interest',
+    display_name: 'INTRST PYMNT',
+    category: 'Income',
+    interval: 'monthly',
+    typical_amount: -4.22,
+    last_seen_date: '2026-07-06',
+    next_expected_date: '2026-08-06',
+  };
+
+  assert.equal(isIncomeSeries(interestPayment), false);
+  assert.equal(nextExpectedIncome({ series: [interestPayment, RENT], from: '2026-08-01' }), null);
+
+  // A real paycheck, even a modest one, must still clear the floor.
+  const modestPaycheck = { ...PAYCHECK, typical_amount: -(MIN_INCOME_AMOUNT + 1) };
+  assert.equal(isIncomeSeries(modestPaycheck), true);
+});
+
+test('#16 an extreme pressure ratio is never rendered as an absurd percentage', () => {
+  // Just above MIN_INCOME_AMOUNT so it's still detected as real income, but
+  // small enough next to RENT's $1,200 obligation to blow past the display
+  // cap - proving the fix is in the wording, not just the income floor.
+  const thinIncome = {
+    ...PAYCHECK,
+    id: 'thin-income',
+    display_name: 'SIDE GIG',
+    typical_amount: -(MIN_INCOME_AMOUNT + 10),
+    next_expected_date: '2026-08-21',
+  };
+
+  const result = evaluateScenario({
+    context: contextWith({ recurringSeries: [thinIncome, RENT] }),
+    scenario: { amount: 50 },
+  });
+
+  assert.ok(result.cash.pressure_ratio > PRESSURE_RATIO_PERCENT_DISPLAY_CAP);
+  const timingText = result.tradeoffs.find((t) => t.kind === 'timing' && t.severity === 'high').text;
+  assert.doesNotMatch(timingText, /\d{4,}%/);
+  assert.match(timingText, /well more than that income covers/);
 });
 
 // --- 2 & 3. Date range safety ----------------------------------------------

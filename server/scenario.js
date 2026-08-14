@@ -52,6 +52,18 @@ const MATERIAL_GOAL_DELAY_DAYS = 7;
 // even when the purchase is perfectly affordable in a given month.
 const NEAR_TERM_PRESSURE_RATIO = 0.8;
 
+// Real bug found running this against the live linked Sandbox account
+// (Phase 5 Step 2, 2026-08-13): recurringSchedule.js's MIN_INCOME_AMOUNT
+// now keeps a trivial credit (a few-dollar interest payment) from being
+// mistaken for "the next paycheck" in the first place, but even a small,
+// *legitimate* detected income (a modest side gig, say) can still produce a
+// pressure_ratio the percentage framing below renders as an absurd number
+// like "132192%" - technically the correct division, but not a usable
+// answer for anyone. Above this cap, buildTradeoffs switches from a
+// percentage to a plain dollar-shortfall statement instead of ever printing
+// a percentage north of 500%.
+const PRESSURE_RATIO_PERCENT_DISPLAY_CAP = 5;
+
 // How far ahead to look for the next paycheck. Long enough to cover monthly
 // payroll, short enough that a quarterly or annual income series never gets
 // presented to the user as "your next paycheck."
@@ -150,26 +162,32 @@ function monthlyEquivalent(amount, recurrence) {
 // (finite, non-negative - never a bare typeof check), because a NaN or a
 // negative slipping into the projection math would produce a confident,
 // completely wrong answer rather than an obvious failure.
+// Phase 5 Step 2: a distinct subclass (same pattern as budget.js's
+// NoHistoryError) so the API route can tell "the caller sent bad input"
+// (400) apart from "something actually broke" (500) via instanceof,
+// without string-matching error messages.
+class ScenarioValidationError extends Error {}
+
 function normalizeScenario(scenario, now) {
   const { amount, category = null, date = null, recurrence = 'once' } = scenario || {};
 
   if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
-    throw new Error('amount must be a finite number greater than zero');
+    throw new ScenarioValidationError('amount must be a finite number greater than zero');
   }
   if (category !== null && !SPEND_CATEGORIES.includes(category)) {
-    throw new Error(`category must be one of: ${SPEND_CATEGORIES.join(', ')}`);
+    throw new ScenarioValidationError(`category must be one of: ${SPEND_CATEGORIES.join(', ')}`);
   }
   if (!RECURRENCES.includes(recurrence)) {
-    throw new Error(`recurrence must be one of: ${RECURRENCES.join(', ')}`);
+    throw new ScenarioValidationError(`recurrence must be one of: ${RECURRENCES.join(', ')}`);
   }
   if (date !== null && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    throw new Error('date must be a YYYY-MM-DD string');
+    throw new ScenarioValidationError('date must be a YYYY-MM-DD string');
   }
   // A what-if about a purchase in the past isn't a decision anyone can still
   // make, and letting one through charges it against the current period's
   // budget as though it were upcoming - a real distortion of the answer.
   if (date !== null && date < toDateOnly(now)) {
-    throw new Error('date cannot be in the past');
+    throw new ScenarioValidationError('date cannot be in the past');
   }
 
   return {
@@ -703,10 +721,14 @@ function buildTradeoffs({ normalized, cash, budgetImpact, goalImpact }) {
       kind: 'timing',
       severity: 'high',
       text:
-        `${money(cash.upcoming_obligations_total)} of recurring bills is expected before your ` +
-        `next income on ${cash.next_expected_income.date}. Adding ${money(normalized.amount)} on ` +
-        `top of that comes to about ` +
-        `${Math.round(cash.pressure_ratio * 100)}% of that expected ${money(cash.next_expected_income.amount)}.`,
+        cash.pressure_ratio <= PRESSURE_RATIO_PERCENT_DISPLAY_CAP
+          ? `${money(cash.upcoming_obligations_total)} of recurring bills is expected before your ` +
+            `next income on ${cash.next_expected_income.date}. Adding ${money(normalized.amount)} on ` +
+            `top of that comes to about ` +
+            `${Math.round(cash.pressure_ratio * 100)}% of that expected ${money(cash.next_expected_income.amount)}.`
+          : `${money(cash.upcoming_obligations_total)} of recurring bills is expected before your ` +
+            `next income of ${money(cash.next_expected_income.amount)} on ${cash.next_expected_income.date} ` +
+            `— well more than that income covers, even before adding ${money(normalized.amount)} for this.`,
     });
     tradeoffs.push({
       kind: 'timing',
@@ -856,8 +878,10 @@ module.exports = {
   compareBuyNowVsWait,
   normalizeScenario,
   monthlyEquivalent,
+  ScenarioValidationError,
   MATERIAL_BUDGET_SHARE,
   MATERIAL_GOAL_DELAY_DAYS,
   NEAR_TERM_PRESSURE_RATIO,
+  PRESSURE_RATIO_PERCENT_DISPLAY_CAP,
   STATUS_LABELS,
 };

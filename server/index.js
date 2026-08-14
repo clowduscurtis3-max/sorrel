@@ -41,6 +41,13 @@ const { recomputeSubscriptionAuditEvents } = require('./subscriptionAuditEvents'
 const { deliverPendingEventsForUser, runNotificationDelivery } = require('./pushDelivery');
 const { registerDevice, unregisterDevice } = require('./notifications');
 const { logError } = require('./safeLog');
+const {
+  evaluateScenario,
+  compareBuyNowVsWait,
+  normalizeScenario,
+  ScenarioValidationError,
+} = require('./scenario');
+const { loadScenarioContext } = require('./scenarioContext');
 
 // Where we send the system browser once Gmail linking finishes, so the app
 // (watching for this scheme via WebBrowser.openAuthSessionAsync) resolves.
@@ -758,6 +765,58 @@ app.get('/budget/alerts', requireUser, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load budget alerts' });
+  }
+});
+
+// Phase 5 Step 2: secure endpoints exposing the deterministic what-if engine
+// (server/scenario.js, Step 1) - simulation only, per the brief. Validation
+// runs before any DB read (loadScenarioContext) both to fail fast on bad
+// input and so a malformed request never even touches the real account's
+// data - normalizeScenario is pure/no-I/O, safe to call standalone here for
+// that purpose alone (evaluateScenario/compareBuyNowVsWait each also
+// re-normalize internally, so this is a cheap, deliberate double-check, not
+// a maintained duplicate of the validation rules themselves).
+app.post('/scenarios/evaluate', requireUser, async (req, res) => {
+  try {
+    const now = new Date();
+    normalizeScenario(req.body, now);
+    const context = await loadScenarioContext(req.userId, now);
+    const result = evaluateScenario({ context, scenario: req.body });
+    res.json({ result });
+  } catch (err) {
+    if (err instanceof ScenarioValidationError) {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Failed to evaluate scenario' });
+  }
+});
+
+// "Buy now" vs. "wait until your next detected paycheck," built on the same
+// engine (compareBuyNowVsWait) rather than a separate code path. `date` in
+// the request body, if sent, is ignored - both sides of this comparison
+// pick their own date (today / the detected income date), same as
+// compareBuyNowVsWait already does internally.
+// `available: false` (200, not an error) is the correct response when no
+// recurring income has been detected for this account - there's no honest
+// date to "wait" for, and the brief prohibits inventing a plausible-looking
+// payday instead of saying so.
+app.post('/scenarios/compare-buy-now-vs-wait', requireUser, async (req, res) => {
+  try {
+    const now = new Date();
+    normalizeScenario(req.body, now);
+    const context = await loadScenarioContext(req.userId, now);
+    const comparison = compareBuyNowVsWait({ context, scenario: req.body });
+    if (!comparison) {
+      return res.json({ available: false });
+    }
+    res.json({ available: true, comparison });
+  } catch (err) {
+    if (err instanceof ScenarioValidationError) {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Failed to compare scenarios' });
   }
 });
 

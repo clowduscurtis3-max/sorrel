@@ -4,6 +4,8 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { apiFetch, apiErrorMessage, GOAL_TYPES } from '../_lib/api';
 import { styles } from '../_lib/styles';
 import { useSessionContext } from '../_lib/session';
+import { formatAmountLabel } from '../_lib/amountPicker';
+import NumberScrollWheel from './NumberScrollWheel';
 
 // Mirrors server/goalProgress.js's AVG_DAYS_PER_MONTH - kept as its own
 // constant here (no module shared between the RN app and the server) so a
@@ -183,6 +185,13 @@ export function GoalFormFields({ form }) {
 
   const tomorrow = new Date(Date.now() + 86400000);
 
+  // Optional field, same show/hide-on-demand pattern as the target-date
+  // button below it (a wheel visible by default would take real screen
+  // space for a value most goals may never set). Once opened it stays open
+  // - re-tapping the summary button toggles it, it doesn't auto-close after
+  // one drag, since a wheel is meant for several adjustments in a row.
+  const [showAmountWheel, setShowAmountWheel] = useState(false);
+
   return (
     <>
       <Text style={styles.text}>What are you hoping to achieve financially?</Text>
@@ -216,13 +225,23 @@ export function GoalFormFields({ form }) {
       )}
 
       <Text style={styles.smallText}>Target amount (optional)</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="e.g. 10000"
-        keyboardType="numeric"
-        value={form.goalAmount}
-        onChangeText={form.setGoalAmount}
+      <Button
+        title={form.goalAmount ? formatAmountLabel(form.goalAmount) : 'Set a target amount'}
+        onPress={() => setShowAmountWheel((s) => !s)}
       />
+      {form.goalAmount && (
+        <Button title="Clear target amount" onPress={() => form.setGoalAmount('')} />
+      )}
+      {showAmountWheel && (
+        <NumberScrollWheel
+          value={form.goalAmount ? Number(form.goalAmount) : 0}
+          onValueChange={(v) => form.setGoalAmount(String(v))}
+          min={0}
+          max={1000000}
+          step={50}
+          formatLabel={formatAmountLabel}
+        />
+      )}
       <Text style={styles.smallText}>Target date (optional)</Text>
       <Button
         title={targetDate ? targetDate.toLocaleDateString() : 'Pick a target date'}
