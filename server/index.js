@@ -36,6 +36,7 @@ const { recomputeOverspendAlerts } = require('./alerts');
 const { getGoalProgress } = require('./goalProgress');
 const { getSubscriptionAudit } = require('./subscriptionAudit');
 const { refreshAccountBalances, getAccountsSummary } = require('./accounts');
+const { generateNetWorthSnapshot, getNetWorthSummary } = require('./netWorth');
 const { recomputeNotificationEvents } = require('./notificationEvents');
 const { recomputeSubscriptionAuditEvents } = require('./subscriptionAuditEvents');
 const { deliverPendingEventsForUser, runNotificationDelivery } = require('./pushDelivery');
@@ -512,6 +513,35 @@ app.get('/accounts', requireUser, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load account balances' });
+  }
+});
+
+// Phase 8 Step 2: net worth (assets - liabilities), trended over time.
+// Stateless read of net_worth_snapshots only - no live recomputation here,
+// same "snapshots are the authoritative source, not a live recalculation"
+// reasoning the brief itself called for. `current` and `history` are both
+// `null`/empty (never fabricated) if the daily job hasn't produced a
+// snapshot for this user yet.
+app.get('/net-worth', requireUser, async (req, res) => {
+  try {
+    const summary = await getNetWorthSummary(req.userId);
+    res.json(summary);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load net worth' });
+  }
+});
+
+// Manual trigger for the daily snapshot job (see runNetWorthSnapshots
+// below), same purpose as every other /admin/* route in this file - lets
+// Step 2 be verified without waiting for the scheduled interval.
+app.post('/admin/generate-net-worth-snapshot', requireUser, async (req, res) => {
+  try {
+    const snapshot = await generateNetWorthSnapshot(req.userId);
+    res.json({ snapshot });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to generate net worth snapshot' });
   }
 });
 
@@ -1598,6 +1628,41 @@ setTimeout(runBackgroundSync, 60 * 1000);
 const NOTIFICATION_DELIVERY_INTERVAL_MS = 5 * 60 * 1000;
 setInterval(runNotificationDelivery, NOTIFICATION_DELIVERY_INTERVAL_MS);
 setTimeout(runNotificationDelivery, 90 * 1000);
+
+// Phase 8 Step 2: daily net worth snapshot, same setInterval+startup-
+// setTimeout convention as runBackgroundSync/runNotificationDelivery
+// above. Every user with at least one active linked Item gets a snapshot
+// attempt; generateNetWorthSnapshot itself is idempotent (upserts on
+// (user_id, snapshot_date)) and silently skips a user with zero eligible
+// accounts rather than writing a fabricated $0 - see server/netWorth.js.
+// Per-user failures are logged and skipped, not thrown, same pattern as
+// every other background job in this file - one user's failure can't
+// stop the rest of the batch.
+const NET_WORTH_SNAPSHOT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+async function runNetWorthSnapshots() {
+  const { data: items, error } = await supabaseAdmin.from('plaid_items').select('user_id').eq('status', 'active');
+  if (error) {
+    logError('Net worth snapshot job: failed to list linked accounts:', error);
+    return;
+  }
+
+  const userIds = [...new Set((items || []).map((i) => i.user_id))];
+
+  for (const userId of userIds) {
+    try {
+      await generateNetWorthSnapshot(userId);
+    } catch (err) {
+      logError(`Net worth snapshot failed for user ${userId}:`, err);
+    }
+  }
+}
+
+setInterval(runNetWorthSnapshots, NET_WORTH_SNAPSHOT_INTERVAL_MS);
+// Run once shortly after startup too, same reasoning as every other
+// background job here - a dev session shouldn't have to wait 24h to see
+// this work at all.
+setTimeout(runNetWorthSnapshots, 120 * 1000);
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Server listening on port ${port}`));
