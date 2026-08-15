@@ -130,12 +130,25 @@ app.post('/link-token', requireUser, async (req, res) => {
     if (relink_item_id) {
       const { data: item, error: itemError } = await supabaseAdmin
         .from('plaid_items')
-        .select('id, access_token')
+        .select('id, access_token, status')
         .eq('id', relink_item_id)
         .eq('user_id', req.userId)
         .single();
       if (itemError || !item) {
         return res.status(404).json({ error: 'No such linked Item for this account' });
+      }
+
+      // Found by code review: a disconnected Item's access_token was
+      // already revoked with Plaid (itemRemove, see the disconnect
+      // route) even though it may still decrypt locally fine - Update
+      // Mode against a Plaid-revoked token fails at Plaid's API, which
+      // would otherwise surface here as an opaque 500 instead of the
+      // same clear guidance already given for an unreadable token.
+      if (item.status !== 'active') {
+        return res.status(409).json({
+          error: 'This connection has already been disconnected - add it again as a new connection instead.',
+          code: 'NEEDS_DISCONNECT_AND_ADD',
+        });
       }
 
       let accessToken;
@@ -210,20 +223,36 @@ app.post('/exchange-token', requireUser, async (req, res) => {
   if (!public_token) return res.status(400).json({ error: 'Missing public_token' });
 
   try {
-    const exchange = await plaidClient.itemPublicTokenExchange({ public_token });
-    const { access_token, item_id } = exchange.data;
-
+    // Found by code review: ownership (and, now, status) of relink_item_id
+    // used to be checked *after* itemPublicTokenExchange - a bad/tampered
+    // relink_item_id still burned a real, single-use Plaid public_token
+    // and a billed API call before being rejected. Checked first now, so
+    // an invalid relink_item_id 404s (or 409s, if disconnected) without
+    // ever touching Plaid.
+    let existingItem = null;
     if (relink_item_id) {
-      const { data: existingItem, error: lookupError } = await supabaseAdmin
+      const { data, error: lookupError } = await supabaseAdmin
         .from('plaid_items')
-        .select('id, item_id')
+        .select('id, item_id, status')
         .eq('id', relink_item_id)
         .eq('user_id', req.userId)
         .single();
-      if (lookupError || !existingItem) {
+      if (lookupError || !data) {
         return res.status(404).json({ error: 'No such linked Item for this account' });
       }
+      if (data.status !== 'active') {
+        return res.status(409).json({
+          error: 'This connection has already been disconnected - add it again as a new connection instead.',
+          code: 'NEEDS_DISCONNECT_AND_ADD',
+        });
+      }
+      existingItem = data;
+    }
 
+    const exchange = await plaidClient.itemPublicTokenExchange({ public_token });
+    const { access_token, item_id } = exchange.data;
+
+    if (existingItem) {
       if (existingItem.item_id === item_id) {
         const { error } = await supabaseAdmin
           .from('plaid_items')

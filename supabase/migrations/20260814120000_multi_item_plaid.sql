@@ -71,6 +71,23 @@ alter table accounts
   add column if not exists plaid_item_id uuid references plaid_items (id) on delete cascade,
   add column if not exists persistent_account_id text;
 
+-- Found by code review: the single-oldest-Item backfill below is only
+-- correct because exactly one plaid_items row exists right now (verified
+-- live before this migration was first written). Nothing enforced that
+-- assumption, so if this file were ever re-applied against a database
+-- that already had more than one Item, every account would be silently
+-- (and wrongly) attributed to whichever Item happens to be oldest. This
+-- makes that failure loud instead of silent - it's a no-op today (there
+-- is still exactly one row) and only ever fires if this migration is
+-- ever replayed somewhere that violates the assumption it depends on.
+do $$
+begin
+  if (select count(*) from plaid_items) > 1 then
+    raise exception
+      'multi_item_plaid backfill assumes exactly one plaid_items row exists; found more than one - the single-oldest-Item backfill below is not safe to run as-is against this database state.';
+  end if;
+end $$;
+
 update accounts
 set plaid_item_id = (select id from plaid_items order by created_at asc limit 1)
 where plaid_item_id is null
