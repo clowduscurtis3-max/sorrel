@@ -110,8 +110,64 @@ async function requireUser(req, res, next) {
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
+// Phase 8 Step 1: `relink_item_id` (optional, a plaid_items.id - this
+// app's own uuid, not Plaid's item_id string) switches this into Plaid's
+// Update Mode - the link token is created with the *existing* Item's
+// access_token instead of `products`, so completing Link reconnects to
+// the same Item (same item_id, same sync cursor) rather than minting a
+// brand-new one. This is the actual fix for "re-linking shouldn't delete
+// history": today's plain (non-Update-Mode) Link mints a new item_id on
+// every session, which is why re-linking used to require deleting the
+// old item's data - Update Mode has no such requirement, because there
+// is no "old item" from Plaid's perspective, only a reauthorized one.
+// Ownership is checked before ever touching the token - a client can
+// never trigger Update Mode against another user's Item, no matter what
+// id it sends.
 app.post('/link-token', requireUser, async (req, res) => {
+  const { relink_item_id } = req.body || {};
+
   try {
+    if (relink_item_id) {
+      const { data: item, error: itemError } = await supabaseAdmin
+        .from('plaid_items')
+        .select('id, access_token')
+        .eq('id', relink_item_id)
+        .eq('user_id', req.userId)
+        .single();
+      if (itemError || !item) {
+        return res.status(404).json({ error: 'No such linked Item for this account' });
+      }
+
+      let accessToken;
+      try {
+        accessToken = decrypt(item.access_token);
+      } catch (err) {
+        if (err instanceof DecryptionError) {
+          // Update Mode is impossible without a readable access_token -
+          // per this phase's own decision, this is NOT silently patched
+          // over with a fresh plain Link. The client is expected to
+          // disconnect this Item (POST /plaid-items/:id/disconnect) and
+          // then add a fresh one instead - two explicit actions, not one
+          // implicit "re-link" that quietly starts a new Item under the
+          // hood.
+          return res.status(409).json({
+            error: 'This connection cannot be repaired directly and needs to be disconnected and re-added.',
+            code: 'NEEDS_DISCONNECT_AND_ADD',
+          });
+        }
+        throw err;
+      }
+
+      const response = await plaidClient.linkTokenCreate({
+        user: { client_user_id: req.userId },
+        client_name: 'Pocket Accountant',
+        country_codes: ['US'],
+        language: 'en',
+        access_token: accessToken,
+      });
+      return res.json({ link_token: response.data.link_token, mode: 'update' });
+    }
+
     const response = await plaidClient.linkTokenCreate({
       user: { client_user_id: req.userId },
       client_name: 'Pocket Accountant',
@@ -119,97 +175,194 @@ app.post('/link-token', requireUser, async (req, res) => {
       country_codes: ['US'],
       language: 'en',
     });
-    res.json({ link_token: response.data.link_token });
+    res.json({ link_token: response.data.link_token, mode: 'add' });
   } catch (err) {
     logError('Failed to create link token:', err);
     res.status(500).json({ error: 'Failed to create link token' });
   }
 });
 
+// Phase 8 Step 1: two distinct, explicit paths, no longer one implicit
+// "replace whatever's there" behavior.
+//
+// ADD (relink_item_id absent - the default, and the only path that
+// existed before this phase): always creates a brand-new plaid_items row.
+// Never deletes or touches any existing Item's accounts/transactions,
+// no matter how many the user already has.
+//
+// RELINK (relink_item_id present - completes the Update Mode flow started
+// by POST /link-token above): Plaid reconnects to the *same* Item, so
+// this should return the same item_id back. The existing plaid_items row
+// is updated in place (fresh access_token, status back to 'active') -
+// its cursor is deliberately left untouched, since it's still valid for
+// the same item_id. Nothing in `accounts`/`transactions` is deleted;
+// there is no "old item's data" to clean up in Update Mode, only a
+// reauthorized connection to the one that already exists.
+//
+// Defensive case: if Plaid ever returns a *different* item_id for a
+// relink_item_id request (not expected in Update Mode, but not something
+// to silently trust either), this does NOT attempt to merge it into the
+// existing row - it's treated as a fresh ADD instead, logged clearly, so
+// at worst a user ends up with an extra Item to notice and disconnect,
+// never a silent loss of history.
 app.post('/exchange-token', requireUser, async (req, res) => {
-  const { public_token } = req.body;
+  const { public_token, relink_item_id } = req.body;
   if (!public_token) return res.status(400).json({ error: 'Missing public_token' });
 
   try {
     const exchange = await plaidClient.itemPublicTokenExchange({ public_token });
     const { access_token, item_id } = exchange.data;
 
-    const { data: existingItem } = await supabaseAdmin
-      .from('plaid_items')
-      .select('item_id')
-      .eq('user_id', req.userId)
-      .single();
+    if (relink_item_id) {
+      const { data: existingItem, error: lookupError } = await supabaseAdmin
+        .from('plaid_items')
+        .select('id, item_id')
+        .eq('id', relink_item_id)
+        .eq('user_id', req.userId)
+        .single();
+      if (lookupError || !existingItem) {
+        return res.status(404).json({ error: 'No such linked Item for this account' });
+      }
 
-    // Re-linking mints a brand-new Plaid item with entirely new
-    // transaction_ids (Plaid Link, not "update mode" re-auth - see the
-    // cursor:null comment below). The *old* item's rows in `transactions`
-    // never get touched by transactionsSync again, so without this they'd
-    // sit there forever, double-counting spend against the freshly synced
-    // new item. This already happened once for real (48 duplicate rows,
-    // cleaned up by hand - see CLAUDE.md); deleting the old item's
-    // transactions here, atomically with the re-link, is the actual fix
-    // rather than another manual cleanup.
-    if (existingItem && existingItem.item_id !== item_id) {
-      const { error: deleteError } = await supabaseAdmin
-        .from('transactions')
-        .delete()
-        .eq('user_id', req.userId);
-      if (deleteError) throw deleteError;
+      if (existingItem.item_id === item_id) {
+        const { error } = await supabaseAdmin
+          .from('plaid_items')
+          .update({ access_token: encrypt(access_token), status: 'active' })
+          .eq('id', existingItem.id);
+        if (error) throw error;
 
-      // Real bug found by adversarial review, 2026-08-13: `accounts` had
-      // the identical staleness problem as `transactions` above (same
-      // root cause - a new Plaid item means new account_ids too), just
-      // never fixed alongside it. refreshAccountBalances only ever
-      // upserts, so without this, a re-link to a different bank/account
-      // set left the old item's account rows in place forever -
-      // GET /accounts would sum stale depository balances alongside the
-      // new ones, overstating the user's real available cash.
-      const { error: deleteAccountsError } = await supabaseAdmin
-        .from('accounts')
-        .delete()
-        .eq('user_id', req.userId);
-      if (deleteAccountsError) throw deleteAccountsError;
+        try {
+          await refreshAccountBalances(req.userId, existingItem.id, access_token);
+        } catch (err) {
+          logError('Account balance refresh failed after relink (non-fatal):', err);
+        }
+
+        return res.json({ success: true, mode: 'relink' });
+      }
+
+      console.error(
+        'Update Mode relink for plaid_items row',
+        existingItem.id,
+        'returned a different item_id than expected - treating as a new Item instead of merging.'
+      );
+    }
+
+    const itemMeta = await plaidClient.itemGet({ access_token }).catch((err) => {
+      logError('Failed to fetch institution metadata for new Item (non-fatal):', err);
+      return null;
+    });
+    const institutionId = itemMeta?.data?.item?.institution_id || null;
+    let institutionName = null;
+    if (institutionId) {
+      const inst = await plaidClient
+        .institutionsGetById({ institution_id: institutionId, country_codes: ['US'] })
+        .catch((err) => {
+          logError('Failed to fetch institution name (non-fatal):', err);
+          return null;
+        });
+      institutionName = inst?.data?.institution?.name || null;
     }
 
     // Encrypted before it ever reaches Supabase - see server/crypto.js.
-    // cursor is reset to null on every (re-)link: a cursor is scoped to
-    // the specific access_token/item it was issued for, and Plaid
-    // Link always mints a brand-new item here (this isn't Plaid's
-    // "update mode" re-auth flow, which reuses the same item). Carrying
-    // an old item's cursor into a new access_token makes transactionsSync
-    // reject it outright with "cursor not associated with access_token" -
-    // exactly the bug that broke re-linking before this fix. Explicitly
-    // listing every column (not just the changed ones) since upsert only
-    // updates columns present in the payload - see the /admin/recategorize
-    // comment in this file for why that matters.
-    const { error } = await supabaseAdmin
+    // cursor starts null: a fresh Item has no prior sync state.
+    const { data: inserted, error } = await supabaseAdmin
       .from('plaid_items')
       .upsert(
-        { user_id: req.userId, item_id, access_token: encrypt(access_token), cursor: null },
-        { onConflict: 'user_id' }
-      );
+        {
+          user_id: req.userId,
+          item_id,
+          access_token: encrypt(access_token),
+          cursor: null,
+          status: 'active',
+          institution_id: institutionId,
+          institution_name: institutionName,
+        },
+        { onConflict: 'user_id,item_id' }
+      )
+      .select('id')
+      .single();
     if (error) throw error;
 
-    // Real bug found by adversarial review, 2026-08-13: nothing here ever
-    // called refreshAccountBalances for the freshly-exchanged token -
-    // account data only ever refreshes as part of syncUserData (a manual
-    // GET /transactions or the 30-min background job), so right after a
-    // (re-)link the account list still showed whatever was cached before
-    // (stale balances, or the just-deleted rows above for a re-link,
-    // meaning an empty list) until the user separately triggered a sync.
-    // Best-effort/non-fatal, same treatment as every other post-sync step
-    // in syncUserData - a balance-fetch hiccup here must not fail the
-    // link itself, which already succeeded.
+    // Real bug found by adversarial review, 2026-08-13 (Phase 7): nothing
+    // called refreshAccountBalances for the freshly-exchanged token, so a
+    // fresh link showed no accounts until the next sync cycle. Still
+    // best-effort/non-fatal here - a balance-fetch hiccup must not fail
+    // the link itself, which already succeeded.
     try {
-      await refreshAccountBalances(req.userId, access_token);
+      await refreshAccountBalances(req.userId, inserted.id, access_token);
     } catch (err) {
       logError('Account balance refresh failed after link (non-fatal):', err);
     }
 
-    res.json({ success: true });
+    res.json({ success: true, mode: 'add' });
   } catch (err) {
     logError('Failed to link account:', err);
     res.status(500).json({ error: 'Failed to link account' });
+  }
+});
+
+// Phase 8 Step 1: disconnecting an Item is deliberately NOT the same as
+// deleting its historical data - the two are separate concepts per this
+// phase's own architecture rules. This only flips status to
+// 'disconnected' (skipping it from every future sync - see
+// syncUserData/runBackgroundSync below) and best-effort revokes the
+// token with Plaid itself (itemRemove) so Plaid stops tracking/billing
+// for it; the Item's accounts and every transaction ever synced under it
+// are left exactly as they are. Ownership-checked the same way as every
+// other per-Item route.
+app.post('/plaid-items/:id/disconnect', requireUser, async (req, res) => {
+  try {
+    const { data: item, error: lookupError } = await supabaseAdmin
+      .from('plaid_items')
+      .select('id, access_token, status')
+      .eq('id', req.params.id)
+      .eq('user_id', req.userId)
+      .single();
+    if (lookupError || !item) {
+      return res.status(404).json({ error: 'No such linked Item for this account' });
+    }
+
+    try {
+      const accessToken = decrypt(item.access_token);
+      await plaidClient.itemRemove({ access_token: accessToken });
+    } catch (err) {
+      // Non-fatal by design: an already-broken token can't be revoked
+      // with Plaid (nothing valid to revoke), and Plaid itself may
+      // already consider the Item gone. Either way, this app's own
+      // record of the disconnect below is the source of truth for
+      // whether the user still sees it as linked.
+      logError('Plaid itemRemove failed during disconnect (non-fatal):', err);
+    }
+
+    const { error } = await supabaseAdmin
+      .from('plaid_items')
+      .update({ status: 'disconnected' })
+      .eq('id', item.id);
+    if (error) throw error;
+
+    res.json({ success: true });
+  } catch (err) {
+    logError('Failed to disconnect Item:', err);
+    res.status(500).json({ error: 'Failed to disconnect Item' });
+  }
+});
+
+// Phase 8 Step 1: lets the client enumerate this user's linked Items
+// (institution name, status) - needed for Step 3's account menu to let a
+// user identify which institution they're managing/re-linking/
+// disconnecting, now that there can be more than one.
+app.get('/plaid-items', requireUser, async (req, res) => {
+  try {
+    const { data: items, error } = await supabaseAdmin
+      .from('plaid_items')
+      .select('id, institution_id, institution_name, status, created_at')
+      .eq('user_id', req.userId)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    res.json({ items: items || [] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load linked Items' });
   }
 });
 
@@ -428,47 +581,77 @@ app.post('/admin/deliver-notifications', requireUser, async (req, res) => {
 
 class NoLinkedAccountError extends Error {}
 
-// The full "bring this user's data up to date" bundle: Plaid sync,
-// then the same two best-effort passes (Gmail receipts, recurring
-// detection) that used to live inline in GET /transactions. Pulled out so
-// both the manual on-open path (GET /transactions) and the unattended
-// background job (runBackgroundSync, below) run identical logic instead of
-// two copies drifting apart over time.
+// The full "bring this user's data up to date" bundle: Plaid sync (now
+// per-Item - Phase 8 Step 1), then the same best-effort passes (Gmail
+// receipts, recurring detection, subscription audit) that used to live
+// inline in GET /transactions. Pulled out so both the manual on-open path
+// (GET /transactions) and the unattended background job (runBackgroundSync,
+// below) run identical logic instead of two copies drifting apart over
+// time.
 async function syncUserData(userId) {
-  const { data: item, error } = await supabaseAdmin
+  const { data: items, error } = await supabaseAdmin
     .from('plaid_items')
-    .select('access_token, cursor')
+    .select('id, access_token, cursor')
     .eq('user_id', userId)
-    .single();
+    .eq('status', 'active');
+  if (error) throw error;
+  if (!items || items.length === 0) throw new NoLinkedAccountError('No linked bank account');
 
-  if (error || !item) throw new NoLinkedAccountError('No linked bank account');
+  // Phase 8 Step 1: each Item is synced independently, in parallel - a
+  // decrypt failure or a Plaid-side error for one Item must never prevent
+  // another Item from syncing ("a failure syncing Bank A must not prevent
+  // Bank B from syncing successfully"). Promise.allSettled (not
+  // Promise.all) so one Item's rejection can't short-circuit the others;
+  // every per-Item failure is logged and skipped rather than thrown, same
+  // non-fatal treatment as every other best-effort step in this function.
+  // The 409 RELINK_REQUIRED path (see GET /transactions below) is only
+  // reached if literally every active Item is unreadable - a genuine
+  // partial failure (some Items fine, one broken) just means that one
+  // Item's data goes stale until the user disconnects/re-links it, not
+  // that the whole account looks broken.
+  let decryptFailures = 0;
+  const results = await Promise.allSettled(
+    items.map(async (item) => {
+      let accessToken;
+      try {
+        accessToken = decrypt(item.access_token);
+      } catch (err) {
+        if (err instanceof DecryptionError) {
+          decryptFailures += 1;
+          console.error(
+            'Stored Plaid token failed to decrypt for Item',
+            item.id,
+            '- needs re-link. Skipping this Item, syncing the user\'s other Items normally.'
+          );
+          return;
+        }
+        throw err;
+      }
 
-  const accessToken = decrypt(item.access_token);
+      // Latency fix from adversarial review, 2026-08-13 (Phase 7): balance
+      // refresh has no data dependency on the transaction sync, only the
+      // access token already decrypted above - run concurrently rather
+      // than sequentially. refreshAccountBalances catches its own failure
+      // and never rejects, so it can't affect syncTransactionsLocked via
+      // Promise.all.
+      await Promise.all([
+        syncTransactionsLocked(item.id, userId, accessToken, item.cursor),
+        refreshAccountBalances(userId, item.id, accessToken).catch((err) => {
+          logError(`Account balance refresh failed for Item ${item.id} (non-fatal):`, err);
+        }),
+      ]);
+    })
+  );
 
-  // Phase 7 Step 2: refresh cached account balances alongside the
-  // transaction sync, same cadence as everything else that stays fresh via
-  // the regular sync cycle rather than a live Plaid call on every
-  // Home-tab render. Best-effort, same treatment as the Gmail scan below -
-  // a balance-fetch hiccup must never block transactions from landing.
-  // Reuses the access token already decrypted above rather than
-  // re-fetching/re-decrypting it a second time.
-  //
-  // Latency fix from adversarial review, 2026-08-13: this used to run
-  // sequentially *after* syncTransactionsLocked resolved, even though it
-  // has no data dependency on the transaction sync - only accessToken,
-  // already available above. Run concurrently instead (the same
-  // Promise.all-for-independent-work pattern this codebase already
-  // established in pushDelivery.js for an analogous case). Error
-  // semantics are unchanged: syncTransactionsLocked's rejection still
-  // propagates out of syncUserData same as before (nothing catches it
-  // here), while refreshAccountBalances catches its own failure and never
-  // rejects, so it can't affect the other promise via Promise.all.
-  await Promise.all([
-    syncTransactionsLocked(userId, accessToken, item.cursor),
-    refreshAccountBalances(userId, accessToken).catch((err) => {
-      logError('Account balance refresh failed (non-fatal):', err);
-    }),
-  ]);
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      logError('Sync failed for one Item (non-fatal - other Items are unaffected):', result.reason);
+    }
+  }
+
+  if (decryptFailures > 0 && decryptFailures === items.length) {
+    throw new DecryptionError('All linked Items failed to decrypt - re-link required');
+  }
 
   // Best-effort: if Gmail is linked, pull in any new receipts too, so the
   // itemized view stays fresh without a separate manual step. A Gmail
@@ -980,15 +1163,22 @@ async function attachMatchedReceipts(userId, transactions) {
 // Plaid + Claude round trip, racing on the final cursor write at the end.
 // Now the second caller just awaits the first one's in-flight sync
 // instead of starting its own.
+// Phase 8 Step 1: keyed by the Item's own row id (plaid_items.id), not
+// userId - each Item has its own access token and its own sync cursor,
+// so two different Items for the same user must be able to sync
+// concurrently without falsely deduping into one lock. The *same* Item
+// triggered twice (e.g. a background tick overlapping a manual refresh)
+// still correctly dedupes, which is the actual property this lock exists
+// to guarantee.
 const activeSyncs = new Map();
 
-function syncTransactionsLocked(userId, access_token, cursor) {
-  if (activeSyncs.has(userId)) return activeSyncs.get(userId);
+function syncTransactionsLocked(itemRowId, userId, access_token, cursor) {
+  if (activeSyncs.has(itemRowId)) return activeSyncs.get(itemRowId);
 
-  const promise = syncTransactions(userId, access_token, cursor).finally(() => {
-    activeSyncs.delete(userId);
+  const promise = syncTransactions(itemRowId, userId, access_token, cursor).finally(() => {
+    activeSyncs.delete(itemRowId);
   });
-  activeSyncs.set(userId, promise);
+  activeSyncs.set(itemRowId, promise);
   return promise;
 }
 
@@ -998,7 +1188,15 @@ function syncTransactionsLocked(userId, access_token, cursor) {
 // saves the new cursor so the next call only fetches the next delta.
 // Not called directly outside this file - always go through
 // syncTransactionsLocked so concurrent callers can't race each other.
-async function syncTransactions(userId, access_token, cursor, attempt = 1) {
+// `itemRowId` scopes the cursor write to this specific Item's plaid_items
+// row; `userId` is still needed for the transaction rows themselves and
+// for the user-scoped budget/alert/notification recomputes below, which
+// are correct to run once per Item that had changes even if a user has
+// several Items - they're idempotent aggregations over all of that
+// user's transactions regardless of which Item produced them (confirmed
+// by reading budget.js/alerts.js/notificationEvents.js directly: none of
+// them reference plaid_items or assume a single Item).
+async function syncTransactions(itemRowId, userId, access_token, cursor, attempt = 1) {
   try {
     let hasMore = true;
     const added = [];
@@ -1055,7 +1253,7 @@ async function syncTransactions(userId, access_token, cursor, attempt = 1) {
     const { error: cursorError } = await supabaseAdmin
       .from('plaid_items')
       .update({ cursor: nextCursor })
-      .eq('user_id', userId);
+      .eq('id', itemRowId);
     if (cursorError) throw cursorError;
 
     // Phase 3 Step 3: keep budget_actuals current the moment transactions
@@ -1094,7 +1292,7 @@ async function syncTransactions(userId, access_token, cursor, attempt = 1) {
     const code = err.response?.data?.error_code;
     if (code === 'PRODUCT_NOT_READY' && attempt < 5) {
       await new Promise((r) => setTimeout(r, 1500));
-      return syncTransactions(userId, access_token, cursor, attempt + 1);
+      return syncTransactions(itemRowId, userId, access_token, cursor, attempt + 1);
     }
     throw err;
   }
@@ -1319,22 +1517,36 @@ async function scanForReceipts(userId, account) {
 const BACKGROUND_SYNC_INTERVAL_MS = 30 * 60 * 1000;
 
 async function runBackgroundSync() {
-  const { data: items, error } = await supabaseAdmin.from('plaid_items').select('user_id');
+  // Phase 8 Step 1: a user can now have more than one plaid_items row, so
+  // this has to dedupe to distinct users - syncUserData itself already
+  // syncs every one of a user's active Items, so calling it once per
+  // *Item* here would redundantly re-sync a user's other Items on every
+  // one of their own Item rows (quadratic for a user with N Items).
+  // Only 'active' Items are considered - a disconnected Item is
+  // deliberately excluded from every future sync, not just hidden from
+  // the UI.
+  const { data: items, error } = await supabaseAdmin
+    .from('plaid_items')
+    .select('user_id')
+    .eq('status', 'active');
   if (error) {
     logError('Background sync: failed to list linked accounts:', error);
     return;
   }
 
-  for (const { user_id } of items || []) {
+  const userIds = [...new Set((items || []).map((i) => i.user_id))];
+
+  for (const user_id of userIds) {
     try {
       await syncUserData(user_id);
     } catch (err) {
       if (err instanceof DecryptionError) {
-        // Same as the on-request path: a token stored before encryption
-        // existed can't be recovered here, the user has to re-link. Just
-        // skip and move on to the next user rather than erroring the loop.
+        // Same as the on-request path: every one of this user's active
+        // Items failed to decrypt (syncUserData already tolerates a
+        // partial failure without throwing - see there) - needs re-link.
+        // Skip and move on to the next user rather than erroring the loop.
         console.error(
-          'Background sync: stored Plaid token failed to decrypt for user',
+          'Background sync: all linked Items failed to decrypt for user',
           user_id,
           '- needs re-link.'
         );
