@@ -115,8 +115,17 @@ function groupByCategory(transactions) {
 // attempt - a combined transaction list always visible on Home - was
 // exactly the "overcrowded home screen" the user pushed back on).
 export default function Home() {
-  const { alerts, goalProgress, subscriptionAudit, accounts, plaidItems, netWorth, bankRelinkSignal } =
-    useAppData();
+  const {
+    alerts,
+    goalProgress,
+    subscriptionAudit,
+    accounts,
+    plaidItems,
+    netWorth,
+    bankRelinkSignal,
+    viewItemRequest,
+    clearViewItemRequest,
+  } = useAppData();
   const { session } = useSessionContext();
 
   // `null` is Home's own default Overview render; a specific plaid_items.id
@@ -309,15 +318,24 @@ export default function Home() {
   }
 
   const activeItems = plaidItems.filter((i) => i.status === 'active');
-  // Real fix found by /code-review (2026-08-16): a disconnected Item had no
-  // remaining reachable UI at all - its accounts/transactions are
-  // preserved server-side (per this phase's own "disconnect and
-  // delete-history are separate concepts" rule), but nothing surfaced them.
-  // Shown as its own, separate, visually distinct section below the active
-  // bubbles rather than mixed in - tapping still opens the same dedicated
-  // per-institution screen, which labels it "(Disconnected)" and frames
-  // any balance as frozen, not current.
-  const disconnectedItems = plaidItems.filter((i) => i.status !== 'active');
+
+  // Real fix found by /code-review (2026-08-16), then revised per the
+  // user's direct follow-up the same day: a disconnected Item's
+  // accounts/transactions are preserved server-side (Phase 8's own
+  // "disconnect and delete-history are separate concepts" rule) and must
+  // stay reachable somewhere - but NOT as a permanent bubble on Home's
+  // everyday glance screen (the user's explicit call: disconnect should
+  // actually remove it from view, not leave it sitting there). Reachable
+  // instead via the account menu's own per-item "View" button, which sets
+  // this shared signal - Home just needs to notice it changed and open
+  // the same dedicated per-institution screen this already has, then
+  // clear the signal so it doesn't re-fire.
+  useEffect(() => {
+    if (viewItemRequest) {
+      setViewingItemId(viewItemRequest);
+      clearViewItemRequest();
+    }
+  }, [viewItemRequest]);
 
   // Found on-device: two real bills from two different banks that happen
   // to share a merchant/amount/date (Plaid Sandbox's canned data is
@@ -576,21 +594,6 @@ export default function Home() {
                     />
                   );
                 })}
-              </View>
-            </View>
-          )}
-
-          {disconnectedItems.length > 0 && (
-            <View style={styles.accountsSection}>
-              <Text style={styles.smallText}>Disconnected - history preserved, not synced</Text>
-              <View style={styles.categoryPicker}>
-                {disconnectedItems.map((i) => (
-                  <Button
-                    key={i.id}
-                    title={`${i.institution_name || 'Linked bank'} (Disconnected)`}
-                    onPress={() => setViewingItemId(i.id)}
-                  />
-                ))}
               </View>
             </View>
           )}

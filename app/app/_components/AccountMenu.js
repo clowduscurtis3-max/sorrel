@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Modal, View, Text, Button, ActivityIndicator } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { createPlaidLinkSession } from 'react-native-plaid-link-sdk';
 import { apiFetch, apiErrorMessage, GMAIL_REDIRECT } from '../_lib/api';
@@ -70,8 +71,10 @@ function hasRealPlaidError(error) {
 // (`relinkItem`, using the specific Item's id) instead, which reconnects
 // to the *same* Item/cursor - no duplication possible by construction.
 export default function AccountMenu({ visible, onClose }) {
+  const router = useRouter();
   const { session } = useSessionContext();
-  const { signOut, refetchAccounts, notifyBankRelinked, plaidItems, refetchPlaidItems } = useAppData();
+  const { signOut, refetchAccounts, notifyBankRelinked, plaidItems, refetchPlaidItems, requestViewItem } =
+    useAppData();
 
   const [gmailEmail, setGmailEmail] = useState(null);
   const [gmailLinking, setGmailLinking] = useState(false);
@@ -400,15 +403,42 @@ export default function AccountMenu({ visible, onClose }) {
                     {item.institution_name || 'Linked bank account'}
                     {item.status !== 'active' ? ' (disconnected)' : ''}
                   </Text>
-                  {item.status === 'active' &&
-                    (actioningItemId === item.id ? (
+                  {item.status === 'active' ? (
+                    actioningItemId === item.id ? (
                       <ActivityIndicator />
                     ) : (
                       <>
                         <Button title="Re-link" onPress={() => relinkItem(item)} />
                         <Button title="Disconnect" onPress={() => disconnectItem(item)} />
                       </>
-                    ))}
+                    )
+                  ) : (
+                    // A disconnected Item can't go through Update Mode
+                    // (server/index.js's /link-token rejects it with
+                    // NEEDS_DISCONNECT_AND_ADD - the user's own explicit
+                    // decision at Phase 8 kickoff: broken/disconnected
+                    // re-link is disconnect+add, two actions, never a
+                    // silent implicit merge). "View" is the only action
+                    // here - opens its still-preserved, frozen data on
+                    // Home via the shared viewItemRequest signal, per the
+                    // user's 2026-08-16 direction that a disconnected bank
+                    // should have no permanent presence on Home itself.
+                    // Real gap found reviewing this diff: the account menu
+                    // is reachable from every tab (the "Account" button is
+                    // in every screen's header), so this also has to
+                    // navigate to Home itself - same router.push pattern
+                    // _layout.js's own notification-tap routing already
+                    // uses - or tapping View from Budget/Recurring/Goal
+                    // would close the modal and appear to do nothing.
+                    <Button
+                      title="View"
+                      onPress={() => {
+                        requestViewItem(item.id);
+                        onClose();
+                        router.push('/');
+                      }}
+                    />
+                  )}
                 </View>
               ))}
             </View>
