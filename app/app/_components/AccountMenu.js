@@ -339,7 +339,7 @@ export default function AccountMenu({ visible, onClose }) {
       await plaidSession.open();
     } catch (err) {
       console.error(err);
-      setError(err.message === 'SERVER_ERROR' ? apiErrorMessage(err) : err.message);
+      setError(apiErrorMessage(err));
       setActioningItemId(null);
     }
   }

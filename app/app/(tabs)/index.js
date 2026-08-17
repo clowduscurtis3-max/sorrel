@@ -138,6 +138,11 @@ export default function Home() {
   const [error, setError] = useState(null);
   const [reviewingTransactionId, setReviewingTransactionId] = useState(null);
   const [correctingCategory, setCorrectingCategory] = useState(false);
+  // Phase 8 Step 4: net worth history toggle - netWorth.history already
+  // arrives with `current` on the same fetch (GET /net-worth's own
+  // {current, history} shape), so this is purely a local show/hide flag,
+  // no new fetch needed.
+  const [showNetWorthHistory, setShowNetWorthHistory] = useState(false);
 
   async function fetchTransactions({ silent = false, suppressErrorBanner = false } = {}) {
     if (!silent) setLoadingTransactions(true);
@@ -304,6 +309,15 @@ export default function Home() {
   }
 
   const activeItems = plaidItems.filter((i) => i.status === 'active');
+  // Real fix found by /code-review (2026-08-16): a disconnected Item had no
+  // remaining reachable UI at all - its accounts/transactions are
+  // preserved server-side (per this phase's own "disconnect and
+  // delete-history are separate concepts" rule), but nothing surfaced them.
+  // Shown as its own, separate, visually distinct section below the active
+  // bubbles rather than mixed in - tapping still opens the same dedicated
+  // per-institution screen, which labels it "(Disconnected)" and frames
+  // any balance as frozen, not current.
+  const disconnectedItems = plaidItems.filter((i) => i.status !== 'active');
 
   // Found on-device: two real bills from two different banks that happen
   // to share a merchant/amount/date (Plaid Sandbox's canned data is
@@ -421,7 +435,15 @@ export default function Home() {
         // appears anywhere in this app outside the Recurring tab's own
         // audit view.
         (() => {
-          const item = activeItems.find((i) => i.id === viewingItemId);
+          // Real fix found by /code-review (2026-08-16): this looked up
+          // activeItems only, so a disconnected Item's own name never
+          // resolved here even once one became reachable via the
+          // "Disconnected" section below - `plaidItems` (every Item
+          // regardless of status) is the correct source for this screen,
+          // since it needs to display disconnected Items too, not just
+          // active ones.
+          const item = plaidItems.find((i) => i.id === viewingItemId);
+          const isDisconnected = item?.status !== 'active';
           const bankAccounts = (accounts?.accounts || []).filter(
             (a) => a.plaid_item_id === viewingItemId
           );
@@ -438,8 +460,18 @@ export default function Home() {
               </View>
 
               <View style={styles.header}>
-                <Text style={styles.rowName}>{item?.institution_name || 'Linked bank'}</Text>
-                {total != null && <Text style={styles.rowAmount}>${total.toFixed(2)} available</Text>}
+                <Text style={styles.rowName}>
+                  {item?.institution_name || 'Linked bank'}
+                  {isDisconnected ? ' (Disconnected)' : ''}
+                </Text>
+                {isDisconnected ? (
+                  <Text style={styles.smallText}>
+                    This bank is disconnected - balances shown are frozen from when it was last
+                    synced, not current.
+                  </Text>
+                ) : (
+                  total != null && <Text style={styles.rowAmount}>${total.toFixed(2)} available</Text>
+                )}
               </View>
 
               <SectionList
@@ -512,19 +544,20 @@ export default function Home() {
               <View style={styles.categoryPicker}>
                 <Button title={`Upcoming bills (${upcomingBills.length})`} disabled />
               </View>
-              {upcomingBills.map((bill) => (
-                <View key={bill.id} style={styles.alertRow}>
-                  <Text style={styles.alertText}>
-                    {bill.display_name} — ${bill.typical_amount.toFixed(2)}
-                  </Text>
-                  <Text style={styles.smallText}>
-                    {formatDueText(bill.next_expected_date)}
-                    {institutionForAccount(bill.account_id)
-                      ? ` · ${institutionForAccount(bill.account_id)}`
-                      : ''}
-                  </Text>
-                </View>
-              ))}
+              {upcomingBills.map((bill) => {
+                const institution = institutionForAccount(bill.account_id);
+                return (
+                  <View key={bill.id} style={styles.alertRow}>
+                    <Text style={styles.alertText}>
+                      {bill.display_name} — ${bill.typical_amount.toFixed(2)}
+                    </Text>
+                    <Text style={styles.smallText}>
+                      {formatDueText(bill.next_expected_date)}
+                      {institution ? ` · ${institution}` : ''}
+                    </Text>
+                  </View>
+                );
+              })}
             </View>
           )}
 
@@ -547,6 +580,21 @@ export default function Home() {
             </View>
           )}
 
+          {disconnectedItems.length > 0 && (
+            <View style={styles.accountsSection}>
+              <Text style={styles.smallText}>Disconnected - history preserved, not synced</Text>
+              <View style={styles.categoryPicker}>
+                {disconnectedItems.map((i) => (
+                  <Button
+                    key={i.id}
+                    title={`${i.institution_name || 'Linked bank'} (Disconnected)`}
+                    onPress={() => setViewingItemId(i.id)}
+                  />
+                ))}
+              </View>
+            </View>
+          )}
+
           {netWorth?.current && (
             <View style={styles.accountsSection}>
               <Text style={styles.rowName}>Net worth</Text>
@@ -555,6 +603,29 @@ export default function Home() {
                 ${netWorth.current.assets.toFixed(2)} assets — ${netWorth.current.liabilities.toFixed(2)}{' '}
                 liabilities
               </Text>
+              {netWorth.history.length > 0 && (
+                <View style={styles.categoryPicker}>
+                  <Button
+                    title={showNetWorthHistory ? 'Hide history' : 'View history'}
+                    onPress={() => setShowNetWorthHistory((v) => !v)}
+                  />
+                </View>
+              )}
+              {showNetWorthHistory &&
+                netWorth.history
+                  .slice()
+                  .reverse()
+                  .map((snap) => (
+                    <View key={snap.snapshot_date} style={styles.budgetRow}>
+                      <View style={styles.rowMain}>
+                        <Text style={styles.rowName}>{snap.snapshot_date}</Text>
+                        <Text style={styles.rowAmount}>${snap.net_worth.toFixed(2)}</Text>
+                      </View>
+                      <Text style={styles.smallText}>
+                        ${snap.assets.toFixed(2)} assets — ${snap.liabilities.toFixed(2)} liabilities
+                      </Text>
+                    </View>
+                  ))}
             </View>
           )}
         </ScrollView>

@@ -195,12 +195,21 @@ async function detectRecurringTransactions(userId) {
   // Series that existed before this run but weren't produced this time
   // (subscription cancelled, pattern broke) are stale - delete them rather
   // than leaving orphaned rows with no tagged transactions pointing at them.
+  // .notIn() (not the old hand-built .not('merchant_key', 'in', "(...)")
+  // string) - merchant_key now embeds Plaid's raw account_id (see seriesKey
+  // above), which isn't normalized the way normalizeMerchantKey's output
+  // is, so hand-quoting every value into a filter string was fragile if an
+  // account_id ever contained a reserved character (comma/quote/etc.).
+  // .notIn() takes a plain array and applies postgrest-js's own reserved-
+  // character escaping (only quoting values that actually need it), the
+  // same dedicated-method pattern this codebase already uses for .in()
+  // elsewhere (accounts.js, netWorth.js) rather than a hand-built string.
   const currentKeys = seriesRows.map((r) => r.merchant_key);
   const { error: staleError } = await supabaseAdmin
     .from('recurring_series')
     .delete()
     .eq('user_id', userId)
-    .not('merchant_key', 'in', `(${currentKeys.map((k) => `"${k}"`).join(',')})`);
+    .notIn('merchant_key', currentKeys);
   if (staleError) throw staleError;
 
   let taggedCount = 0;

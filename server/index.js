@@ -1175,7 +1175,6 @@ async function attachAccountInfo(userId, transactions) {
     .select('plaid_account_id, plaid_item_id')
     .eq('user_id', userId);
   if (error) throw error;
-  if (!accounts || accounts.length === 0) return transactions;
 
   const { data: items, error: itemsError } = await supabaseAdmin
     .from('plaid_items')
@@ -1184,17 +1183,39 @@ async function attachAccountInfo(userId, transactions) {
   if (itemsError) throw itemsError;
 
   const itemNameById = Object.fromEntries((items || []).map((i) => [i.id, i.institution_name]));
-  const itemIdByAccountId = Object.fromEntries(accounts.map((a) => [a.plaid_account_id, a.plaid_item_id]));
+  const itemIdByAccountId = Object.fromEntries((accounts || []).map((a) => [a.plaid_account_id, a.plaid_item_id]));
 
-  return transactions.map((t) => {
+  let unresolvedCount = 0;
+  const result = transactions.map((t) => {
     const plaidItemId = itemIdByAccountId[t.account_id];
-    if (!plaidItemId) return t;
+    if (!plaidItemId) {
+      unresolvedCount++;
+      return t;
+    }
     return {
       ...t,
       plaid_item_id: plaidItemId,
       institution_name: itemNameById[plaidItemId] || null,
     };
   });
+
+  // Real, if transient, gap found by /code-review (2026-08-16): a
+  // transaction whose account_id has no matching `accounts` row yet (e.g.
+  // this same request's own refreshAccountBalances call, run moments ago
+  // inside syncUserData, transiently failed for that Item) gets no
+  // plaid_item_id - and since Home's per-bank drill-down filters strictly
+  // on plaid_item_id, such a transaction is invisible until a later
+  // request's refreshAccountBalances succeeds and backfills `accounts`.
+  // Self-healing (every /transactions call re-attempts the refresh), but
+  // was previously silent - logged now so a persistent case is
+  // diagnosable instead of just "some transactions seem to be missing."
+  if (unresolvedCount > 0) {
+    console.warn(
+      `attachAccountInfo: ${unresolvedCount} transaction(s) for user ${userId} have no matching account row yet - will resolve once account balances next refresh successfully.`
+    );
+  }
+
+  return result;
 }
 
 // Matches any unmatched receipts against this transaction list, persists

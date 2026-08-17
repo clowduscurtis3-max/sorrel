@@ -108,9 +108,18 @@ function detectIntraSeriesCreep(series, transactions) {
 // bias over a false accusation, consistent with this feature's
 // inform-never-accuse role).
 function detectForkedPriceJumps(activeById, lapsedById) {
+  // Grouped by merchant root AND account - merchant_key's root alone
+  // (stripped of both the amount suffix and the account_id Phase 8 Step 3
+  // added) can't tell two different banks' same-named merchants apart, and
+  // without the account boundary this would correlate an active series at
+  // one bank with an unrelated lapsed series at a different bank as if one
+  // "jumped" into the other - a fabricated financial claim. Same merchant
+  // at two different accounts is exactly the case recurring.js's own
+  // account-scoped detection (the fix right above this file's own history)
+  // exists to keep separate.
   const byRoot = new Map();
   for (const s of [...activeById.values(), ...lapsedById.values()]) {
-    const root = s.merchant_key.split(':')[0];
+    const root = `${s.merchant_key.split(':')[0]} ${s.account_id}`;
     if (!byRoot.has(root)) byRoot.set(root, []);
     byRoot.get(root).push(s);
   }

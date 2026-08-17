@@ -50,10 +50,32 @@ function computeAccountsSummary({ accounts }) {
     // (joined by the caller, getAccountsSummary, below) rather than
     // guessed/omitted.
     institution_name: a.institution_name ?? null,
+    // Real fix found by /code-review (2026-08-16): getAccountsSummary used
+    // to exclude a disconnected Item's accounts entirely, which correctly
+    // kept a frozen balance from looking "current" but also made that
+    // Item's accounts/transactions permanently unreachable in the app -
+    // contradicting this phase's own "disconnect and delete-history are
+    // separate concepts" rule. Now every account is returned regardless of
+    // its Item's status, tagged with `item_status` so the client can still
+    // label a disconnected one clearly (frozen, not current) instead of
+    // hiding it outright. Defaults to 'active' for any caller that doesn't
+    // tag it (there are none today, but this keeps the function's existing
+    // behavior for a hypothetical future caller that doesn't care about
+    // Item status).
+    item_status: a.item_status || 'active',
   }));
 
+  // Only an active Item's depository accounts count toward the "spendable
+  // cash" total - a disconnected Item's cached balance is frozen at
+  // whatever it was when last synced (same reasoning netWorth.js's
+  // getEligibleAccountsForUser already applies), so including it here
+  // would present stale data as current even though the account itself is
+  // still listed individually above.
   const depositoryWithBalance = list.filter(
-    (a) => a.type === 'depository' && (a.available_balance != null || a.current_balance != null)
+    (a) =>
+      a.type === 'depository' &&
+      a.item_status === 'active' &&
+      (a.available_balance != null || a.current_balance != null)
   );
   const totalDepositoryAvailable =
     depositoryWithBalance.length > 0
@@ -168,41 +190,36 @@ async function refreshAccountBalances(userId, plaidItemId, accessToken) {
 // Plain read + compute, same shape as getGoalProgress - no live Plaid call
 // at request time, just reads whatever refreshAccountBalances last cached.
 //
-// Found while building Step 3's disconnect UI: this used to select every
-// account for the user with no regard for its Item's status, unlike
-// netWorth.js's getEligibleAccountsForUser (Step 2), which deliberately
-// excludes disconnected Items - their cached balance is frozen at whatever
-// it was when last synced, never refreshed again, so showing it as current
-// would be misleading. Disconnect had no reachable UI until this step, so
-// the gap was latent; now that a user can actually disconnect an Item, this
-// needed the same filter net worth already has, for the same reason.
+// Returns every account regardless of its Item's status (active or
+// disconnected) - see computeAccountsSummary's own `item_status` comment
+// above for why this changed from an active-only filter: excluding a
+// disconnected Item's accounts entirely made its history permanently
+// unreachable in the app, not just kept its stale balance from looking
+// current (which is still handled correctly, just at the total-sum level
+// now instead of by hiding the accounts).
 async function getAccountsSummary(userId) {
-  const { data: activeItems, error: itemsError } = await supabaseAdmin
+  const { data: items, error: itemsError } = await supabaseAdmin
     .from('plaid_items')
-    .select('id, institution_name')
-    .eq('user_id', userId)
-    .eq('status', 'active');
+    .select('id, institution_name, status')
+    .eq('user_id', userId);
   if (itemsError) throw itemsError;
+  if (!items || items.length === 0) return computeAccountsSummary({ accounts: [] });
 
-  const activeItemIds = (activeItems || []).map((i) => i.id);
-  if (activeItemIds.length === 0) return computeAccountsSummary({ accounts: [] });
-
-  const institutionNameByItemId = Object.fromEntries(
-    (activeItems || []).map((i) => [i.id, i.institution_name])
-  );
+  const institutionNameByItemId = Object.fromEntries(items.map((i) => [i.id, i.institution_name]));
+  const statusByItemId = Object.fromEntries(items.map((i) => [i.id, i.status]));
 
   const { data: accounts, error } = await supabaseAdmin
     .from('accounts')
     .select(
       'id, plaid_item_id, plaid_account_id, name, official_name, type, subtype, mask, current_balance, available_balance, iso_currency_code'
     )
-    .eq('user_id', userId)
-    .in('plaid_item_id', activeItemIds);
+    .eq('user_id', userId);
   if (error) throw error;
 
   const withInstitution = (accounts || []).map((a) => ({
     ...a,
     institution_name: institutionNameByItemId[a.plaid_item_id] || null,
+    item_status: statusByItemId[a.plaid_item_id] || 'active',
   }));
 
   return computeAccountsSummary({ accounts: withInstitution });
