@@ -47,14 +47,56 @@ function computeNetWorth({ accounts }) {
   let assets = 0;
   let liabilities = 0;
   let excludedAccountCount = 0;
+  const seenPersistentIds = new Set();
 
   for (const a of accounts || []) {
+    // Found by code review: a persistent_account_id collision (the same
+    // real-world account linked under two different Items - see the
+    // duplicate-detection signal accounts.js already establishes) was
+    // being summed once per Item, double-counting one real balance. Only
+    // the first occurrence of a given non-null persistent_account_id
+    // counts; later ones are excluded (counted, not silently dropped)
+    // rather than inflating net worth.
+    if (a.persistent_account_id) {
+      if (seenPersistentIds.has(a.persistent_account_id)) {
+        excludedAccountCount += 1;
+        continue;
+      }
+      seenPersistentIds.add(a.persistent_account_id);
+    }
+
+    // Found by code review: this app has no currency-conversion logic
+    // anywhere, so a non-USD account can't be honestly summed alongside
+    // USD ones without fabricating an exchange rate - excluded like an
+    // unrecognized type, same "never fabricate" discipline as everywhere
+    // else in this codebase. Missing iso_currency_code is treated as USD
+    // (matches accounts.js's own `|| 'USD'` convention), not excluded for
+    // simply not having the field set.
+    const currency = a.iso_currency_code || 'USD';
+    if (currency !== 'USD') {
+      excludedAccountCount += 1;
+      continue;
+    }
+
     if (ASSET_TYPES.has(a.type)) {
       const value = a.available_balance ?? a.current_balance;
-      if (typeof value === 'number' && Number.isFinite(value)) assets += value;
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        assets += value;
+      } else {
+        // Found by code review: a *recognized* type with a missing/
+        // non-finite balance was silently contributing $0 with no trace -
+        // excluded_account_count previously only fired for unrecognized
+        // types. Now visible either way, matching this counter's own
+        // stated purpose.
+        excludedAccountCount += 1;
+      }
     } else if (LIABILITY_TYPES.has(a.type)) {
       const value = a.current_balance;
-      if (typeof value === 'number' && Number.isFinite(value)) liabilities += value;
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        liabilities += value;
+      } else {
+        excludedAccountCount += 1;
+      }
     } else {
       excludedAccountCount += 1;
     }
@@ -100,22 +142,33 @@ function getLocalDateString(timezone, now) {
 // ids) rather than a single joined/filtered query - no precedent for a
 // join-filter in this codebase, and this keeps the same plain,
 // predictable query style already used everywhere else here.
-async function getEligibleAccountsForUser(userId) {
-  const { data: activeItems, error: itemsError } = await supabaseAdmin
-    .from('plaid_items')
-    .select('id')
-    .eq('user_id', userId)
-    .eq('status', 'active');
-  if (itemsError) throw itemsError;
-
-  const activeItemIds = (activeItems || []).map((i) => i.id);
-  if (activeItemIds.length === 0) return [];
+//
+// `activeItemIds`, if provided, skips the first query - found by code
+// review: the daily snapshot job (runNetWorthSnapshots, index.js) already
+// fetches every active Item once to build its per-user batch, then this
+// function fetched the exact same thing again for every single user in
+// that batch. The optional parameter lets the batch job pass through what
+// it already has; the single-user callers (POST /admin/generate-net-worth-
+// snapshot, or any direct call with none given) still query for it
+// themselves, so behavior is unchanged for them.
+async function getEligibleAccountsForUser(userId, activeItemIds) {
+  let itemIds = activeItemIds;
+  if (!itemIds) {
+    const { data: activeItems, error: itemsError } = await supabaseAdmin
+      .from('plaid_items')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('status', 'active');
+    if (itemsError) throw itemsError;
+    itemIds = (activeItems || []).map((i) => i.id);
+  }
+  if (itemIds.length === 0) return [];
 
   const { data: accounts, error: accountsError } = await supabaseAdmin
     .from('accounts')
-    .select('type, current_balance, available_balance')
+    .select('type, current_balance, available_balance, persistent_account_id, iso_currency_code')
     .eq('user_id', userId)
-    .in('plaid_item_id', activeItemIds);
+    .in('plaid_item_id', itemIds);
   if (accountsError) throw accountsError;
 
   return accounts || [];
@@ -134,8 +187,8 @@ async function getEligibleAccountsForUser(userId) {
 // disconnected) gets no snapshot written at all, not a fabricated $0 one
 // - "we have no account data for this user today" and "this user's real
 // net worth is $0" are different, and only one of them is true here.
-async function generateNetWorthSnapshot(userId, now = new Date()) {
-  const accounts = await getEligibleAccountsForUser(userId);
+async function generateNetWorthSnapshot(userId, now = new Date(), activeItemIds) {
+  const accounts = await getEligibleAccountsForUser(userId, activeItemIds);
   if (accounts.length === 0) return null;
 
   // Found by code review: excluded_account_count was computed by
@@ -181,6 +234,16 @@ async function generateNetWorthSnapshot(userId, now = new Date()) {
   return { snapshot_date: snapshotDate, assets, liabilities, net_worth, excluded_account_count };
 }
 
+// Roughly a year of daily snapshots - generous for any trend view this
+// app is likely to build, bounded rather than unbounded. Found by code
+// review: this used to fetch and serialize a user's *entire* snapshot
+// history on every single GET /net-worth call just to read the latest
+// row as `current` - fine at day one, but grows linearly and forever as
+// an account ages (a two-year user would mean ~730 rows returned on every
+// call for a value that only ever needs the newest one plus a bounded
+// trend window).
+const NET_WORTH_HISTORY_LIMIT = 365;
+
 // Plain read, same shape as getGoalProgress/getAccountsSummary - no live
 // recomputation here, snapshots (written only by generateNetWorthSnapshot,
 // above) are the sole source of truth for both "current" and "history",
@@ -188,15 +251,21 @@ async function generateNetWorthSnapshot(userId, now = new Date()) {
 // scratch on every request" instruction. `current` is simply the most
 // recent snapshot; both are `null`/empty, not fabricated, if none exist
 // yet (a brand-new user, or one whose daily job hasn't run yet).
-async function getNetWorthSummary(userId) {
+async function getNetWorthSummary(userId, { historyLimit = NET_WORTH_HISTORY_LIMIT } = {}) {
   const { data: snapshots, error } = await supabaseAdmin
     .from('net_worth_snapshots')
     .select('snapshot_date, assets, liabilities, net_worth, excluded_account_count')
     .eq('user_id', userId)
-    .order('snapshot_date', { ascending: true });
+    .order('snapshot_date', { ascending: false })
+    .limit(historyLimit);
   if (error) throw error;
 
-  const history = snapshots || [];
+  // Fetched newest-first so `.limit()` bounds the *right* end (the most
+  // recent snapshots, not the oldest) - reversed back to chronological
+  // order to match this function's existing, already-relied-upon contract
+  // (history[history.length - 1] is `current`; app/index.js's history UI,
+  // whenever built, will expect oldest-to-newest same as before).
+  const history = (snapshots || []).slice().reverse();
   const current = history.length > 0 ? history[history.length - 1] : null;
 
   return { current, history };

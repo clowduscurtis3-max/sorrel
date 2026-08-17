@@ -157,7 +157,11 @@ test("#10 an 'other'/unrecognized account type is excluded from both sums, not g
   assert.equal(result.excluded_account_count, 1);
 });
 
-test('#11 a missing/non-finite balance is treated as no contribution, never NaN', () => {
+test('#11 a missing/non-finite balance is treated as no contribution, never NaN, and is now counted as excluded', () => {
+  // Found by code review: a *recognized* type (depository/credit here)
+  // with a missing balance used to contribute $0 silently, with
+  // excluded_account_count only ever firing for unrecognized types -
+  // fixed to count these too, same visibility this counter exists for.
   const result = computeNetWorth({
     accounts: [
       account({ type: 'depository', current_balance: null, available_balance: null }),
@@ -168,6 +172,49 @@ test('#11 a missing/non-finite balance is treated as no contribution, never NaN'
   assert.equal(result.liabilities, 0);
   assert.equal(result.net_worth, 0);
   assert.ok(!Number.isNaN(result.net_worth));
+  assert.equal(result.excluded_account_count, 2);
+});
+
+test('#13 the same real-world account linked under two Items (matching persistent_account_id) is only counted once', () => {
+  const result = computeNetWorth({
+    accounts: [
+      account({ type: 'depository', available_balance: 5000, persistent_account_id: 'real-acct-1' }),
+      account({ type: 'depository', available_balance: 5000, persistent_account_id: 'real-acct-1' }),
+      account({ type: 'depository', available_balance: 300 }), // no signal - not deduped
+    ],
+  });
+  assert.equal(result.assets, 5300);
+  assert.equal(result.excluded_account_count, 1);
+});
+
+test('#14 accounts with no persistent_account_id are never deduped against each other', () => {
+  const result = computeNetWorth({
+    accounts: [
+      account({ type: 'depository', available_balance: 100 }),
+      account({ type: 'depository', available_balance: 100 }),
+    ],
+  });
+  assert.equal(result.assets, 200);
+  assert.equal(result.excluded_account_count, 0);
+});
+
+test('#15 a non-USD account is excluded rather than summed as if it were USD', () => {
+  const result = computeNetWorth({
+    accounts: [
+      account({ type: 'depository', available_balance: 5000, iso_currency_code: 'USD' }),
+      account({ type: 'depository', available_balance: 3000, iso_currency_code: 'CAD' }),
+    ],
+  });
+  assert.equal(result.assets, 5000);
+  assert.equal(result.excluded_account_count, 1);
+});
+
+test('#16 a missing iso_currency_code is treated as USD, not excluded', () => {
+  const result = computeNetWorth({
+    accounts: [account({ type: 'depository', available_balance: 5000 })],
+  });
+  assert.equal(result.assets, 5000);
+  assert.equal(result.excluded_account_count, 0);
 });
 
 test('#12 an empty account list reports a clean zero, not an error', () => {

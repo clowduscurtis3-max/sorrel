@@ -1680,17 +1680,30 @@ setTimeout(runNotificationDelivery, 90 * 1000);
 const NET_WORTH_SNAPSHOT_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 async function runNetWorthSnapshots() {
-  const { data: items, error } = await supabaseAdmin.from('plaid_items').select('user_id').eq('status', 'active');
+  // Found by code review: this used to select only user_id, then
+  // generateNetWorthSnapshot -> getEligibleAccountsForUser re-queried
+  // plaid_items for that same user's active Items all over again - two
+  // round trips per user per cycle for data already sitting right here.
+  // Selecting `id` too and grouping client-side lets each user's already-
+  // fetched active-Item ids be passed straight through instead.
+  const { data: items, error } = await supabaseAdmin
+    .from('plaid_items')
+    .select('id, user_id')
+    .eq('status', 'active');
   if (error) {
     logError('Net worth snapshot job: failed to list linked accounts:', error);
     return;
   }
 
-  const userIds = [...new Set((items || []).map((i) => i.user_id))];
+  const itemIdsByUser = new Map();
+  for (const item of items || []) {
+    if (!itemIdsByUser.has(item.user_id)) itemIdsByUser.set(item.user_id, []);
+    itemIdsByUser.get(item.user_id).push(item.id);
+  }
 
-  for (const userId of userIds) {
+  for (const [userId, activeItemIds] of itemIdsByUser) {
     try {
-      await generateNetWorthSnapshot(userId);
+      await generateNetWorthSnapshot(userId, new Date(), activeItemIds);
     } catch (err) {
       logError(`Net worth snapshot failed for user ${userId}:`, err);
     }
