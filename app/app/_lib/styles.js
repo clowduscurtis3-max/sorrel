@@ -221,4 +221,19 @@ export const styles = StyleSheet.create({
     flex: 1,
     paddingBottom: 72,
   },
+  // Added for the account-menu modal (Phase 8 Step 3) - one block per
+  // linked Plaid Item (institution name/status + its own Re-link/
+  // Disconnect buttons), same plain-stacked-Button convention as every
+  // other list in this app rather than a side-by-side row.
+  plaidItemsSection: {
+    gap: 12,
+    paddingHorizontal: 24,
+    paddingBottom: 16,
+  },
+  plaidItemBlock: {
+    gap: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#ddd',
+    paddingBottom: 10,
+  },
 });

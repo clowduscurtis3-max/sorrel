@@ -1,0 +1,28 @@
+-- Found tap-testing Phase 8 Step 3 on-device: recurring transaction
+-- detection (Phase 3 Step 1, server/recurring.js) has always clustered
+-- transactions by merchant+amount alone, with no awareness of which
+-- account they came from - reasonable when every user had exactly one
+-- linked bank, but a real gap once multi-item support (Phase 8 Step 1)
+-- made more than one possible. Confirmed live: Plaid Sandbox's canned data
+-- is identical across institutions (the same merchant/amount/date at both
+-- linked test banks), which blended into one cluster with duplicate
+-- same-day entries and broke the "every gap is consistent" check entirely
+-- - zero series detected account-wide. But the underlying gap is general,
+-- not Sandbox-specific: two real accounts each independently paying the
+-- same merchant (e.g. Netflix on two different cards) would previously
+-- have been merged into one incorrect blended series regardless of
+-- whether their dates happened to collide.
+--
+-- account_id (Plaid's raw account_id string, matching transactions.
+-- account_id's own type/convention - not a FK to accounts.id, same
+-- non-FK-text pattern transactions.account_id itself already uses) makes
+-- the account boundary a real, queryable column instead of only implicit
+-- in an opaque merchant_key fingerprint. Nullable only so existing rows
+-- (all pre-dating this fix, from when only one account existed per user)
+-- don't need a backfill guess at which of a user's several current
+-- accounts an old series belonged to - the very next detection run
+-- rebuilds every row from scratch anyway (detectRecurringTransactions
+-- deletes and re-upserts wholesale on every call), so a transient null on
+-- old rows is harmless and self-corrects immediately.
+alter table recurring_series
+  add column if not exists account_id text;

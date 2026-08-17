@@ -217,6 +217,7 @@ function computeSubscriptionAudit({ series = [], transactionsBySeriesId = new Ma
       lapsedById.set(s.id, s);
       lapsed.push({
         id: s.id,
+        account_id: s.account_id,
         display_name: s.display_name,
         category: s.category,
         interval: s.interval,
@@ -230,6 +231,16 @@ function computeSubscriptionAudit({ series = [], transactionsBySeriesId = new Ma
       const monthlyEquivalent = round2(s.typical_amount * (AVG_DAYS_PER_MONTH / interval.days));
       const entry = {
         id: s.id,
+        // Phase 8 Step 3/4 follow-up: found on-device - two real, distinct
+        // bills from two different banks that happen to share a merchant/
+        // amount/date (Plaid Sandbox's canned data is identical across
+        // institutions, see recurring.js's own account-scoping fix) looked
+        // exactly like a duplicated row with nothing to tell them apart.
+        // Exposed here (not resolved to an institution name - this module
+        // has no access to plaid_items/accounts, same reasoning
+        // attachAccountInfo's own comment gives) so the client can resolve
+        // it the same way it already does for transactions.
+        account_id: s.account_id,
         display_name: s.display_name,
         category: s.category,
         interval: s.interval,
@@ -273,7 +284,7 @@ async function getSubscriptionAudit(userId, { now } = {}) {
   const { data: series, error: seriesError } = await supabaseAdmin
     .from('recurring_series')
     .select(
-      'id, merchant_key, display_name, category, interval, typical_amount, last_seen_date, next_expected_date, occurrence_count'
+      'id, merchant_key, account_id, display_name, category, interval, typical_amount, last_seen_date, next_expected_date, occurrence_count'
     )
     .eq('user_id', userId);
   if (seriesError) throw seriesError;

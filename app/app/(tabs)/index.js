@@ -4,6 +4,7 @@ import {
   Text,
   Button,
   ActivityIndicator,
+  ScrollView,
   SectionList,
   RefreshControl,
   AppState,
@@ -14,26 +15,41 @@ import { createPlaidLinkSession } from 'react-native-plaid-link-sdk';
 import { apiFetch, apiErrorMessage, formatAmount, CATEGORIES } from '../_lib/api';
 import { styles } from '../_lib/styles';
 import { useAppData } from '../_lib/appData';
+import { useSessionContext } from '../_lib/session';
 
-// Phase 6 Step 3: display text for a subscription-audit price-change
-// finding, ported verbatim from old app/App.js - hand-matched to the exact
-// same wording server/subscriptionAuditEvents.js already uses for the push-
-// notification body, so what a notification says and what this screen shows
-// for the same finding read the same rather than drifting apart.
-function formatPriceChangeText(item) {
-  const pct = Math.round(item.increase_ratio * 100);
-  return (
-    `${item.display_name} is now $${item.current_amount.toFixed(2)} / ${item.interval}, up from ` +
-    `$${item.previous_amount.toFixed(2)} — about ${pct}% more.`
-  );
+// Phase 8 Step 4 follow-up: a plain time-of-day greeting, requested
+// directly by the user - goalProgress's own message (already shown right
+// below this) reads as a status line, not a greeting, so it wasn't filling
+// this role on its own. First name only, from whatever Google Sign-In
+// populated (session.user.user_metadata.full_name) - falls back to no name
+// at all rather than guessing one from the email address, same "never
+// fabricate" instinct as everywhere else in this app.
+function greeting(session) {
+  const hour = new Date().getHours();
+  const timeOfDay = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
+  const firstName = session?.user?.user_metadata?.full_name?.split(' ')[0];
+  return firstName ? `Good ${timeOfDay}, ${firstName}.` : `Good ${timeOfDay}.`;
 }
 
-function formatLapsedText(item) {
-  const days = item.days_overdue;
-  return (
-    `${item.display_name} hasn't charged in ${days} day${days === 1 ? '' : 's'}, past its usual ` +
-    `${item.interval} schedule — worth checking if it's still something you want.`
-  );
+// Phase 8 Step 4 follow-up: the user's explicit "say maybe a week from the
+// current date" - a bill due 6 weeks out isn't "upcoming" in the
+// at-a-glance sense this section is for.
+const UPCOMING_BILLS_WINDOW_DAYS = 7;
+
+// Plain "in N days" framing for the Upcoming bills glance section -
+// date-only math (matches this app's existing timezone-consistent-date
+// convention elsewhere, e.g. alerts.js/subscriptionAudit.js's own
+// UTC-calendar-date comparisons) so a bill due "today" doesn't flicker
+// between today/tomorrow depending on time of day.
+function formatDueText(nextExpectedDate) {
+  const due = new Date(`${nextExpectedDate}T00:00:00Z`);
+  const today = new Date();
+  const todayUtc = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+  const days = Math.round((due - todayUtc) / (1000 * 60 * 60 * 24));
+  if (days < 0) return 'expected recently';
+  if (days === 0) return 'due today';
+  if (days === 1) return 'due tomorrow';
+  return `due in ${days} days`;
 }
 
 // Groups transactions into the shape SectionList expects, one section per
@@ -79,11 +95,40 @@ function groupByCategory(transactions) {
 
 // Phase 7 Step 1 sub-step 1.3: the real Home tab, replacing the sub-step
 // 1.2 placeholder. Owns transactions/linked/linking locally (per the Phase
-// 7 plan - not shared with other tabs), reads alerts/goalProgress/
-// subscriptionAudit/accounts from AppDataProvider (fetched proactively
-// there, shared with other tabs that need them later).
+// 7 plan - not shared with other tabs), reads alerts/goalProgress/accounts
+// from AppDataProvider (fetched proactively there, shared with other tabs
+// that need them later).
+//
+// Phase 8 Step 3/4 follow-up (2026-08-16, per the user's explicit,
+// repeated direction): Home is deliberately a lightweight glance screen
+// now - greeting, budget alerts, upcoming bills, one bubble per linked bank
+// ("institution name: total balance available", nothing more), and net
+// worth. The subscription-audit findings (price-creep, price-jump, lapsed)
+// were tried here and then explicitly removed - those belong solely on the
+// Recurring tab. Upcoming bills is different in kind (a "what's due soon"
+// glance, not a subscription-audit finding) and was explicitly asked back
+// after being removed alongside that block by mistake. Individual account
+// balances and every transaction (including recurring-tagged ones) only
+// ever appear after tapping into a specific bank's bubble, which swaps the
+// whole screen to a dedicated view for that bank - never squeezed onto
+// Home itself, which is the whole point of this restructure (an earlier
+// attempt - a combined transaction list always visible on Home - was
+// exactly the "overcrowded home screen" the user pushed back on).
 export default function Home() {
-  const { alerts, goalProgress, subscriptionAudit, accounts, bankRelinkSignal } = useAppData();
+  const { alerts, goalProgress, subscriptionAudit, accounts, plaidItems, netWorth, bankRelinkSignal } =
+    useAppData();
+  const { session } = useSessionContext();
+
+  // `null` is Home's own default Overview render; a specific plaid_items.id
+  // swaps the whole screen to that bank's dedicated view. Deliberately a
+  // local state swap, not a real Expo Router route - see AccountMenu.js's
+  // own extensive comment for the three real, compounding bugs a
+  // router-route-based overlay caused earlier in this project (useAppData()
+  // throwing outside its provider, a GO_BACK error, and an unresolved
+  // infinite navigation loop). A plain conditional render, still fully
+  // inside AppDataProvider's tree, sidesteps that entire bug class - there's
+  // no new route for the root gate or a cold app-launch to ever resolve to.
+  const [viewingItemId, setViewingItemId] = useState(null);
 
   const [transactions, setTransactions] = useState([]);
   const [loadingTransactions, setLoadingTransactions] = useState(false);
@@ -243,19 +288,112 @@ export default function Home() {
     }
   }
 
+  // One bank's own depository total - shared by each Home bubble's label
+  // and the dedicated institution screen's own header, same
+  // depository-only/null-when-nothing convention as computeAccountsSummary
+  // itself (server/accounts.js) rather than a second, drifting definition.
+  function bankTotal(itemId) {
+    const depository = (accounts?.accounts || []).filter(
+      (a) =>
+        a.plaid_item_id === itemId &&
+        a.type === 'depository' &&
+        (a.available_balance != null || a.current_balance != null)
+    );
+    if (depository.length === 0) return null;
+    return depository.reduce((sum, a) => sum + (a.available_balance ?? a.current_balance), 0);
+  }
+
+  const activeItems = plaidItems.filter((i) => i.status === 'active');
+
+  // Found on-device: two real bills from two different banks that happen
+  // to share a merchant/amount/date (Plaid Sandbox's canned data is
+  // identical across institutions) read as an apparent duplicate with
+  // nothing to tell them apart. Resolves a recurring-bill entry's
+  // account_id (server/subscriptionAudit.js) to an institution name the
+  // same way attachAccountInfo does server-side for transactions - via
+  // accounts.accounts, which already carries both plaid_account_id and
+  // institution_name.
+  function institutionForAccount(accountId) {
+    return accounts?.accounts.find((a) => a.plaid_account_id === accountId)?.institution_name || null;
+  }
+
+  // "Upcoming bills" at a glance, requested directly by the user - uses
+  // subscriptionAudit.recurring_bills as-is (already fetched, already
+  // carries next_expected_date/typical_amount per bill from
+  // recurring_series - Bills & Utilities specifically, e.g. mortgage/
+  // phone/electricity, not Subscriptions like Netflix, which stays on the
+  // Recurring tab only). Windowed to the next 7 days
+  // (UPCOMING_BILLS_WINDOW_DAYS) per the user's explicit request, rather
+  // than an arbitrary top-N regardless of how far out it is.
+  const upcomingBills = subscriptionAudit
+    ? (() => {
+        const now = new Date();
+        const todayUtc = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+        return [...subscriptionAudit.recurring_bills]
+          .filter((bill) => {
+            const days = Math.round(
+              (new Date(`${bill.next_expected_date}T00:00:00Z`) - todayUtc) / (1000 * 60 * 60 * 24)
+            );
+            return days <= UPCOMING_BILLS_WINDOW_DAYS;
+          })
+          .sort((a, b) => new Date(a.next_expected_date) - new Date(b.next_expected_date));
+      })()
+    : [];
+
+  // Shared between both branches below - a transaction row, including the
+  // "needs review" category-correction flow (the one thing every
+  // transaction list in this app has always supported). Only rendered
+  // inside the dedicated institution screen now that Home itself never
+  // shows any transactions.
+  function renderTransactionRow({ item }) {
+    return (
+      <View style={styles.row}>
+        <View style={styles.rowMain}>
+          <Text style={styles.rowName}>{item.name}</Text>
+          <Text style={styles.rowAmount}>{formatAmount(item.amount)}</Text>
+        </View>
+
+        {item.isRecurring && (
+          <Text style={styles.recurringTag}>Recurring · {item.recurringInterval}</Text>
+        )}
+
+        {item.needsReview &&
+          (reviewingTransactionId === item.transactionId ? (
+            correctingCategory ? (
+              <ActivityIndicator />
+            ) : (
+              <View style={styles.categoryPicker}>
+                {CATEGORIES.map((c) => (
+                  <Button key={c} title={c} onPress={() => correctCategory(item.transactionId, c)} />
+                ))}
+                <Button title="Cancel" onPress={() => setReviewingTransactionId(null)} />
+              </View>
+            )
+          ) : (
+            <View style={styles.reviewRow}>
+              <Text style={styles.reviewText}>
+                We couldn't confidently categorize this purchase. Help us out by choosing the
+                correct category. We'll use your feedback to improve future matches.
+              </Text>
+              <Button
+                title="Choose category"
+                onPress={() => setReviewingTransactionId(item.transactionId)}
+              />
+            </View>
+          ))}
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
-      {goalProgress && (
-        <View style={styles.goalProgressSection}>
-          <Text style={styles.smallText}>{goalProgress.message}</Text>
-        </View>
-      )}
+      <View style={styles.goalProgressSection}>
+        <Text style={styles.rowName}>{greeting(session)}</Text>
+      </View>
 
-      {/* This one stays fixed (not part of the scrolling header below) -
-          a 409 from fetchTransactions (bank connection needs re-linking)
-          sets both `error` and `linked: false`, and the "not linked" empty
-          state below has no SectionList to carry a header on at all - this
-          message would never be reachable if it only lived there. */}
+      {/* Stays fixed regardless of which branch below is showing - a 409
+          from fetchTransactions (bank connection needs re-linking) can
+          happen no matter which view is open. */}
       {error && (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>{error}</Text>
@@ -275,142 +413,151 @@ export default function Home() {
             <Button title="Link bank account" onPress={linkBankAccount} />
           )}
         </View>
-      ) : (
-        <SectionList
-          style={styles.list}
-          sections={groupByCategory(transactions)}
-          keyExtractor={(item) => item.key}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-          // Account balances, overspend alerts, and subscription-audit
-          // findings all live here now instead of as fixed content above
-          // the list - with a real linked account (12 balance rows plus a
-          // long alert, in the case that surfaced this) that fixed content
-          // alone could fill the whole screen with nothing below it
-          // scrollable, making the actual transaction list unreachable
-          // (found on-device, 2026-08-12). Bundling them into the list's
-          // own header means everything scrolls together as one list
-          // instead of nesting a second scrollable region inside
-          // `SectionList` (a VirtualizedList) - RN explicitly warns against
-          // nesting a VirtualizedList inside a plain ScrollView with the
-          // same orientation, so a wrapping ScrollView was not an option.
-          ListHeaderComponent={
+      ) : viewingItemId !== null ? (
+        // ---- Dedicated per-institution screen ----
+        // A full screen swap, not an overlay on top of Home, per the
+        // user's explicit "separate screen... back arrow" request. This is
+        // now the only place any transaction (recurring-tagged or not)
+        // appears anywhere in this app outside the Recurring tab's own
+        // audit view.
+        (() => {
+          const item = activeItems.find((i) => i.id === viewingItemId);
+          const bankAccounts = (accounts?.accounts || []).filter(
+            (a) => a.plaid_item_id === viewingItemId
+          );
+          const bankTransactions = transactions.filter((t) => t.plaid_item_id === viewingItemId);
+          const total = bankTotal(viewingItemId);
+
+          return (
             <>
-              {accounts && accounts.accounts.length > 0 && (
-                <View style={styles.accountsSection}>
-                  {accounts.accounts.map((a) => {
-                    const balance = a.available_balance ?? a.current_balance;
-                    return (
-                      <View key={a.id} style={styles.rowMain}>
-                        <Text style={styles.rowName}>
-                          {a.name}
-                          {a.mask ? ` ···${a.mask}` : ''}
-                        </Text>
-                        <Text style={styles.rowAmount}>
-                          {balance != null ? `$${balance.toFixed(2)}` : '—'}
-                        </Text>
-                      </View>
-                    );
-                  })}
-                  {accounts.total_depository_available != null && (
-                    <Text style={styles.smallText}>
-                      ${accounts.total_depository_available.toFixed(2)} total available
-                    </Text>
-                  )}
+              <View style={styles.topBar}>
+                <View>
+                  <Button title="← Back" onPress={() => setViewingItemId(null)} />
                 </View>
-              )}
-
-              {alerts.length > 0 && (
-                <View style={styles.alertsSection}>
-                  {alerts.map((a) => (
-                    <View key={a.category} style={styles.alertRow}>
-                      <Text style={styles.alertText}>{a.message}</Text>
-                      {a.suggested_action && (
-                        <Text style={styles.smallText}>{a.suggested_action}</Text>
-                      )}
-                    </View>
-                  ))}
-                </View>
-              )}
-
-              {/* Phase 6 Step 3: subscription-audit findings (price creep,
-                  price jumps, lapsed subscriptions) - shown unprompted,
-                  same "red flags surfaced on their own" treatment as the
-                  overspend alerts above. The full per-subscription list
-                  lives on the Recurring tab (sub-step 1.5). */}
-              {subscriptionAudit &&
-                (subscriptionAudit.gradual_increases.length > 0 ||
-                  subscriptionAudit.price_jumps.length > 0 ||
-                  subscriptionAudit.lapsed.length > 0) && (
-                  <View style={styles.alertsSection}>
-                    {subscriptionAudit.gradual_increases.map((item) => (
-                      <View key={`creep-${item.series_id}`} style={styles.alertRow}>
-                        <Text style={styles.alertText}>{formatPriceChangeText(item)}</Text>
-                      </View>
-                    ))}
-                    {subscriptionAudit.price_jumps.map((item) => (
-                      <View
-                        key={`jump-${item.previous_series_id}-${item.current_series_id}`}
-                        style={styles.alertRow}
-                      >
-                        <Text style={styles.alertText}>{formatPriceChangeText(item)}</Text>
-                      </View>
-                    ))}
-                    {subscriptionAudit.lapsed.map((item) => (
-                      <View key={`lapsed-${item.id}`} style={styles.alertRow}>
-                        <Text style={styles.alertText}>{formatLapsedText(item)}</Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
-            </>
-          }
-          renderSectionHeader={({ section: { title } }) => (
-            <Text style={styles.sectionHeader}>{title}</Text>
-          )}
-          renderItem={({ item }) => (
-            <View style={styles.row}>
-              <View style={styles.rowMain}>
-                <Text style={styles.rowName}>{item.name}</Text>
-                <Text style={styles.rowAmount}>{formatAmount(item.amount)}</Text>
+                <View />
               </View>
 
-              {item.isRecurring && (
-                <Text style={styles.recurringTag}>Recurring · {item.recurringInterval}</Text>
-              )}
+              <View style={styles.header}>
+                <Text style={styles.rowName}>{item?.institution_name || 'Linked bank'}</Text>
+                {total != null && <Text style={styles.rowAmount}>${total.toFixed(2)} available</Text>}
+              </View>
 
-              {item.needsReview &&
-                (reviewingTransactionId === item.transactionId ? (
-                  correctingCategory ? (
-                    <ActivityIndicator />
-                  ) : (
-                    <View style={styles.categoryPicker}>
-                      {CATEGORIES.map((c) => (
-                        <Button
-                          key={c}
-                          title={c}
-                          onPress={() => correctCategory(item.transactionId, c)}
-                        />
-                      ))}
-                      <Button title="Cancel" onPress={() => setReviewingTransactionId(null)} />
+              <SectionList
+                style={styles.list}
+                sections={groupByCategory(bankTransactions)}
+                keyExtractor={(item) => item.key}
+                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+                ListHeaderComponent={
+                  bankAccounts.length > 0 && (
+                    <View style={styles.accountsSection}>
+                      {bankAccounts.map((a) => {
+                        const balance = a.available_balance ?? a.current_balance;
+                        return (
+                          <View key={a.id} style={styles.rowMain}>
+                            <Text style={styles.rowName}>
+                              {a.name}
+                              {a.mask ? ` ···${a.mask}` : ''}
+                            </Text>
+                            <Text style={styles.rowAmount}>
+                              {balance != null ? `$${balance.toFixed(2)}` : '—'}
+                            </Text>
+                          </View>
+                        );
+                      })}
                     </View>
                   )
-                ) : (
-                  <View style={styles.reviewRow}>
-                    <Text style={styles.reviewText}>
-                      We couldn't confidently categorize this purchase. Help us out by
-                      choosing the correct category. We'll use your feedback to improve
-                      future matches.
-                    </Text>
-                    <Button
-                      title="Choose category"
-                      onPress={() => setReviewingTransactionId(item.transactionId)}
-                    />
-                  </View>
-                ))}
+                }
+                renderSectionHeader={({ section: { title } }) => (
+                  <Text style={styles.sectionHeader}>{title}</Text>
+                )}
+                renderItem={renderTransactionRow}
+                ListEmptyComponent={<Text style={styles.text}>No transactions yet.</Text>}
+              />
+            </>
+          );
+        })()
+      ) : (
+        // ---- Home / Overview (default) ----
+        // Deliberately short and bounded (a handful of alerts + one bubble
+        // per bank + net worth) - a plain ScrollView is correct here, not a
+        // SectionList; there is no long transaction feed on this screen
+        // anymore for a nested-VirtualizedList concern to even apply to.
+        <ScrollView style={styles.list}>
+          {goalProgress && (
+            <View style={styles.goalProgressSection}>
+              <Text style={styles.smallText}>{goalProgress.message}</Text>
             </View>
           )}
-          ListEmptyComponent={<Text style={styles.text}>No transactions yet.</Text>}
-        />
+
+          {alerts.length > 0 && (
+            <View style={styles.alertsSection}>
+              {alerts.map((a) => (
+                <View key={a.category} style={styles.alertRow}>
+                  <Text style={styles.alertText}>{a.message}</Text>
+                  {a.suggested_action && <Text style={styles.smallText}>{a.suggested_action}</Text>}
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* Upcoming bills - Bills & Utilities specifically (mortgage/
+              phone/electricity-style), not Subscriptions (Netflix-style,
+              shown on the Recurring tab only). A non-interactive header
+              bubble (same visual chip language as the bank bubbles below,
+              just not tappable) followed by the list itself, each row
+              tagged with its bank so two real, distinct bills sharing a
+              merchant/amount don't read as a duplicate. */}
+          {upcomingBills.length > 0 && (
+            <View style={styles.alertsSection}>
+              <View style={styles.categoryPicker}>
+                <Button title={`Upcoming bills (${upcomingBills.length})`} disabled />
+              </View>
+              {upcomingBills.map((bill) => (
+                <View key={bill.id} style={styles.alertRow}>
+                  <Text style={styles.alertText}>
+                    {bill.display_name} — ${bill.typical_amount.toFixed(2)}
+                  </Text>
+                  <Text style={styles.smallText}>
+                    {formatDueText(bill.next_expected_date)}
+                    {institutionForAccount(bill.account_id)
+                      ? ` · ${institutionForAccount(bill.account_id)}`
+                      : ''}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {activeItems.length > 0 && (
+            <View style={styles.accountsSection}>
+              <View style={styles.categoryPicker}>
+                {activeItems.map((i) => {
+                  const total = bankTotal(i.id);
+                  return (
+                    <Button
+                      key={i.id}
+                      title={`${i.institution_name || 'Linked bank'}: ${
+                        total != null ? `$${total.toFixed(2)}` : '—'
+                      }`}
+                      onPress={() => setViewingItemId(i.id)}
+                    />
+                  );
+                })}
+              </View>
+            </View>
+          )}
+
+          {netWorth?.current && (
+            <View style={styles.accountsSection}>
+              <Text style={styles.rowName}>Net worth</Text>
+              <Text style={styles.rowAmount}>${netWorth.current.net_worth.toFixed(2)}</Text>
+              <Text style={styles.smallText}>
+                ${netWorth.current.assets.toFixed(2)} assets — ${netWorth.current.liabilities.toFixed(2)}{' '}
+                liabilities
+              </Text>
+            </View>
+          )}
+        </ScrollView>
       )}
       <StatusBar style="auto" />
     </View>

@@ -763,7 +763,8 @@ app.get('/transactions', requireUser, async (req, res) => {
 
     const enriched = await attachMatchedReceipts(req.userId, transactions);
     const withRecurring = await attachRecurringInfo(req.userId, enriched);
-    res.json({ transactions: withRecurring });
+    const withAccountInfo = await attachAccountInfo(req.userId, withRecurring);
+    res.json({ transactions: withAccountInfo });
   } catch (err) {
     if (err instanceof NoLinkedAccountError) {
       return res.status(404).json({ error: 'No linked bank account' });
@@ -1154,6 +1155,44 @@ async function attachRecurringInfo(userId, transactions) {
       is_recurring: true,
       recurring_interval: s.interval,
       recurring_next_expected_date: s.next_expected_date,
+    };
+  });
+}
+
+// Phase 8 Step 3 follow-up: found tap-testing multi-item support on-device
+// - once a second Item existed, nothing anywhere told the two apart. A
+// transaction's own `account_id` is Plaid's raw account_id string (see
+// where transactions are inserted below), not this app's `accounts.id` -
+// there's no direct schema link from a transaction to which Item it came
+// from (Phase 8 Step 1 deliberately didn't add one - "don't unnecessarily
+// propagate Item identity" past the accounts layer). This joins through
+// accounts.plaid_account_id purely for display, same one-time read-only
+// join shape as attachRecurringInfo below - nothing is persisted, and
+// budget/alert/goal logic (which never needed Item identity) is untouched.
+async function attachAccountInfo(userId, transactions) {
+  const { data: accounts, error } = await supabaseAdmin
+    .from('accounts')
+    .select('plaid_account_id, plaid_item_id')
+    .eq('user_id', userId);
+  if (error) throw error;
+  if (!accounts || accounts.length === 0) return transactions;
+
+  const { data: items, error: itemsError } = await supabaseAdmin
+    .from('plaid_items')
+    .select('id, institution_name')
+    .eq('user_id', userId);
+  if (itemsError) throw itemsError;
+
+  const itemNameById = Object.fromEntries((items || []).map((i) => [i.id, i.institution_name]));
+  const itemIdByAccountId = Object.fromEntries(accounts.map((a) => [a.plaid_account_id, a.plaid_item_id]));
+
+  return transactions.map((t) => {
+    const plaidItemId = itemIdByAccountId[t.account_id];
+    if (!plaidItemId) return t;
+    return {
+      ...t,
+      plaid_item_id: plaidItemId,
+      institution_name: itemNameById[plaidItemId] || null,
     };
   });
 }

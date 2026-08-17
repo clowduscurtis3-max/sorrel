@@ -67,6 +67,16 @@ export function AppDataProvider({ children }) {
   const [goalProgress, setGoalProgress] = useState(null);
   const [subscriptionAudit, setSubscriptionAudit] = useState(null);
   const [accounts, setAccounts] = useState(null);
+  // Phase 8 Step 3 follow-up: moved here from being AccountMenu-local state
+  // - Home's new Overview/per-bank filter needs the same linked-Item list
+  // AccountMenu already fetched for its own Re-link/Disconnect rows, so this
+  // is now shared the same way accounts/alerts/etc. already are, rather than
+  // two screens independently fetching GET /plaid-items.
+  const [plaidItems, setPlaidItems] = useState([]);
+  // Phase 8 Step 4: GET /net-worth's own shape verbatim - {current, history}
+  // - current is null until the daily snapshot job has run at least once for
+  // this user, never fabricated as $0 in the meantime (see netWorth.js).
+  const [netWorth, setNetWorth] = useState(null);
 
   // Real bug found by adversarial review, 2026-08-13: re-linking a bank
   // account via AccountMenu (a plain sibling <Modal>, not a router route -
@@ -143,12 +153,35 @@ export function AppDataProvider({ children }) {
     }
   }
 
+  async function fetchPlaidItems() {
+    try {
+      const res = await apiFetch('/plaid-items');
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const data = await res.json();
+      setPlaidItems(data.items || []);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function fetchNetWorth() {
+    try {
+      const res = await apiFetch('/net-worth');
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      setNetWorth(await res.json());
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   useEffect(() => {
     if (!session) return;
     fetchAlerts();
     fetchGoalProgress();
     fetchSubscriptionAudit();
     fetchAccounts();
+    fetchPlaidItems();
+    fetchNetWorth();
     registerDeviceForPushNotifications().then((token) => {
       pushTokenRef.current = token;
     });
@@ -168,6 +201,8 @@ export function AppDataProvider({ children }) {
           fetchGoalProgress();
           fetchSubscriptionAudit();
           fetchAccounts();
+          fetchPlaidItems();
+          fetchNetWorth();
         }, 1500);
       }
       appState.current = nextState;
@@ -218,10 +253,14 @@ export function AppDataProvider({ children }) {
         goalProgress,
         subscriptionAudit,
         accounts,
+        plaidItems,
+        netWorth,
         refetchAlerts: fetchAlerts,
         refetchGoalProgress: fetchGoalProgress,
         refetchSubscriptionAudit: fetchSubscriptionAudit,
         refetchAccounts: fetchAccounts,
+        refetchPlaidItems: fetchPlaidItems,
+        refetchNetWorth: fetchNetWorth,
         bankRelinkSignal,
         notifyBankRelinked,
         signOut,

@@ -102,25 +102,39 @@ function toDateOnly(d) {
 async function detectRecurringTransactions(userId) {
   const { data: transactions, error } = await supabaseAdmin
     .from('transactions')
-    .select('transaction_id, merchant_name, name, amount, date, category')
+    .select('transaction_id, account_id, merchant_name, name, amount, date, category')
     .eq('user_id', userId)
     .order('date', { ascending: true });
   if (error) throw error;
   if (!transactions || transactions.length === 0) return { seriesCount: 0, taggedCount: 0 };
 
-  const byMerchant = new Map();
+  // Found tap-testing Phase 8 Step 3 on-device: grouping by merchant alone
+  // (with no account boundary) blends two different accounts' independent
+  // charge histories into one candidate cluster - confirmed live against
+  // Plaid Sandbox's identical-across-institutions canned data, where this
+  // broke detection entirely (duplicate same-day entries failed the
+  // gap-consistency check). The gap is general, not Sandbox-specific: even
+  // with non-colliding dates, two real accounts each paying the same
+  // merchant (e.g. Netflix on two different cards) would previously have
+  // been silently merged into one incorrect series. Grouping by
+  // (merchant, account) first - same two-level shape clusterByAmount
+  // already applies for amount - fixes both failure modes: each account's
+  // pattern is detected independently, whether or not their dates happen
+  // to coincide.
+  const byMerchantAndAccount = new Map();
   for (const t of transactions) {
-    const key = normalizeMerchantKey(t.merchant_name || t.name);
-    if (!key) continue;
-    if (!byMerchant.has(key)) byMerchant.set(key, []);
-    byMerchant.get(key).push(t);
+    const merchantKey = normalizeMerchantKey(t.merchant_name || t.name);
+    if (!merchantKey) continue;
+    const key = `${merchantKey} ${t.account_id}`;
+    if (!byMerchantAndAccount.has(key)) byMerchantAndAccount.set(key, { merchantKey, accountId: t.account_id, items: [] });
+    byMerchantAndAccount.get(key).items.push(t);
   }
 
   const seriesRows = [];
   const transactionIdsBySeriesKey = new Map();
 
-  for (const [merchantKey, group] of byMerchant) {
-    for (const cluster of clusterByAmount(group)) {
+  for (const { merchantKey, accountId, items } of byMerchantAndAccount.values()) {
+    for (const cluster of clusterByAmount(items)) {
       if (cluster.items.length < MIN_OCCURRENCES) continue;
 
       const sorted = [...cluster.items].sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -130,14 +144,17 @@ async function detectRecurringTransactions(userId) {
 
       const lastSeen = dates[dates.length - 1];
       const latest = sorted[sorted.length - 1];
-      // Amount cluster is part of the key - the same merchant can have more
-      // than one legitimately distinct recurring series (e.g. a streaming
-      // service's monthly plan vs. an annual add-on).
-      const seriesKey = `${merchantKey}:${Math.round(cluster.repAmount * 100)}`;
+      // Amount cluster and account are both part of the key - the same
+      // merchant can have more than one legitimately distinct recurring
+      // series (e.g. a streaming service's monthly plan vs. an annual
+      // add-on), and now also across two different accounts paying the
+      // same merchant independently.
+      const seriesKey = `${merchantKey}:${Math.round(cluster.repAmount * 100)}:${accountId}`;
 
       seriesRows.push({
         user_id: userId,
         merchant_key: seriesKey,
+        account_id: accountId,
         display_name: latest.merchant_name || latest.name,
         category: latest.category || null,
         interval: interval.name,

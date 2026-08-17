@@ -20,6 +20,12 @@ function round2(n) {
 function computeAccountsSummary({ accounts }) {
   const list = (accounts || []).map((a) => ({
     id: a.id,
+    // Phase 8 Step 3 follow-up: exposed so the app can filter transactions
+    // (whose own account_id is this exact same Plaid string, not
+    // accounts.id) down to one specific account when its bubble is tapped -
+    // not new information exposure, since every transaction the client
+    // already receives carries this same value on itself.
+    plaid_account_id: a.plaid_account_id,
     name: a.name,
     official_name: a.official_name ?? null,
     type: a.type,
@@ -36,6 +42,14 @@ function computeAccountsSummary({ accounts }) {
     // goals/alerts stay user-scoped only, per this phase's own
     // "don't unnecessarily propagate Item identity" rule).
     plaid_item_id: a.plaid_item_id,
+    // Phase 8 Step 3 follow-up: Plaid Sandbox reuses the exact same generic
+    // account names ("Plaid Checking", "Plaid Saving", ...) across every
+    // institution, confirmed live once a second Item existed - with no
+    // institution name attached, two same-named accounts under different
+    // banks were genuinely indistinguishable on Home. Passed through here
+    // (joined by the caller, getAccountsSummary, below) rather than
+    // guessed/omitted.
+    institution_name: a.institution_name ?? null,
   }));
 
   const depositoryWithBalance = list.filter(
@@ -153,16 +167,45 @@ async function refreshAccountBalances(userId, plaidItemId, accessToken) {
 
 // Plain read + compute, same shape as getGoalProgress - no live Plaid call
 // at request time, just reads whatever refreshAccountBalances last cached.
+//
+// Found while building Step 3's disconnect UI: this used to select every
+// account for the user with no regard for its Item's status, unlike
+// netWorth.js's getEligibleAccountsForUser (Step 2), which deliberately
+// excludes disconnected Items - their cached balance is frozen at whatever
+// it was when last synced, never refreshed again, so showing it as current
+// would be misleading. Disconnect had no reachable UI until this step, so
+// the gap was latent; now that a user can actually disconnect an Item, this
+// needed the same filter net worth already has, for the same reason.
 async function getAccountsSummary(userId) {
+  const { data: activeItems, error: itemsError } = await supabaseAdmin
+    .from('plaid_items')
+    .select('id, institution_name')
+    .eq('user_id', userId)
+    .eq('status', 'active');
+  if (itemsError) throw itemsError;
+
+  const activeItemIds = (activeItems || []).map((i) => i.id);
+  if (activeItemIds.length === 0) return computeAccountsSummary({ accounts: [] });
+
+  const institutionNameByItemId = Object.fromEntries(
+    (activeItems || []).map((i) => [i.id, i.institution_name])
+  );
+
   const { data: accounts, error } = await supabaseAdmin
     .from('accounts')
     .select(
-      'id, plaid_item_id, name, official_name, type, subtype, mask, current_balance, available_balance, iso_currency_code'
+      'id, plaid_item_id, plaid_account_id, name, official_name, type, subtype, mask, current_balance, available_balance, iso_currency_code'
     )
-    .eq('user_id', userId);
+    .eq('user_id', userId)
+    .in('plaid_item_id', activeItemIds);
   if (error) throw error;
 
-  return computeAccountsSummary({ accounts: accounts || [] });
+  const withInstitution = (accounts || []).map((a) => ({
+    ...a,
+    institution_name: institutionNameByItemId[a.plaid_item_id] || null,
+  }));
+
+  return computeAccountsSummary({ accounts: withInstitution });
 }
 
 module.exports = { computeAccountsSummary, refreshAccountBalances, getAccountsSummary };
