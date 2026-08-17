@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Modal, View, Text, Button, ActivityIndicator } from 'react-native';
+import { Modal, View, Text, Button, ActivityIndicator, Alert } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { createPlaidLinkSession } from 'react-native-plaid-link-sdk';
 import { apiFetch, apiErrorMessage, GMAIL_REDIRECT } from '../_lib/api';
@@ -71,10 +70,8 @@ function hasRealPlaidError(error) {
 // (`relinkItem`, using the specific Item's id) instead, which reconnects
 // to the *same* Item/cursor - no duplication possible by construction.
 export default function AccountMenu({ visible, onClose }) {
-  const router = useRouter();
   const { session } = useSessionContext();
-  const { signOut, refetchAccounts, notifyBankRelinked, plaidItems, refetchPlaidItems, requestViewItem } =
-    useAppData();
+  const { signOut, refetchAccounts, notifyBankRelinked, plaidItems, refetchPlaidItems } = useAppData();
 
   const [gmailEmail, setGmailEmail] = useState(null);
   const [gmailLinking, setGmailLinking] = useState(false);
@@ -347,28 +344,44 @@ export default function AccountMenu({ visible, onClose }) {
     }
   }
 
-  // Disconnecting is deliberately NOT the same as deleting history (Phase
-  // 8's own architecture rule - see server/index.js's disconnect route) -
-  // this just flips the Item's status and stops it from syncing further;
-  // its accounts/transactions stay exactly as they are. No confirmation
-  // dialog, matching this app's existing convention (Sign out has none
-  // either) - and it's the less-destructive of the two real actions here,
-  // not more.
-  async function disconnectItem(item) {
-    setActioningItemId(item.id);
-    setError(null);
-    try {
-      const res = await apiFetch(`/plaid-items/${item.id}/disconnect`, { method: 'POST' });
-      if (!res.ok) throw new Error('SERVER_ERROR');
-      await refetchAccounts();
-      await refetchPlaidItems();
-      notifyBankRelinked();
-    } catch (err) {
-      console.error(err);
-      setError(apiErrorMessage(err));
-    } finally {
-      setActioningItemId(null);
-    }
+  // Real product decision, 2026-08-17, replacing the earlier soft
+  // "disconnect" model entirely: deleting a bank is a genuine, cascading
+  // delete (server/index.js's DELETE /plaid-items/:id - revokes the Plaid
+  // token, deletes this Item's transactions and accounts, recomputes
+  // budget/goal/recurring/alerts fresh). Confirmation wording deliberately
+  // doesn't say "cannot be undone" - direct user feedback: that reads as
+  // needlessly scary and isn't even fully true, since the bank can just be
+  // added back (as a fresh connection - the specific transaction history
+  // being deleted is real and won't return, but the account itself isn't
+  // gone forever).
+  async function deleteItem(item) {
+    Alert.alert(
+      'Are you sure you want to delete this account?',
+      'Deleting removes all transaction history and account balances.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setActioningItemId(item.id);
+            setError(null);
+            try {
+              const res = await apiFetch(`/plaid-items/${item.id}`, { method: 'DELETE' });
+              if (!res.ok) throw new Error('SERVER_ERROR');
+              await refetchAccounts();
+              await refetchPlaidItems();
+              notifyBankRelinked();
+            } catch (err) {
+              console.error(err);
+              setError(apiErrorMessage(err));
+            } finally {
+              setActioningItemId(null);
+            }
+          },
+        },
+      ]
+    );
   }
 
   return (
@@ -399,45 +412,14 @@ export default function AccountMenu({ visible, onClose }) {
             <View style={styles.plaidItemsSection}>
               {plaidItems.map((item) => (
                 <View key={item.id} style={styles.plaidItemBlock}>
-                  <Text style={styles.smallText}>
-                    {item.institution_name || 'Linked bank account'}
-                    {item.status !== 'active' ? ' (disconnected)' : ''}
-                  </Text>
-                  {item.status === 'active' ? (
-                    actioningItemId === item.id ? (
-                      <ActivityIndicator />
-                    ) : (
-                      <>
-                        <Button title="Re-link" onPress={() => relinkItem(item)} />
-                        <Button title="Disconnect" onPress={() => disconnectItem(item)} />
-                      </>
-                    )
+                  <Text style={styles.smallText}>{item.institution_name || 'Linked bank account'}</Text>
+                  {actioningItemId === item.id ? (
+                    <ActivityIndicator />
                   ) : (
-                    // A disconnected Item can't go through Update Mode
-                    // (server/index.js's /link-token rejects it with
-                    // NEEDS_DISCONNECT_AND_ADD - the user's own explicit
-                    // decision at Phase 8 kickoff: broken/disconnected
-                    // re-link is disconnect+add, two actions, never a
-                    // silent implicit merge). "View" is the only action
-                    // here - opens its still-preserved, frozen data on
-                    // Home via the shared viewItemRequest signal, per the
-                    // user's 2026-08-16 direction that a disconnected bank
-                    // should have no permanent presence on Home itself.
-                    // Real gap found reviewing this diff: the account menu
-                    // is reachable from every tab (the "Account" button is
-                    // in every screen's header), so this also has to
-                    // navigate to Home itself - same router.push pattern
-                    // _layout.js's own notification-tap routing already
-                    // uses - or tapping View from Budget/Recurring/Goal
-                    // would close the modal and appear to do nothing.
-                    <Button
-                      title="View"
-                      onPress={() => {
-                        requestViewItem(item.id);
-                        onClose();
-                        router.push('/');
-                      }}
-                    />
+                    <>
+                      <Button title="Re-link" onPress={() => relinkItem(item)} />
+                      <Button title="Delete" onPress={() => deleteItem(item)} />
+                    </>
                   )}
                 </View>
               ))}

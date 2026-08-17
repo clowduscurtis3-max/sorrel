@@ -331,20 +331,29 @@ app.post('/exchange-token', requireUser, async (req, res) => {
   }
 });
 
-// Phase 8 Step 1: disconnecting an Item is deliberately NOT the same as
-// deleting its historical data - the two are separate concepts per this
-// phase's own architecture rules. This only flips status to
-// 'disconnected' (skipping it from every future sync - see
-// syncUserData/runBackgroundSync below) and best-effort revokes the
-// token with Plaid itself (itemRemove) so Plaid stops tracking/billing
-// for it; the Item's accounts and every transaction ever synced under it
-// are left exactly as they are. Ownership-checked the same way as every
-// other per-Item route.
-app.post('/plaid-items/:id/disconnect', requireUser, async (req, res) => {
+// Real product decision, 2026-08-17 - replaces the original "disconnect
+// preserves history" model above (Phase 8's own "disconnect and
+// delete-history are separate concepts" rule). Direct user feedback: a
+// deleted bank should be genuinely gone, not left as a frozen, unremovable
+// entry - "they deleted it for a reason." The soft-disconnect model also
+// created a real problem in practice: re-adding the same bank after
+// disconnecting it produced a second, permanent duplicate line, since
+// there was no way to ever remove the stale disconnected one.
+//
+// This is a real cascading delete, not a status flip: revokes the Plaid
+// token, deletes this Item's transactions (deliberately, not just its
+// accounts - leaving transactions in place but orphaned would keep
+// silently feeding budget/goal/recurring numbers from a "gone" account
+// with no explanation, which is worse than the duplicate-line problem
+// this replaces), deletes its accounts (cascades automatically via the
+// accounts.plaid_item_id FK), then deletes the plaid_items row itself.
+// Every derived table is recomputed fresh afterward, same best-effort
+// sequence syncUserData already uses whenever transactions change.
+app.delete('/plaid-items/:id', requireUser, async (req, res) => {
   try {
     const { data: item, error: lookupError } = await supabaseAdmin
       .from('plaid_items')
-      .select('id, access_token, status')
+      .select('id, access_token')
       .eq('id', req.params.id)
       .eq('user_id', req.userId)
       .single();
@@ -359,21 +368,60 @@ app.post('/plaid-items/:id/disconnect', requireUser, async (req, res) => {
       // Non-fatal by design: an already-broken token can't be revoked
       // with Plaid (nothing valid to revoke), and Plaid itself may
       // already consider the Item gone. Either way, this app's own
-      // record of the disconnect below is the source of truth for
-      // whether the user still sees it as linked.
-      logError('Plaid itemRemove failed during disconnect (non-fatal):', err);
+      // deletion below is the real source of truth for whether the user
+      // still sees it as linked.
+      logError('Plaid itemRemove failed during delete (non-fatal):', err);
     }
 
-    const { error } = await supabaseAdmin
-      .from('plaid_items')
-      .update({ status: 'disconnected' })
-      .eq('id', item.id);
-    if (error) throw error;
+    const { data: accountRows, error: acctFetchError } = await supabaseAdmin
+      .from('accounts')
+      .select('plaid_account_id')
+      .eq('plaid_item_id', item.id);
+    if (acctFetchError) throw acctFetchError;
+    const accountIds = (accountRows || []).map((a) => a.plaid_account_id);
+
+    if (accountIds.length > 0) {
+      const { error: txDeleteError } = await supabaseAdmin
+        .from('transactions')
+        .delete()
+        .eq('user_id', req.userId)
+        .in('account_id', accountIds);
+      if (txDeleteError) throw txDeleteError;
+    }
+
+    const { error: deleteError } = await supabaseAdmin.from('plaid_items').delete().eq('id', item.id);
+    if (deleteError) throw deleteError;
+
+    try {
+      await recomputeBudgetActuals(req.userId);
+    } catch (err) {
+      logError('Failed to recompute budget actuals after delete (non-fatal):', err);
+    }
+    try {
+      await recomputeOverspendAlerts(req.userId);
+    } catch (err) {
+      logError('Failed to recompute overspend alerts after delete (non-fatal):', err);
+    }
+    try {
+      await detectRecurringTransactions(req.userId);
+    } catch (err) {
+      logError('Failed to recompute recurring series after delete (non-fatal):', err);
+    }
+    try {
+      await recomputeNotificationEvents(req.userId);
+    } catch (err) {
+      logError('Failed to recompute notification events after delete (non-fatal):', err);
+    }
+    try {
+      await recomputeSubscriptionAuditEvents(req.userId);
+    } catch (err) {
+      logError('Failed to recompute subscription audit events after delete (non-fatal):', err);
+    }
 
     res.json({ success: true });
   } catch (err) {
-    logError('Failed to disconnect Item:', err);
-    res.status(500).json({ error: 'Failed to disconnect Item' });
+    logError('Failed to delete Item:', err);
+    res.status(500).json({ error: 'Failed to delete Item' });
   }
 });
 
@@ -870,6 +918,7 @@ app.patch('/transactions/:transaction_id/category', requireUser, async (req, res
     }
 
     const merchantKey = normalizeMerchantKey(data[0].merchant_name || data[0].name);
+    let retroactivelyUpdated = 0;
     if (merchantKey) {
       const { error: prefError } = await supabaseAdmin
         .from('merchant_category_preferences')
@@ -886,9 +935,55 @@ app.patch('/transactions/:transaction_id/category', requireUser, async (req, res
       // and was returned to the user - failing to remember the preference
       // for next time shouldn't surface as an error on this request.
       if (prefError) console.error('Failed to save merchant preference:', prefError);
+
+      // Real gap, found by direct user feedback 2026-08-17: saving the
+      // preference above only ever affected *future* transactions from
+      // this merchant (categorizeTransactions reads it on the next sync,
+      // see categorize.js) - every already-synced transaction from the
+      // same merchant, already sitting in the list, stayed exactly as it
+      // was. Retroactively applies the correction to this user's other
+      // transactions that share the same merchant, excluding any that
+      // were already manually categorized by the user themselves - a
+      // deliberate prior manual choice for a specific transaction (e.g.
+      // one "Amazon" purchase filed under Shopping, another under
+      // Electronics on purpose) is never silently overwritten by a later
+      // correction elsewhere; only machine-categorized ones (whatever
+      // their confidence) get brought in line.
+      const { data: sameMerchant, error: sameMerchantError } = await supabaseAdmin
+        .from('transactions')
+        .select('transaction_id, merchant_name, name, category_reasoning')
+        .eq('user_id', req.userId)
+        .neq('transaction_id', req.params.transaction_id);
+      if (sameMerchantError) {
+        console.error('Failed to look up same-merchant transactions:', sameMerchantError);
+      } else {
+        const matchingIds = (sameMerchant || [])
+          .filter(
+            (t) =>
+              normalizeMerchantKey(t.merchant_name || t.name) === merchantKey &&
+              t.category_reasoning !== 'Manually categorized by user.'
+          )
+          .map((t) => t.transaction_id);
+        if (matchingIds.length > 0) {
+          const { error: retroError } = await supabaseAdmin
+            .from('transactions')
+            .update({
+              category,
+              category_confidence: 'high',
+              category_reasoning: 'Matches your manual correction for this merchant.',
+            })
+            .eq('user_id', req.userId)
+            .in('transaction_id', matchingIds);
+          if (retroError) {
+            console.error('Failed to retroactively apply merchant category correction:', retroError);
+          } else {
+            retroactivelyUpdated = matchingIds.length;
+          }
+        }
+      }
     }
 
-    res.json({ success: true });
+    res.json({ success: true, retroactively_updated: retroactivelyUpdated });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to update category' });

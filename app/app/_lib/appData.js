@@ -96,23 +96,6 @@ export function AppDataProvider({ children }) {
     setBankRelinkSignal((n) => n + 1);
   }
 
-  // A disconnected Item has no bubble on Home (per the user's explicit
-  // 2026-08-16 direction: disconnect should genuinely remove a bank from
-  // the everyday glance screen, not leave it sitting there) - but its
-  // accounts/transactions are still preserved server-side (Phase 8's own
-  // "disconnect and delete-history are separate concepts" rule), so
-  // AccountMenu needs a way to hand Home a specific item id to open its
-  // (still-local, per Phase 7's plan) `viewingItemId` state to. Not a
-  // route - same "no router-based modal" precedent as everywhere else in
-  // this file - just a shared signal, cleared once Home consumes it.
-  const [viewItemRequest, setViewItemRequest] = useState(null);
-  function requestViewItem(itemId) {
-    setViewItemRequest(itemId);
-  }
-  function clearViewItemRequest() {
-    setViewItemRequest(null);
-  }
-
   // Phase 4 Step G: held onto so signOut() can unregister this exact
   // device/token pair without re-requesting push permission a second time.
   const pushTokenRef = useRef(null);
@@ -280,9 +263,6 @@ export function AppDataProvider({ children }) {
         refetchNetWorth: fetchNetWorth,
         bankRelinkSignal,
         notifyBankRelinked,
-        viewItemRequest,
-        requestViewItem,
-        clearViewItemRequest,
         signOut,
       }}
     >

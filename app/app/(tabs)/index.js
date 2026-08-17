@@ -115,17 +115,8 @@ function groupByCategory(transactions) {
 // attempt - a combined transaction list always visible on Home - was
 // exactly the "overcrowded home screen" the user pushed back on).
 export default function Home() {
-  const {
-    alerts,
-    goalProgress,
-    subscriptionAudit,
-    accounts,
-    plaidItems,
-    netWorth,
-    bankRelinkSignal,
-    viewItemRequest,
-    clearViewItemRequest,
-  } = useAppData();
+  const { alerts, goalProgress, subscriptionAudit, accounts, plaidItems, netWorth, bankRelinkSignal } =
+    useAppData();
   const { session } = useSessionContext();
 
   // `null` is Home's own default Overview render; a specific plaid_items.id
@@ -317,26 +308,6 @@ export default function Home() {
     return depository.reduce((sum, a) => sum + (a.available_balance ?? a.current_balance), 0);
   }
 
-  const activeItems = plaidItems.filter((i) => i.status === 'active');
-
-  // Real fix found by /code-review (2026-08-16), then revised per the
-  // user's direct follow-up the same day: a disconnected Item's
-  // accounts/transactions are preserved server-side (Phase 8's own
-  // "disconnect and delete-history are separate concepts" rule) and must
-  // stay reachable somewhere - but NOT as a permanent bubble on Home's
-  // everyday glance screen (the user's explicit call: disconnect should
-  // actually remove it from view, not leave it sitting there). Reachable
-  // instead via the account menu's own per-item "View" button, which sets
-  // this shared signal - Home just needs to notice it changed and open
-  // the same dedicated per-institution screen this already has, then
-  // clear the signal so it doesn't re-fire.
-  useEffect(() => {
-    if (viewItemRequest) {
-      setViewingItemId(viewItemRequest);
-      clearViewItemRequest();
-    }
-  }, [viewItemRequest]);
-
   // Found on-device: two real bills from two different banks that happen
   // to share a merchant/amount/date (Plaid Sandbox's canned data is
   // identical across institutions) read as an apparent duplicate with
@@ -453,15 +424,7 @@ export default function Home() {
         // appears anywhere in this app outside the Recurring tab's own
         // audit view.
         (() => {
-          // Real fix found by /code-review (2026-08-16): this looked up
-          // activeItems only, so a disconnected Item's own name never
-          // resolved here even once one became reachable via the
-          // "Disconnected" section below - `plaidItems` (every Item
-          // regardless of status) is the correct source for this screen,
-          // since it needs to display disconnected Items too, not just
-          // active ones.
           const item = plaidItems.find((i) => i.id === viewingItemId);
-          const isDisconnected = item?.status !== 'active';
           const bankAccounts = (accounts?.accounts || []).filter(
             (a) => a.plaid_item_id === viewingItemId
           );
@@ -478,18 +441,8 @@ export default function Home() {
               </View>
 
               <View style={styles.header}>
-                <Text style={styles.rowName}>
-                  {item?.institution_name || 'Linked bank'}
-                  {isDisconnected ? ' (Disconnected)' : ''}
-                </Text>
-                {isDisconnected ? (
-                  <Text style={styles.smallText}>
-                    This bank is disconnected - balances shown are frozen from when it was last
-                    synced, not current.
-                  </Text>
-                ) : (
-                  total != null && <Text style={styles.rowAmount}>${total.toFixed(2)} available</Text>
-                )}
+                <Text style={styles.rowName}>{item?.institution_name || 'Linked bank'}</Text>
+                {total != null && <Text style={styles.rowAmount}>${total.toFixed(2)} available</Text>}
               </View>
 
               <SectionList
@@ -579,10 +532,10 @@ export default function Home() {
             </View>
           )}
 
-          {activeItems.length > 0 && (
+          {plaidItems.length > 0 && (
             <View style={styles.accountsSection}>
               <View style={styles.categoryPicker}>
-                {activeItems.map((i) => {
+                {plaidItems.map((i) => {
                   const total = bankTotal(i.id);
                   return (
                     <Button
