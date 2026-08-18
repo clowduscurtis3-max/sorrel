@@ -5,6 +5,7 @@ const {
   projectFinishDate,
   monthsBetween,
   AVG_DAYS_PER_MONTH,
+  MIN_DAYS_FOR_PROJECTION,
 } = require('./goalProgress');
 const { INTERVAL_DAYS } = require('./recurring');
 const { upcomingObligations, nextExpectedIncome } = require('./recurringSchedule');
@@ -872,16 +873,217 @@ function compareBuyNowVsWait({ context, scenario }) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Phase 9 Step 1: findMaxComfortableAmount / projectAffordableDate
+//
+// Both reuse evaluateScenario/projectFinishDate rather than defining a
+// second notion of "comfortable" or a second savings-rate formula - see the
+// Phase 9 section of CLAUDE.md for the full monotonicity argument these
+// rely on. Neither function receives, guesses, or is allowed to invent a
+// real-world item price; the only amounts either ever touches are ones the
+// caller already supplied or ones this module derives purely from the
+// user's own financial data.
+// ---------------------------------------------------------------------------
+
+const CENTS_PER_DOLLAR = 100;
+
+function toCents(dollars) {
+  return Math.round(dollars * CENTS_PER_DOLLAR);
+}
+
+function fromCents(cents) {
+  return cents / CENTS_PER_DOLLAR;
+}
+
+// Purely a bug-detection safety valve, not a product ceiling: doubling 1
+// cent this many times passes 10^15 dollars, several orders of magnitude
+// past anything a real evaluateScenario input could ever need to reach
+// given the monotonicity proof above (every dimension that's actually
+// available forces non-comfortable status at a finite, real-data-derived
+// amount). Tripping this means an engine invariant broke, not that a real
+// user's number was too big - see the thrown error below.
+const MAX_COMFORTABLE_SEARCH_DOUBLINGS = 60;
+
+// Answers "what is the largest one-time amount that stays 'comfortable',
+// per the existing scenario engine, right now?" - by binary-searching
+// evaluateScenario's own status, never by re-deriving affordability
+// independently. Deliberately takes no item type, category price
+// assumption, or guessed amount - `category`/`date`/`recurrence` describe
+// the *shape* of the hypothetical purchase (same as evaluateScenario's own
+// inputs minus amount), never its price.
+//
+// Search is done entirely in integer cents to avoid accumulating float
+// error across repeated halving; only the boundary call into
+// evaluateScenario converts to a dollar amount, since that's the unit the
+// rest of the engine already uses everywhere.
+function findMaxComfortableAmount({ context, category = null, date = null, recurrence = 'once' }) {
+  const evaluateAt = (cents) =>
+    evaluateScenario({
+      context,
+      scenario: { amount: fromCents(cents), category, date, recurrence },
+    });
+
+  // Smallest real unit of currency this app can evaluate - evaluateScenario
+  // itself rejects amount <= 0, so this is also the floor of what "some
+  // positive amount is comfortable" can mean.
+  const probe = evaluateAt(1);
+
+  if (probe.confidence === 'low') {
+    return {
+      available: false,
+      reason: 'insufficient_data',
+      detail:
+        'Not enough income, budget, or goal data is available yet to say what would be comfortable.',
+    };
+  }
+
+  if (probe.status !== 'comfortable') {
+    // Explicit, not inferred: even the smallest representable purchase
+    // ($0.01) isn't comfortable right now, so the honest answer is zero,
+    // never a negative number and never null standing in for zero.
+    return {
+      available: true,
+      max_comfortable_amount_cents: 0,
+      max_comfortable_amount: 0,
+      category,
+      date: probe.scenario.date,
+      recurrence,
+      detail: 'No positive amount is currently comfortable.',
+    };
+  }
+
+  let loCents = 1; // known comfortable
+  let hiCents = 1;
+  let iterations = 0;
+  let hiResult = probe;
+
+  while (hiResult.status === 'comfortable') {
+    iterations += 1;
+    if (iterations > MAX_COMFORTABLE_SEARCH_DOUBLINGS) {
+      throw new Error(
+        'findMaxComfortableAmount: no non-comfortable amount found within the safety search ' +
+          'bound - this indicates a monotonicity invariant was violated, not a real financial ' +
+          'result (see MAX_COMFORTABLE_SEARCH_DOUBLINGS).'
+      );
+    }
+    loCents = hiCents;
+    hiCents *= 2;
+    hiResult = evaluateAt(hiCents);
+  }
+
+  while (hiCents - loCents > 1) {
+    const midCents = loCents + Math.floor((hiCents - loCents) / 2);
+    const midResult = evaluateAt(midCents);
+    if (midResult.status === 'comfortable') {
+      loCents = midCents;
+    } else {
+      hiCents = midCents;
+    }
+  }
+
+  return {
+    available: true,
+    max_comfortable_amount_cents: loCents,
+    max_comfortable_amount: fromCents(loCents),
+    category,
+    date: probe.scenario.date,
+    recurrence,
+    // The actual engine result at the boundary amount, included so a caller
+    // never has to re-derive "why is this the limit" - it's the same
+    // object evaluateScenario would return for a real check at this amount.
+    boundary_result: evaluateAt(loCents),
+  };
+}
+
+// Answers "given a real target amount, when would the user's own observed
+// saving rate reach it?" - reuses projectFinishDate (goalProgress.js)
+// verbatim rather than a second date-projection formula, and only ever
+// projects from data this app actually has: net-saved-since-goal and the
+// pace derived from it, the same numbers computeGoalImpact/
+// computeGoalProgress already use and the user already sees on the Goal
+// tab. targetAmount must be supplied by the caller (already validated
+// upstream, per Phase 9 Step 2's amount guardrail) - this function never
+// estimates it.
+//
+// No goal set means no anchored, real observed-rate baseline exists
+// anywhere in this app - returning insufficient_data here is the honest
+// answer, not a reason to invent a since-date that was never asked for.
+function projectAffordableDate({ context, targetAmount }) {
+  if (typeof targetAmount !== 'number' || !Number.isFinite(targetAmount) || targetAmount <= 0) {
+    throw new ScenarioValidationError('targetAmount must be a finite number greater than zero');
+  }
+  const target = round2(targetAmount);
+  const { goal, goalCreatedAt, netSavedSinceGoal, now } = context;
+
+  if (!goal) {
+    return {
+      available: false,
+      reason: 'no_goal',
+      detail: 'No goal is set, so there is no observed saving rate to project from.',
+    };
+  }
+
+  const saved = round2(netSavedSinceGoal);
+
+  if (saved >= target) {
+    return {
+      available: true,
+      status: 'already_affordable',
+      target_amount: target,
+      saved_amount: saved,
+      detail: 'This is already within what has been saved so far.',
+    };
+  }
+
+  const daysElapsed = Math.max(1, Math.floor((now - goalCreatedAt) / MS_PER_DAY));
+  // Same guard computeGoalProgress uses before trusting a rate at all - a
+  // few early transactions shouldn't be enough to swing a projection.
+  if (daysElapsed < MIN_DAYS_FOR_PROJECTION || saved <= 0) {
+    return {
+      available: false,
+      reason: 'insufficient_history',
+      detail: 'Not enough observed saving history yet to project a rate.',
+    };
+  }
+
+  const monthsElapsed = monthsBetween(goalCreatedAt, now);
+  const monthlyPace = saved / monthsElapsed; // > 0, guaranteed by the checks above
+
+  const projectedDate = projectFinishDate({ saved, target, monthlyPace, now });
+  const projectedDateStr = toDateOnlyOrNull(projectedDate);
+
+  if (!projectedDateStr) {
+    return {
+      available: false,
+      reason: 'no_projectable_date',
+      detail: 'The observed saving rate does not support a realistic projected date for this amount.',
+    };
+  }
+
+  return {
+    available: true,
+    status: 'projected',
+    target_amount: target,
+    saved_amount: saved,
+    monthly_pace: round2(monthlyPace),
+    projected_date: projectedDateStr,
+    days_from_now: daysBetween(toDateOnly(now), projectedDateStr),
+  };
+}
+
 module.exports = {
   evaluateScenario,
   compareScenarios,
   compareBuyNowVsWait,
   normalizeScenario,
   monthlyEquivalent,
+  findMaxComfortableAmount,
+  projectAffordableDate,
   ScenarioValidationError,
   MATERIAL_BUDGET_SHARE,
   MATERIAL_GOAL_DELAY_DAYS,
   NEAR_TERM_PRESSURE_RATIO,
   PRESSURE_RATIO_PERCENT_DISPLAY_CAP,
+  MAX_COMFORTABLE_SEARCH_DOUBLINGS,
   STATUS_LABELS,
 };
