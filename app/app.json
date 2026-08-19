@@ -40,7 +40,14 @@
         }
       ],
       "expo-router",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow Pocket Accountant to use your microphone to ask about a purchase by voice."
+        }
+      ],
+      "expo-asset"
     ],
     "extra": {
       "eas": {

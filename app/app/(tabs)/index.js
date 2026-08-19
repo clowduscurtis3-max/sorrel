@@ -16,6 +16,7 @@ import { apiFetch, apiErrorMessage, formatAmount, CATEGORIES } from '../_lib/api
 import { styles } from '../_lib/styles';
 import { useAppData } from '../_lib/appData';
 import { useSessionContext } from '../_lib/session';
+import AffordabilityQuery from '../_components/AffordabilityQuery';
 
 // Phase 8 Step 4 follow-up: a plain time-of-day greeting, requested
 // directly by the user - goalProgress's own message (already shown right
@@ -486,6 +487,11 @@ export default function Home() {
         // SectionList; there is no long transaction feed on this screen
         // anymore for a nested-VirtualizedList concern to even apply to.
         <ScrollView style={styles.list}>
+          {/* Phase 9 Step 4: the ambient affordability entry point - leads
+              the Overview screen per the brief's "ambient" framing, above
+              the passive status sections below it. */}
+          <AffordabilityQuery />
+
           {goalProgress && (
             <View style={styles.goalProgressSection}>
               <Text style={styles.smallText}>{goalProgress.message}</Text>

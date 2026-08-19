@@ -68,7 +68,12 @@ function describeComparisonDifference({ diff, buyNowResult, waitResult }) {
 // Reused for both the single-check result and each side of the buy-now-vs-
 // wait comparison below, so the two don't drift into two slightly
 // different renderings of the same result shape.
-function ScenarioResult({ label, result }) {
+// Exported (Phase 9 Step 4): AffordabilityQuery.js reuses this unchanged
+// for the "can I afford this?" home-screen card - the brief is explicit
+// that this is meant to be "a new front door on already-built
+// infrastructure, not a new response system," so the same rendering (and
+// its explanation/tradeoffs-fallback logic) is shared, not re-implemented.
+export function ScenarioResult({ label, result }) {
   return (
     <View style={styles.reviewRow}>
       {label && <Text style={styles.smallText}>{label}</Text>}

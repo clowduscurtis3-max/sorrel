@@ -57,6 +57,7 @@ const {
   sanitizeParsedOutput,
   extractCandidateAmounts,
 } = require('./affordabilityParse');
+const { transcribeAudio } = require('./transcribe');
 
 // Where we send the system browser once Gmail linking finishes, so the app
 // (watching for this scheme via WebBrowser.openAuthSessionAsync) resolves.
@@ -1360,6 +1361,42 @@ app.post('/affordability/query', requireUser, async (req, res) => {
     res.status(500).json({ error: 'Failed to process affordability query' });
   }
 });
+
+// Phase 9 Step 4 (voice, Option B): raw audio in, transcribed text out -
+// nothing else. This is a fully separate call from /affordability/query on
+// purpose: the mobile client transcribes here first, shows the result in an
+// editable text field for the user to review/correct, and only THEN calls
+// /affordability/query with whatever text the user actually submits. There
+// is no code path anywhere that chains a transcription directly into a
+// financial answer - that's the hard "never" rule the brief calls out
+// (a misheard "50" becoming "15" must be visible and correctable before any
+// calculation happens), enforced by these being two separate endpoints
+// rather than one voice-in-answer-out route.
+//
+// express.raw (not express.json/multer) scoped to just this one route - the
+// upload is always exactly one binary file, no other form fields, so a raw
+// body is the simplest correct fit and needs no new dependency (multer)
+// this project doesn't otherwise have a reason to carry.
+const MAX_AUDIO_UPLOAD_BYTES = 5 * 1024 * 1024; // a few seconds of speech is a few hundred KB at most - generous but bounded
+app.post(
+  '/affordability/transcribe',
+  requireUser,
+  express.raw({ type: () => true, limit: MAX_AUDIO_UPLOAD_BYTES }),
+  async (req, res) => {
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      return res.status(400).json({ error: 'No audio data received' });
+    }
+    try {
+      const text = await transcribeAudio(req.body, req.headers['content-type'] || 'audio/m4a');
+      res.json({ text });
+    } catch (err) {
+      // logError, never console.error(err) or the raw audio buffer - see
+      // server/transcribe.js and safeLog.js for why.
+      logError('Failed to transcribe audio:', err);
+      res.status(500).json({ error: 'Failed to transcribe audio' });
+    }
+  }
+);
 
 // Step 4: preview only, nothing persisted - given a category and its new
 // amount, returns the AI's proposed offsetting reductions elsewhere (with
