@@ -55,6 +55,30 @@ test('multiple amounts: both a real purchase price and real context amount indep
   assert.equal(validateStatedAmountAgainstRawInput(text, 500), true);
 });
 
+test('a cents-scaled amount does not also validate its raw, unscaled digits - real guardrail-defeat bug found by /code-review (2026-08-19)', () => {
+  // "50 cents" used to also add a bare 50 candidate (the digits, read by
+  // the broadest fallback pattern with no idea a more specific pattern -
+  // cents - already claimed them under a different scale). If the model
+  // ever misclassified amount_stated as 50 instead of 0.5, this would have
+  // validated it as legitimate, since "50" genuinely appears in the text -
+  // defeating the guardrail this file exists to enforce. Fixed by having
+  // the bare-number fallback skip any match that overlaps a range a more
+  // specific pattern already claimed.
+  const centsText = 'Can I afford something for 50 cents?';
+  assert.equal(validateStatedAmountAgainstRawInput(centsText, 0.5), true);
+  assert.equal(validateStatedAmountAgainstRawInput(centsText, 50), false);
+});
+
+test('extractCandidateAmounts orders candidates by where they appear in the text, not by which regex pattern found them - real bug found by /code-review (2026-08-19)', () => {
+  // Candidates used to be collected into a Set in fixed pattern-scan order
+  // (dollar-sign patterns before the bare-number fallback, regardless of
+  // actual text position) - server/index.js's needs_amount clarification
+  // follow-up uses candidates[0] as the answer, so a message where a bare
+  // number appears before a dollar-sign amount got the wrong one first.
+  const candidates = [...extractCandidateAmounts('50, or actually $75')];
+  assert.deepEqual(candidates, [50, 75]);
+});
+
 test('vague price language produces zero traceable amounts', () => {
   const vague = [
     'Can I afford a cheap TV?',

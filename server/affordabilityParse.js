@@ -89,37 +89,80 @@ function extractText(response) {
 
 const AMOUNT_MATCH_TOLERANCE = 0.005; // half a cent, absorbs float/round2 noise
 
+// Two real bugs found by /code-review (2026-08-19), fixed together since
+// they share one root cause: candidates used to be collected into a Set in
+// fixed pattern-scan order (dollar-sign, then k-shorthand, then dollars/
+// bucks, then cents, then bare-number) rather than by where they actually
+// appear in the text, and the bare-number fallback had no way to know a
+// more specific pattern already claimed the same digits under a different
+// scale.
+//   1. Guardrail defeat: "50 cents" produces both 0.5 (correctly scaled,
+//      from the cents pattern) AND 50 (the raw digits, from the bare-number
+//      fallback, which has no concept of "already claimed"). If the model
+//      ever misclassifies amount_stated as 50 instead of 0.5,
+//      validateStatedAmountAgainstRawInput below would accept it as
+//      legitimate - "50" genuinely appears in the text - defeating the
+//      exact guardrail this file exists to enforce.
+//   2. Wrong clarification amount: index.js's needs_amount follow-up uses
+//      candidates[0] as the answer. For "$75, or wait, actually 50", the
+//      dollar-sign loop runs before the bare-number loop regardless of
+//      which number the user actually meant last, so candidates[0] was 75
+//      (the rejected value), not 50 (the real answer).
+// Fixed by tracking each match's text position and only keeping the
+// bare-number fallback's match when it doesn't overlap a range a more
+// specific pattern already claimed, then ordering candidates by where they
+// appear in the text rather than by which loop found them.
 function extractCandidateAmounts(rawText) {
-  const candidates = new Set();
   const text = String(rawText || '');
+  const found = []; // { value, start }
+  const claimed = []; // [start, end) ranges already claimed by a specific pattern
 
-  const add = (n) => {
-    if (Number.isFinite(n) && n > 0) candidates.add(Math.round(n * 100) / 100);
-  };
+  function overlapsClaimed(start, end) {
+    return claimed.some(([cs, ce]) => start < ce && end > cs);
+  }
+
+  function addSpecific(n, start, end) {
+    if (Number.isFinite(n) && n > 0) {
+      found.push({ value: Math.round(n * 100) / 100, start });
+      claimed.push([start, end]);
+    }
+  }
+
+  function addBare(n, start, end) {
+    if (overlapsClaimed(start, end)) return;
+    if (Number.isFinite(n) && n > 0) {
+      found.push({ value: Math.round(n * 100) / 100, start });
+    }
+  }
 
   // $1,200.50 / $50 / $0.99
   for (const m of text.matchAll(/\$\s?(\d{1,3}(?:,\d{3})*|\d+)(\.\d{1,2})?/g)) {
-    add(parseFloat(m[1].replace(/,/g, '') + (m[2] || '')));
+    addSpecific(parseFloat(m[1].replace(/,/g, '') + (m[2] || '')), m.index, m.index + m[0].length);
   }
   // 1.2k / $1.2k shorthand
   for (const m of text.matchAll(/\$?(\d+(?:\.\d+)?)\s?[kK]\b/g)) {
-    add(parseFloat(m[1]) * 1000);
+    addSpecific(parseFloat(m[1]) * 1000, m.index, m.index + m[0].length);
   }
   // "50 dollars" / "50 bucks"
   for (const m of text.matchAll(/(\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s?(dollars|bucks)\b/gi)) {
-    add(parseFloat(m[1].replace(/,/g, '')));
+    addSpecific(parseFloat(m[1].replace(/,/g, '')), m.index, m.index + m[0].length);
   }
   // "50 cents" (bare, no $ sign)
   for (const m of text.matchAll(/\b(\d+(?:\.\d+)?)\s?cents?\b/gi)) {
-    add(parseFloat(m[1]) / 100);
+    addSpecific(parseFloat(m[1]) / 100, m.index, m.index + m[0].length);
   }
   // Bare number token, comma-grouped or plain, with optional decimal - the
   // broadest match, needed to support a reply like "1200" on its own (the
   // clarification follow-up turn, where the whole message IS the amount).
+  // Skipped when it overlaps a range a more specific pattern above already
+  // claimed - see the function-level comment for why.
   for (const m of text.matchAll(/\b(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?\b/g)) {
-    add(parseFloat(m[1].replace(/,/g, '') + (m[2] || '')));
+    addBare(parseFloat(m[1].replace(/,/g, '') + (m[2] || '')), m.index, m.index + m[0].length);
   }
 
+  found.sort((a, b) => a.start - b.start);
+  const candidates = new Set(); // insertion order preserved = textual order
+  for (const { value } of found) candidates.add(value);
   return candidates;
 }
 

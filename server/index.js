@@ -1352,6 +1352,17 @@ app.post('/affordability/query', requireUser, async (req, res) => {
       message: "This isn't something Sorrel can answer yet.",
     });
   } catch (err) {
+    // Real inconsistency found by /code-review (2026-08-19): this route
+    // calls evaluateScenario/findMaxComfortableAmount/projectAffordableDate
+    // just like /scenarios/evaluate and /scenarios/compare-buy-now-vs-wait
+    // above, both of which special-case ScenarioValidationError into a 400
+    // - this route didn't, so an invalid value reaching those functions
+    // (e.g. from a future relaxed sanitizer or a new field) would fall
+    // through to a generic 500 instead of the specific 400 message the
+    // identical error class produces on the sibling routes.
+    if (err instanceof ScenarioValidationError) {
+      return res.status(400).json({ error: err.message });
+    }
     // logError, not console.error(err) directly - this route's failures can
     // originate from the Anthropic call inside parseAffordabilityQuery, and
     // safeLog.js exists specifically to strip provider error payloads

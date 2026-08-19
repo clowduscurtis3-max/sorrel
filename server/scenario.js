@@ -968,6 +968,14 @@ function findMaxComfortableAmount({ context, category = null, date = null, recur
   let hiCents = 1;
   let iterations = 0;
   let hiResult = probe;
+  // Real redundancy found by /code-review (2026-08-19): the result for
+  // whatever `loCents` currently is gets computed at the exact moment
+  // `loCents` is set in both loops below, but used to be discarded rather
+  // than kept - the old code called `evaluateAt(loCents)` a second time at
+  // the very end to get back a result it had already computed. Tracked
+  // here instead, maintained as an invariant ("bestResult is always the
+  // engine result for the current loCents") through both loops.
+  let bestResult = probe; // result for loCents=1, same value as probe initially
 
   while (hiResult.status === 'comfortable') {
     iterations += 1;
@@ -979,6 +987,7 @@ function findMaxComfortableAmount({ context, category = null, date = null, recur
       );
     }
     loCents = hiCents;
+    bestResult = hiResult; // hiResult was just verified comfortable for the value now becoming loCents
     hiCents *= 2;
     hiResult = evaluateAt(hiCents);
   }
@@ -988,8 +997,9 @@ function findMaxComfortableAmount({ context, category = null, date = null, recur
     const midResult = evaluateAt(midCents);
     if (midResult.status === 'comfortable') {
       loCents = midCents;
+      bestResult = midResult; // midResult IS the result for the new loCents
     } else {
-      hiCents = midCents;
+      hiCents = midCents; // loCents unchanged - bestResult still describes it
     }
   }
 
@@ -1003,7 +1013,7 @@ function findMaxComfortableAmount({ context, category = null, date = null, recur
     // The actual engine result at the boundary amount, included so a caller
     // never has to re-derive "why is this the limit" - it's the same
     // object evaluateScenario would return for a real check at this amount.
-    boundary_result: evaluateAt(loCents),
+    boundary_result: bestResult,
   };
 }
 

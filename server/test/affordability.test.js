@@ -241,6 +241,51 @@ test('findMaxComfortableAmount: income comfortably exceeding obligations finds a
   assert.notEqual(justPast.status, 'comfortable');
 });
 
+test('findMaxComfortableAmount: boundary_result exactly matches a fresh evaluateScenario call at the boundary amount - real redundancy fixed by /code-review (2026-08-19)', () => {
+  // The search used to recompute evaluateAt(loCents) a second time at the
+  // very end to build boundary_result, even though the identical result
+  // had already been computed (and discarded) at the exact point loCents
+  // was last set, in both the doubling and binary-search loops. Fixed by
+  // tracking that result (`bestResult`) instead of recomputing it. This
+  // test locks in the invariant the refactor depends on: whatever
+  // findMaxComfortableAmount returns as boundary_result must be identical
+  // to what a fresh, independent evaluateScenario call at that exact
+  // amount produces - not just "status is comfortable" (already checked
+  // above), but the whole object, field for field.
+  const context = contextWith({
+    now: new Date('2026-08-20T12:00:00Z'),
+    recurringSeries: [
+      {
+        id: 'income',
+        display_name: 'ACME PAYROLL',
+        category: 'Income',
+        interval: 'monthly',
+        typical_amount: -8000,
+        last_seen_date: '2026-08-01',
+        next_expected_date: '2026-09-01',
+      },
+      {
+        id: 'rent',
+        display_name: 'RIVERSIDE APARTMENTS',
+        category: 'Bills & Utilities',
+        interval: 'monthly',
+        typical_amount: 1500,
+        last_seen_date: '2026-08-01',
+        next_expected_date: '2026-09-01',
+      },
+    ],
+    budgets: [{ category: 'Shopping', budgeted_amount: 100000, reasoning: null }],
+    actuals: [{ category: 'Shopping', actual_amount: 0 }],
+  });
+
+  const result = findMaxComfortableAmount({ context, category: 'Shopping' });
+  const independent = evaluateScenario({
+    context,
+    scenario: { amount: result.max_comfortable_amount, category: 'Shopping', date: result.date },
+  });
+  assert.deepEqual(result.boundary_result, independent);
+});
+
 function fromResultCents(result, deltaCents) {
   return Math.max(1, result.max_comfortable_amount_cents + deltaCents) / 100;
 }

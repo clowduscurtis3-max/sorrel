@@ -105,7 +105,16 @@ export default function AffordabilityQuery() {
   // already uses for typed input. Never calls submit() itself.
   async function stopRecordingAndTranscribe() {
     await recorder.stop();
-    if (!recorder.uri) return;
+    if (!recorder.uri) {
+      // Real bug found by /code-review (2026-08-19): this used to return
+      // with zero feedback - the mic button silently reverted to idle with
+      // no indication anything went wrong, in the one flow this project's
+      // own brief calls out as safety-critical for user visibility (a
+      // misheard/failed recording needs to be visibly correctable, not
+      // silently dropped).
+      setVoiceError("That recording didn't come through - try again or type it.");
+      return;
+    }
 
     setTranscribing(true);
     setVoiceError(null);

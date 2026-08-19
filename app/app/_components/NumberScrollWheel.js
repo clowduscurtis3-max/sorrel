@@ -8,6 +8,7 @@ import Animated, {
   withDecay,
   runOnJS,
   cancelAnimation,
+  clamp,
 } from 'react-native-reanimated';
 
 // Phase 5 Step 3 (later revision, 2026-08-13): a real velocity-based
@@ -39,10 +40,14 @@ const PIXELS_PER_STEP = 6;
 const ROW_HEIGHT = 36;
 const VISIBLE_ROWS = 5; // must be odd - equal rows above/below the center
 
-function clamp(v, min, max) {
-  'worklet';
-  return Math.min(max, Math.max(min, v));
-}
+// Real duplication found by /code-review (2026-08-19): this file used to
+// hand-roll its own `clamp` worklet, duplicating Reanimated's own built-in
+// export - in the exact file that already suffered a fatal Worklets-
+// runtime crash once from a missing 'worklet' directive on a locally-
+// defined function. Importing the library's own pre-worklet-ready version
+// removes both the duplication and the recurrence risk. Same signature
+// (value, min, max), same math (Math.min(Math.max(value,min),max)),
+// confirmed against reanimated's own source before swapping.
 
 // value/onValueChange: plain numbers, not strings - callers already
 // converting to/from a string-based form field (GoalForm.js's goalAmount)
