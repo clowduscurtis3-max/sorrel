@@ -11,7 +11,7 @@ import { apiFetch, apiErrorMessage } from '../_lib/api';
 import { styles } from '../_lib/styles';
 import { formatAmountLabel } from '../_lib/amountPicker';
 import { ScenarioResult, describeComparisonDifference } from './ScenarioResult';
-import NumberScrollWheel from './NumberScrollWheel';
+import DrumAmountPicker from './DrumAmountPicker';
 
 // Phase 9 Step 4, moved to the Budget tab in Phase 13: the "can I afford
 // this?" entry point - one text field, one submit action, one structured
@@ -32,8 +32,9 @@ import NumberScrollWheel from './NumberScrollWheel';
 // having a chance to correct the text first (a misheard "50" as "15" is
 // visible and editable before "Ask" is ever pressed).
 //
-// Phase 13: gained a third, conditional input for the amount -
-// NumberScrollWheel, rendered only during the needs_amount clarification
+// Phase 13: gained a third, conditional input for the amount - a scroll
+// wheel (DrumAmountPicker, a real native widget since 2026-08-19; see that
+// file's header), rendered only during the needs_amount clarification
 // (text and voice stay always-available, unchanged from Phase 9) - and an
 // explicit "Compare: buy now vs. wait" secondary action, reusing
 // ScenarioCheck.js's old comparison endpoint/rendering verbatim via
@@ -70,7 +71,7 @@ export default function AffordabilityQuery() {
   // echoes back verbatim (see server/index.js's /affordability/query).
   const [pendingContext, setPendingContext] = useState(null);
   // The wheel's own numeric value, separate from `text` - it needs a plain
-  // number to drive NumberScrollWheel's controlled `value` prop, while
+  // number to drive DrumAmountPicker's controlled `value` prop, while
   // `text` stays the one field that's actually submitted (same field
   // voice transcription writes into).
   const [wheelValue, setWheelValue] = useState(1);
@@ -254,9 +255,10 @@ export default function AffordabilityQuery() {
       {/* Phase 13: the wheel is a fallback for the needs_amount state only -
           "not taking up the screen constantly." Writes into the same
           `text` field typed/voice input use, so it needs no separate
-          submit path. */}
+          submit path. Swapped to a real native picker (2026-08-19) -
+          see DrumAmountPicker.js for why. */}
       {pendingContext && (
-        <NumberScrollWheel
+        <DrumAmountPicker
           value={wheelValue}
           onValueChange={onWheelChange}
           min={1}
