@@ -9,15 +9,18 @@ import {
 } from 'expo-audio';
 import { apiFetch, apiErrorMessage } from '../_lib/api';
 import { styles } from '../_lib/styles';
-import { ScenarioResult } from './ScenarioCheck';
+import { formatAmountLabel } from '../_lib/amountPicker';
+import { ScenarioResult, describeComparisonDifference } from './ScenarioResult';
+import NumberScrollWheel from './NumberScrollWheel';
 
-// Phase 9 Step 4: the ambient "can I afford this?" entry point on Home.
-// One text field, one submit action, one structured result - not a chat
-// thread. The only multi-turn shape this component knows about is the
-// brief's single sanctioned exception (missing-amount clarification),
-// implemented the same stateless way the backend does: the previously
-// returned `context` is held in local state and echoed back on the
-// follow-up POST, never persisted, never a running conversation.
+// Phase 9 Step 4, moved to the Budget tab in Phase 13: the "can I afford
+// this?" entry point - one text field, one submit action, one structured
+// result, not a chat thread. The only multi-turn shape this component
+// knows about is the brief's single sanctioned exception (missing-amount
+// clarification), implemented the same stateless way the backend does:
+// the previously returned `context` is held in local state and echoed
+// back on the follow-up POST, never persisted, never a running
+// conversation.
 //
 // Voice (Option B, approved 2026-08-19 - see CLAUDE.md's Voice
 // Architecture Decision Gate): record -> upload to the backend's
@@ -28,6 +31,20 @@ import { ScenarioResult } from './ScenarioCheck';
 // recording reaches the financial engine without the user seeing and
 // having a chance to correct the text first (a misheard "50" as "15" is
 // visible and editable before "Ask" is ever pressed).
+//
+// Phase 13: gained a third, conditional input for the amount -
+// NumberScrollWheel, rendered only during the needs_amount clarification
+// (text and voice stay always-available, unchanged from Phase 9) - and an
+// explicit "Compare: buy now vs. wait" secondary action, reusing
+// ScenarioCheck.js's old comparison endpoint/rendering verbatim via
+// ScenarioResult.js (ScenarioCheck.js itself is deleted as of this
+// phase). The wheel writes a formatted amount string into the same `text`
+// field voice transcription already populates - both converge on one
+// value before submission, so the backend needs no new code to support a
+// third input method (extractCandidateAmounts/
+// validateStatedAmountAgainstRawInput already handle whatever string
+// reaches them). The wheel's min/max/step/formatLabel here match
+// ScenarioCheck.js's old config exactly.
 
 function describeProjection(p) {
   if (p.status === 'already_affordable') {
@@ -52,6 +69,19 @@ export default function AffordabilityQuery() {
   // context a NEEDS_AMOUNT response returned, which the follow-up request
   // echoes back verbatim (see server/index.js's /affordability/query).
   const [pendingContext, setPendingContext] = useState(null);
+  // The wheel's own numeric value, separate from `text` - it needs a plain
+  // number to drive NumberScrollWheel's controlled `value` prop, while
+  // `text` stays the one field that's actually submitted (same field
+  // voice transcription writes into).
+  const [wheelValue, setWheelValue] = useState(1);
+
+  // Step 4 (moved from ScenarioCheck.js in Phase 13): "buy now vs. wait
+  // until your next paycheck" - its own separate loading/error/result
+  // state, shown only as an explicit secondary action after a plain
+  // result, never auto-run alongside it.
+  const [comparing, setComparing] = useState(false);
+  const [comparisonError, setComparisonError] = useState(null);
+  const [comparison, setComparison] = useState(null);
 
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState = useAudioRecorderState(recorder);
@@ -123,9 +153,14 @@ export default function AffordabilityQuery() {
       }
       const body = await res.json();
       setResponse(body);
+      // A fresh result makes any prior comparison stale - it was run
+      // against a different (or now-superseded) checked amount.
+      setComparison(null);
+      setComparisonError(null);
       if (body.status === 'needs_amount') {
         setPendingContext(body.context);
         setText(''); // clears the field for the amount-only reply, not auto-submitted
+        setWheelValue(1);
       } else {
         setPendingContext(null);
       }
@@ -142,11 +177,51 @@ export default function AffordabilityQuery() {
     submit(text, pendingContext || undefined);
   }
 
+  function onWheelChange(v) {
+    setWheelValue(v);
+    setText(formatAmountLabel(v));
+  }
+
   function startOver() {
     setText('');
     setResponse(null);
     setPendingContext(null);
     setError(null);
+    setComparison(null);
+    setComparisonError(null);
+  }
+
+  // Reuses the last successfully-checked amount/category/recurrence
+  // (response.result.scenario, the normalized scenario evaluateScenario
+  // itself produced) rather than re-deriving anything client-side - the
+  // exact same body shape ScenarioCheck.js used to send.
+  async function checkComparison() {
+    if (!response?.result?.scenario) return;
+    const { amount, category, recurrence } = response.result.scenario;
+    setComparing(true);
+    setComparisonError(null);
+    setComparison(null);
+    try {
+      const res = await apiFetch('/scenarios/compare-buy-now-vs-wait', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount, category, recurrence }),
+      });
+      if (!res.ok) {
+        if (res.status === 400) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || 'SERVER_ERROR');
+        }
+        throw new Error('SERVER_ERROR');
+      }
+      const body = await res.json();
+      setComparison(body);
+    } catch (err) {
+      console.error(err);
+      setComparisonError(err.message === 'SERVER_ERROR' ? apiErrorMessage(err) : err.message);
+    } finally {
+      setComparing(false);
+    }
   }
 
   return (
@@ -166,6 +241,21 @@ export default function AffordabilityQuery() {
         placeholder={pendingContext ? 'e.g. $50' : 'e.g. Can I afford a $50 dinner?'}
         editable={!submitting && !transcribing}
       />
+
+      {/* Phase 13: the wheel is a fallback for the needs_amount state only -
+          "not taking up the screen constantly." Writes into the same
+          `text` field typed/voice input use, so it needs no separate
+          submit path. */}
+      {pendingContext && (
+        <NumberScrollWheel
+          value={wheelValue}
+          onValueChange={onWheelChange}
+          min={1}
+          max={9999}
+          step={1}
+          formatLabel={formatAmountLabel}
+        />
+      )}
 
       {/* Voice: record -> transcribe -> lands in the field above as plain
           editable text. Never submits on its own - "Ask"/"Submit amount"
@@ -207,7 +297,55 @@ export default function AffordabilityQuery() {
       )}
 
       {response?.status === 'result' && response.result && (
-        <ScenarioResult result={response.result} />
+        <>
+          <ScenarioResult result={response.result} />
+
+          {/* Explicit secondary action, never auto-run alongside the plain
+              result above - "not an extra tap that should've been
+              automatic," per the brief, unless that stops feeling right
+              once actually used. */}
+          {comparing ? (
+            <ActivityIndicator />
+          ) : (
+            <Button title="Compare: buy now vs. wait" onPress={checkComparison} />
+          )}
+
+          {comparisonError && <Text style={styles.errorText}>{comparisonError}</Text>}
+
+          {comparison && comparison.available === false && (
+            <Text style={styles.smallText}>
+              No recurring income has been detected yet, so there's no real payday to compare
+              waiting against.
+            </Text>
+          )}
+
+          {comparison && comparison.available === true && (
+            <View style={styles.reviewRow}>
+              {(() => {
+                const [buyNow, wait] = comparison.comparison.scenarios;
+                const [diff] = comparison.comparison.differences;
+                return (
+                  <>
+                    <ScenarioResult label="Buy now" result={buyNow.result} />
+                    <ScenarioResult
+                      label={`Wait until your paycheck on ${wait.result.scenario.date}`}
+                      result={wait.result}
+                    />
+                    {diff && (
+                      <Text style={styles.smallText}>
+                        {describeComparisonDifference({
+                          diff,
+                          buyNowResult: buyNow.result,
+                          waitResult: wait.result,
+                        })}
+                      </Text>
+                    )}
+                  </>
+                );
+              })()}
+            </View>
+          )}
+        </>
       )}
 
       {response?.status === 'result' && response.max_comfortable && (

@@ -140,6 +140,14 @@ test('findMaxComfortableAmount: a goal so tight even $0.01 is not comfortable re
   assert.equal(result.available, true);
   assert.equal(result.max_comfortable_amount_cents, 0);
   assert.equal(result.max_comfortable_amount, 0);
+  // Real bug (2026-08-19): this branch used to omit `boundary_result`
+  // entirely while the search's other `available: true` return always
+  // includes it - the client unconditionally renders
+  // `max_comfortable.boundary_result`, so this exact case ("nothing is
+  // comfortable") crashed on-device with "Cannot read property
+  // 'status_label' of undefined" instead of showing the honest result.
+  assert.ok(result.boundary_result, 'boundary_result must be present even when nothing is comfortable');
+  assert.equal(result.boundary_result.status_label, 'Affordable, with a tradeoff');
 });
 
 test('findMaxComfortableAmount: resolves an exact-cent status boundary (category budget share)', () => {

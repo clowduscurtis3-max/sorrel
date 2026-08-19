@@ -1341,7 +1341,7 @@ app.post('/affordability/query', requireUser, async (req, res) => {
       }
       // Structured facts only - template phrasing is a UI concern, same
       // split this codebase already uses for describeComparisonDifference
-      // (app/app/_components/ScenarioCheck.js), not duplicated server-side.
+      // (app/app/_components/ScenarioResult.js), not duplicated server-side.
       return res.json({ status: 'result', projection });
     }
 

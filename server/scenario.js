@@ -949,6 +949,18 @@ function findMaxComfortableAmount({ context, category = null, date = null, recur
       date: probe.scenario.date,
       recurrence,
       detail: 'No positive amount is currently comfortable.',
+      // Real bug found on-device (2026-08-19): this branch omitted
+      // `boundary_result` entirely, while the search's other `available:
+      // true` return below always includes it - the client
+      // unconditionally renders `max_comfortable.boundary_result` (see
+      // AffordabilityQuery.js), so any query landing here crashed with
+      // "Cannot read property 'status_label' of undefined" instead of
+      // showing the honest zero-comfortable result. `probe` (the $0.01
+      // evaluateScenario call above) IS the engine result at this
+      // boundary, same as `evaluateAt(loCents)` is for the other branch -
+      // included here for the same reason the comment below states: so a
+      // caller never has to re-derive "why is this the limit."
+      boundary_result: probe,
     };
   }
 

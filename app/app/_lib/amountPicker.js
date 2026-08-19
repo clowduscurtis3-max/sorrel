@@ -1,4 +1,4 @@
-// Shared formatting for ScenarioCheck.js and GoalForm.js's amount fields,
+// Shared formatting for AffordabilityQuery.js and GoalForm.js's amount fields,
 // both rendered via NumberScrollWheel.js (a continuous velocity-based
 // scroll wheel, not a fixed list of options) - this file used to also
 // generate tiered-step option arrays for @react-native-picker/picker, but

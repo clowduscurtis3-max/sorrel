@@ -1,11 +1,22 @@
 import { useCallback, useState } from 'react';
-import { View, Text, Button, ActivityIndicator, ScrollView, TextInput } from 'react-native';
+import { View, Text, Button, ActivityIndicator, TextInput } from 'react-native';
+// Phase 13: ScrollView specifically from react-native-gesture-handler, not
+// plain react-native - this tab now nests a Gesture.Pan() (NumberScrollWheel,
+// inside AffordabilityQuery) directly inside this scroll container. RN's own
+// ScrollView uses its own native scroll responder, a different gesture
+// system from react-native-gesture-handler's; the two fighting over which
+// owns a vertical touch stream is a well-documented RNGH conflict, and its
+// usual symptom is exactly what showed up on-device here - the inner pan
+// gesture only seeing the touch at release instead of continuously during
+// the drag. RNGH's own ScrollView is a drop-in replacement that shares its
+// gesture-recognition system with Gesture.Pan(), avoiding that fight.
+import { ScrollView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
 import { useFocusEffect } from '@react-navigation/native';
 import { apiFetch, apiErrorMessage } from '../_lib/api';
 import { styles } from '../_lib/styles';
 import { useAppData } from '../_lib/appData';
-import ScenarioCheck from '../_components/ScenarioCheck';
+import AffordabilityQuery from '../_components/AffordabilityQuery';
 
 // Phase 7 Step 1 sub-step 1.4: the real Budget tab, replacing the sub-step
 // 1.2 placeholder. `budgetStatus` and its whole edit/proposal sub-state
@@ -190,12 +201,14 @@ export default function Budget() {
         </View>
       ) : (
         <ScrollView style={styles.budgetScreen}>
-          {/* Phase 5 Step 3: "Can I buy this?" - decided in Phase 7 to live
-              in this tab, since it's fundamentally a budget/goal-impact
-              question, not a fifth destination of its own. Placed above the
-              budget-status list since it's a standalone question, not part
-              of the generate/edit flow below it. */}
-          <ScenarioCheck />
+          {/* Phase 5 Step 3 / Phase 13: "Can I afford this?" - decided in
+              Phase 7 to live in this tab, since it's fundamentally a
+              budget/goal-impact question, not a fifth destination of its
+              own; Phase 13 consolidated Home's voice/text version onto this
+              same spot rather than keeping two separate front doors. Placed
+              above the budget-status list since it's a standalone question,
+              not part of the generate/edit flow below it. */}
+          <AffordabilityQuery />
 
           {generatingBudget ? (
             <ActivityIndicator />
