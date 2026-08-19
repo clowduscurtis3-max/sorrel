@@ -46,10 +46,17 @@ const {
   evaluateScenario,
   compareBuyNowVsWait,
   normalizeScenario,
+  findMaxComfortableAmount,
+  projectAffordableDate,
   ScenarioValidationError,
 } = require('./scenario');
 const { loadScenarioContext } = require('./scenarioContext');
 const { explainScenario, explainComparison } = require('./scenarioExplain');
+const {
+  parseAffordabilityQuery,
+  sanitizeParsedOutput,
+  extractCandidateAmounts,
+} = require('./affordabilityParse');
 
 // Where we send the system browser once Gmail linking finishes, so the app
 // (watching for this scheme via WebBrowser.openAuthSessionAsync) resolves.
@@ -1164,6 +1171,193 @@ app.post('/scenarios/compare-buy-now-vs-wait', requireUser, async (req, res) => 
     }
     console.error(err);
     res.status(500).json({ error: 'Failed to compare scenarios' });
+  }
+});
+
+// Phase 9 Step 3: single front door for the ambient "can I afford this?"
+// feature - raw text in, one structured result out. No persistent
+// conversation history exists anywhere in this route or its callers; the
+// one sanctioned multi-turn shape (QUERY -> NEEDS_AMOUNT -> AMOUNT PROVIDED
+// -> RESULT) is implemented statelessly via the optional `context` field a
+// client echoes back on a follow-up request - never server-side session
+// state, matching the brief's explicit "do not introduce persistent
+// conversation storage" requirement.
+//
+// A max length exists because this is free-form text reaching an LLM call,
+// unlike every other endpoint in this file (all fixed-shape JSON) - no
+// existing precedent to reuse for this specific control, so this is new,
+// not duplicated.
+const MAX_AFFORDABILITY_QUERY_LENGTH = 500;
+
+// Re-sanitizes a client-echoed clarification context through the exact same
+// whitelist parseAffordabilityQuery's own output goes through - the context
+// object *originated* server-side moments earlier, but it arrives back in
+// this request's body, so it's untrusted again by the time it gets here
+// (same reasoning as never trusting a client-supplied user id). amount_stated
+// is deliberately stripped rather than accepted from context - the whole
+// point of the follow-up turn is a fresh amount pulled from *this* message,
+// never carried over from the prior one.
+function sanitizeClarificationContext(raw) {
+  const sanitized = sanitizeParsedOutput({ ...raw, amount_stated: null }, '');
+  return {
+    intent: sanitized.intent,
+    category: sanitized.category,
+    recurrence: sanitized.recurrence,
+    wants_timeline: sanitized.wants_timeline,
+  };
+}
+
+app.post('/affordability/query', requireUser, async (req, res) => {
+  const { text, context } = req.body || {};
+
+  if (typeof text !== 'string' || text.trim().length === 0) {
+    return res.status(400).json({ error: 'text is required' });
+  }
+  if (text.length > MAX_AFFORDABILITY_QUERY_LENGTH) {
+    return res
+      .status(400)
+      .json({ error: `text must be ${MAX_AFFORDABILITY_QUERY_LENGTH} characters or fewer` });
+  }
+  if (context !== undefined && (typeof context !== 'object' || context === null || Array.isArray(context))) {
+    return res.status(400).json({ error: 'context must be an object if provided' });
+  }
+
+  try {
+    let parsed;
+    if (context) {
+      // Clarification follow-up: intent/category/recurrence were already
+      // classified on the original query - no second Claude call for what's
+      // usually just a bare number. Amount extraction reuses the exact same
+      // deterministic candidate-matching the guardrail is built on, so a
+      // follow-up amount is held to the identical standard as a first-turn
+      // one. If this message contains more than one number, the first found
+      // is used - a genuine but minor UX edge case (not a safety issue: any
+      // amount used here is still guaranteed to be something the user
+      // actually typed in this message).
+      const base = sanitizeClarificationContext(context);
+      const candidates = [...extractCandidateAmounts(text)];
+      parsed = sanitizeParsedOutput(
+        { ...base, amount_stated: candidates.length > 0 ? candidates[0] : null },
+        text
+      );
+    } else {
+      parsed = await parseAffordabilityQuery(text);
+    }
+
+    if (parsed.intent === 'unsupported') {
+      return res.json({
+        status: 'unsupported',
+        message:
+          "This isn't something Sorrel can answer yet - it only handles single-purchase affordability questions.",
+      });
+    }
+
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+    const clarificationContext = {
+      intent: parsed.intent,
+      category: parsed.category,
+      recurrence: parsed.recurrence,
+      wants_timeline: parsed.wants_timeline,
+    };
+
+    // 'unknown' can't be fed to the engine (normalizeScenario only accepts a
+    // real RECURRENCES value) and there's no second clarification turn
+    // sanctioned for recurrence, only for amount. Evaluated as a one-time
+    // purchase rather than left unanswered, with that assumption stated
+    // plainly in the result rather than silently baked in - flagged to the
+    // user as a real product decision made here, not assumed without
+    // comment (see CLAUDE.md).
+    const recurrenceWasAmbiguous = parsed.recurrence === 'unknown';
+    const recurrenceForEngine = recurrenceWasAmbiguous ? 'once' : parsed.recurrence;
+
+    if (parsed.intent === 'affordability_check') {
+      if (parsed.amount_stated === null) {
+        return res.json({
+          status: 'needs_amount',
+          message: 'How much will it cost?',
+          context: clarificationContext,
+        });
+      }
+      const scenarioContext = await loadScenarioContext(req.userId, now);
+      const result = evaluateScenario({
+        context: scenarioContext,
+        scenario: {
+          amount: parsed.amount_stated,
+          category: parsed.category,
+          date: today,
+          recurrence: recurrenceForEngine,
+        },
+      });
+      if (recurrenceWasAmbiguous) {
+        result.limitations = [
+          ...result.limitations,
+          "This was evaluated as a one-time purchase - the question didn't make the recurring frequency clear.",
+        ];
+      }
+      // Same Step 5 explanation call /scenarios/evaluate already makes for
+      // an identical result shape - reusing the existing, already
+      // cost-justified mechanism, not a new AI call site.
+      result.explanation = await explainScenario(result);
+      return res.json({ status: 'result', result });
+    }
+
+    if (parsed.intent === 'maximum_comfortable_amount') {
+      const scenarioContext = await loadScenarioContext(req.userId, now);
+      const maxResult = findMaxComfortableAmount({
+        context: scenarioContext,
+        category: parsed.category,
+        date: today,
+        recurrence: 'once', // this intent asks about a single amount, not an ongoing commitment
+      });
+      if (!maxResult.available) {
+        return res.json({ status: 'insufficient_data', detail: maxResult.detail });
+      }
+      // Deliberately no explainScenario call here - unlike
+      // affordability_check above, this isn't reusing an existing Phase 5
+      // call site, it would be a new one. Structured data only, per this
+      // project's cost-conscious default; can revisit with its own
+      // measured-cost decision if requested, same discipline Phase 5 Step 5
+      // went through before adding its own call.
+      return res.json({ status: 'result', max_comfortable: maxResult });
+    }
+
+    if (parsed.intent === 'affordable_date') {
+      if (parsed.amount_stated === null) {
+        return res.json({
+          status: 'needs_amount',
+          message: 'How much are you trying to afford?',
+          context: clarificationContext,
+        });
+      }
+      const scenarioContext = await loadScenarioContext(req.userId, now);
+      const projection = projectAffordableDate({
+        context: scenarioContext,
+        targetAmount: parsed.amount_stated,
+      });
+      if (!projection.available) {
+        return res.json({ status: 'insufficient_data', reason: projection.reason, detail: projection.detail });
+      }
+      // Structured facts only - template phrasing is a UI concern, same
+      // split this codebase already uses for describeComparisonDifference
+      // (app/app/_components/ScenarioCheck.js), not duplicated server-side.
+      return res.json({ status: 'result', projection });
+    }
+
+    // Unreachable given PARSER_INTENTS is exhaustive and already checked
+    // above, but never fall through to an undefined response shape.
+    return res.json({
+      status: 'unsupported',
+      message: "This isn't something Sorrel can answer yet.",
+    });
+  } catch (err) {
+    // logError, not console.error(err) directly - this route's failures can
+    // originate from the Anthropic call inside parseAffordabilityQuery, and
+    // safeLog.js exists specifically to strip provider error payloads
+    // before they reach the log (see server/safeLog.js). Never logs the
+    // raw query text itself either way.
+    logError('Failed to process affordability query:', err);
+    res.status(500).json({ error: 'Failed to process affordability query' });
   }
 });
 
