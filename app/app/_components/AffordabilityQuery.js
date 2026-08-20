@@ -11,7 +11,7 @@ import { apiFetch, apiErrorMessage } from '../_lib/api';
 import { styles } from '../_lib/styles';
 import { formatAmountLabel } from '../_lib/amountPicker';
 import { ScenarioResult, describeComparisonDifference } from './ScenarioResult';
-import DrumAmountPicker from './DrumAmountPicker';
+import DigitAmountPicker from './DigitAmountPicker';
 
 // Phase 9 Step 4, moved to the Budget tab in Phase 13: the "can I afford
 // this?" entry point - one text field, one submit action, one structured
@@ -32,20 +32,18 @@ import DrumAmountPicker from './DrumAmountPicker';
 // having a chance to correct the text first (a misheard "50" as "15" is
 // visible and editable before "Ask" is ever pressed).
 //
-// Phase 13: gained a third, conditional input for the amount - a scroll
-// wheel (DrumAmountPicker, a real native widget since 2026-08-19; see that
-// file's header), rendered only during the needs_amount clarification
-// (text and voice stay always-available, unchanged from Phase 9) - and an
-// explicit "Compare: buy now vs. wait" secondary action, reusing
-// ScenarioCheck.js's old comparison endpoint/rendering verbatim via
-// ScenarioResult.js (ScenarioCheck.js itself is deleted as of this
-// phase). The wheel writes a formatted amount string into the same `text`
-// field voice transcription already populates - both converge on one
-// value before submission, so the backend needs no new code to support a
-// third input method (extractCandidateAmounts/
+// Phase 13: gained a third, conditional input for the amount - a wheel
+// (DigitAmountPicker, see that file's header), rendered only during the
+// needs_amount clarification (text and voice stay always-available,
+// unchanged from Phase 9) - and an explicit "Compare: buy now vs. wait"
+// secondary action, reusing ScenarioCheck.js's old comparison endpoint/
+// rendering verbatim via ScenarioResult.js (ScenarioCheck.js itself is
+// deleted as of this phase). The wheel writes a formatted amount string
+// into the same `text` field voice transcription already populates -
+// both converge on one value before submission, so the backend needs no
+// new code to support a third input method (extractCandidateAmounts/
 // validateStatedAmountAgainstRawInput already handle whatever string
-// reaches them). The wheel's min/max/step/formatLabel here match
-// ScenarioCheck.js's old config exactly.
+// reaches them).
 
 function describeProjection(p) {
   if (p.status === 'already_affordable') {
@@ -61,35 +59,38 @@ function describeProjection(p) {
   );
 }
 
-// OPEN BUG (2026-08-19): dragging the wheel below can partially scroll the
-// parent Budget ScrollView mid-drag. Four things tried this same day, in
-// order: (1) raw View touch handlers toggling scrollEnabled - desynced
-// React Native's own gesture bookkeeping (confirmed via adb logcat);
-// (2) the wheel's own onValueChanging/onChange driving the same toggle -
-// fixed (1)'s desync but still lost the touch-dispatch race on a fast
-// swipe; (3) locking scrollEnabled for the wheel's whole visible lifetime -
-// reduced but didn't eliminate the scroll, AND trapped the user unable to
-// scroll back up once it happened, a strictly worse failure mode, real
-// on-device report: "the screen scrolled down, and now I can't even
-// scroll up"; (4) moving the wheel into its own <Modal> (a separate native
-// window, no shared touch-dispatch chain with the ScrollView at all) -
-// this one actually worked (confirmed on-device: "runs great, super
-// smooth"), but the presentation - an explicit "Pick with wheel" tap plus
-// a popup sheet - was rejected directly by the user as unnecessary
-// friction ("extra work, looks dumb... just fix the scrolling").
+// Long history (2026-08-19/20) of the wheel's amount-selection design,
+// worth keeping since the final answer isn't obvious from the code alone:
+// dragging a single continuous $1-$9999 wheel could partially scroll the
+// parent Budget ScrollView mid-drag on a fast/long swipe. Five things
+// tried, in order: (1) raw View touch handlers toggling scrollEnabled -
+// desynced React Native's own gesture bookkeeping (confirmed via adb
+// logcat); (2) the wheel's own onValueChanging/onChange driving the same
+// toggle - fixed (1)'s desync but still lost the touch-dispatch race on a
+// fast swipe; (3) locking scrollEnabled for the wheel's whole visible
+// lifetime - reduced but didn't eliminate the scroll, AND trapped the
+// user unable to scroll back up once it happened, a strictly worse
+// failure mode ("the screen scrolled down, and now I can't even scroll
+// up"); (4) moving the wheel into its own <Modal> - structurally solved
+// the conflict (confirmed on-device: "runs great, super smooth"), but the
+// presentation (an explicit "Pick with wheel" tap, a popup sheet) was
+// rejected directly by the user as unnecessary friction; (5) reverted to
+// a plain inline wheel with a much bigger touch target - genuinely helped
+// normal-paced swiping, but a real fast/long swipe could still
+// occasionally trigger the scroll.
 //
-// Reverted to a plain inline wheel per that direct instruction, combined
-// with a much bigger touch target (see DrumAmountPicker.js's own
-// ITEM_HEIGHT/textSize - roughly doubled) on the user's own theory that a
-// generous hit area with nothing else nearby removes most real-world
-// cases of a drag spilling onto the ScrollView. Worth flagging honestly:
-// this session's own controlled testing (adb-scripted swipes starting
-// well inside the wheel's already-full-width bounds, not near an edge)
-// still reproduced the scroll, so touch-area size alone may not fully
-// eliminate it the way the Modal did - not yet re-tested on-device with
-// the larger size as of this note. If it recurs, the Modal approach is
-// proven to work; the open question would be presentation only (how to
-// make a popup feel like less friction), not whether it's needed.
+// The real fix (2026-08-20) turned out to be orthogonal to all five
+// attempts above: none of them addressed *why* a long/fast swipe was ever
+// needed in the first place. A single $1-$999,999 wheel needs one either
+// to reach a realistic amount; a tiered-step version (fine near $1,
+// coarser further out - tried and reverted the same day) fixed that but
+// gave up exact-value precision, correctly rejected by the user ("cant
+// select the exact number anymore"). DigitAmountPicker's per-digit
+// odometer design resolves both at once: every individual wheel only
+// ever has 10 rows, so no swipe on any single wheel can travel far
+// regardless of speed, while every digit 0-9 stays directly selectable -
+// no tiering, no precision lost. See DigitAmountPicker.js's own header
+// for the full reasoning.
 export default function AffordabilityQuery() {
   const [text, setText] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -101,7 +102,7 @@ export default function AffordabilityQuery() {
   const [pendingContext, setPendingContext] = useState(null);
 
   // The wheel's own numeric value, separate from `text` - it needs a plain
-  // number to drive DrumAmountPicker's controlled `value` prop, while
+  // number to drive DigitAmountPicker's controlled `value` prop, while
   // `text` stays the one field that's actually submitted (same field
   // voice transcription writes into).
   const [wheelValue, setWheelValue] = useState(1);
@@ -285,19 +286,10 @@ export default function AffordabilityQuery() {
       {/* Phase 13: the wheel is a fallback for the needs_amount state only -
           "not taking up the screen constantly." Writes into the same
           `text` field typed/voice input use, so it needs no separate
-          submit path. Plain inline render per direct user instruction
-          (2026-08-19) - see this file's own header comment for the Modal
-          attempt that preceded this and why it was reverted. */}
-      {pendingContext && (
-        <DrumAmountPicker
-          value={wheelValue}
-          onValueChange={onWheelChange}
-          min={1}
-          max={9999}
-          step={1}
-          formatLabel={formatAmountLabel}
-        />
-      )}
+          submit path. Now a per-digit odometer (DigitAmountPicker,
+          2026-08-20) rather than one continuous $1-$999,999 wheel - see
+          this file's own header comment and DigitAmountPicker.js for why. */}
+      {pendingContext && <DigitAmountPicker value={wheelValue} onValueChange={onWheelChange} />}
 
       {/* Voice: record -> transcribe -> lands in the field above as plain
           editable text. Never submits on its own - "Ask"/"Submit amount"

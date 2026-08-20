@@ -4,34 +4,19 @@ import { View, Text, Button, ActivityIndicator, TextInput, ScrollView } from 're
 // React Native (2026-08-19). It was switched to RNGH's version in Phase 13
 // because this tab then nested a Gesture.Pan() (the old NumberScrollWheel)
 // directly inside this scroll container - that justification is gone,
-// AffordabilityQuery now uses DrumAmountPicker (a genuinely native widget,
-// no RNGH gesture at all), so there's nothing left here for RNGH's
-// ScrollView to coordinate with.
+// AffordabilityQuery no longer has any RNGH gesture in it at all, so
+// there's nothing left here for RNGH's ScrollView to coordinate with.
 //
-// OPEN BUG, not confirmed fixed as of this note (2026-08-19): dragging
-// AffordabilityQuery's amount wheel can partially scroll this ScrollView
-// mid-drag. Confirmed via a controlled on-device A/B (adb-scripted swipes
-// + before/after screenshots + a live logcat pull) that this happens
-// identically under both RNGH's ScrollView and this plain RN one - so it
-// is NOT an RNGH-vs-plain-ScrollView difference, ruled out, not just
-// unconfirmed. Also tried and reverted: locking `scrollEnabled={false}`
-// for the whole needs_amount step reduced but didn't eliminate the
-// scroll, AND trapped the user unable to scroll back up once it happened
-// - worse than not locking at all. A <Modal>-based fix (wheel rendered in
-// its own native window, structurally outside this ScrollView's touch
-// hierarchy) was built and worked, but was rejected on direct user
-// feedback as unnecessary presentation friction ("extra work, looks
-// dumb"). Current approach, same session: plain inline wheel (like
-// before any of this), combined with a much larger touch target
-// (DrumAmountPicker.js's ITEM_HEIGHT roughly doubled) on the theory that
-// a generous hit area with nothing rendered beside the wheel removes most
-// real-world cases of a drag spilling onto this ScrollView. Not yet
-// re-tested on-device with the larger size - this session's own earlier
-// controlled testing reproduced the scroll even with swipes starting well
-// inside the wheel's (already full-width) bounds, so size alone may not
-// fully close it the way the Modal did. If it recurs, the Modal is a
-// proven-working fallback; the remaining question would be presentation,
-// not whether the fix itself works.
+// Long-running scroll-vs-wheel conflict, resolved 2026-08-20 - see
+// AffordabilityQuery.js's own header comment for the full multi-attempt
+// history (touch handlers, reactive scrollEnabled locking, a <Modal>,
+// bigger touch targets, tiered steps - five things tried before landing
+// on the real fix). The actual answer turned out to have nothing to do
+// with this ScrollView specifically: DigitAmountPicker's per-digit
+// odometer design means no individual wheel ever has more than 10 rows,
+// so no swipe on it - however fast or long - can travel far enough to
+// meaningfully contend with this ScrollView's own gesture recognition in
+// the first place.
 import { StatusBar } from 'expo-status-bar';
 import { useFocusEffect } from '@react-navigation/native';
 import { apiFetch, apiErrorMessage } from '../_lib/api';
