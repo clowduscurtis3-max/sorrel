@@ -61,7 +61,12 @@ function describeProjection(p) {
   );
 }
 
-export default function AffordabilityQuery() {
+// onWheelInteractionStart/onWheelInteractionEnd: optional, forwarded
+// straight to DrumAmountPicker (see that file's header comment) - lets
+// budget.js's ScrollView disable itself for the duration of a wheel touch,
+// working around a real Android nested-touch race found on-device
+// (2026-08-19). Both no-ops if the caller doesn't pass them.
+export default function AffordabilityQuery({ onWheelInteractionStart, onWheelInteractionEnd }) {
   const [text, setText] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -265,6 +270,8 @@ export default function AffordabilityQuery() {
           max={9999}
           step={1}
           formatLabel={formatAmountLabel}
+          onInteractionStart={onWheelInteractionStart}
+          onInteractionEnd={onWheelInteractionEnd}
         />
       )}
 

@@ -38,6 +38,13 @@ export default function Budget() {
   const [loadingProposal, setLoadingProposal] = useState(false);
   const [applyingBudgetEdit, setApplyingBudgetEdit] = useState(false);
   const [error, setError] = useState(null);
+  // Real bug found on-device (2026-08-19): dragging AffordabilityQuery's
+  // amount wheel sometimes scrolled this ScrollView at the same time - an
+  // Android nested-touch race, not a fixed hitbox issue (see
+  // DrumAmountPicker.js's header comment for the full explanation).
+  // Disabling this ScrollView for the duration of a wheel touch sidesteps
+  // the race entirely rather than trying to out-time it.
+  const [wheelScrollLocked, setWheelScrollLocked] = useState(false);
 
   // Step 5: current month's budgeted vs. actual per category. `budgeted`
   // comes back null for a category that's never had a budget generated,
@@ -200,7 +207,7 @@ export default function Budget() {
           <ActivityIndicator />
         </View>
       ) : (
-        <ScrollView style={styles.budgetScreen}>
+        <ScrollView style={styles.budgetScreen} scrollEnabled={!wheelScrollLocked}>
           {/* Phase 5 Step 3 / Phase 13: "Can I afford this?" - decided in
               Phase 7 to live in this tab, since it's fundamentally a
               budget/goal-impact question, not a fifth destination of its
@@ -208,7 +215,10 @@ export default function Budget() {
               same spot rather than keeping two separate front doors. Placed
               above the budget-status list since it's a standalone question,
               not part of the generate/edit flow below it. */}
-          <AffordabilityQuery />
+          <AffordabilityQuery
+            onWheelInteractionStart={() => setWheelScrollLocked(true)}
+            onWheelInteractionEnd={() => setWheelScrollLocked(false)}
+          />
 
           {generatingBudget ? (
             <ActivityIndicator />

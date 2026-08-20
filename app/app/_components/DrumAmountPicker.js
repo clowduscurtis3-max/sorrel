@@ -39,6 +39,23 @@ export default function DrumAmountPicker({
   max = 9999,
   step = 1,
   formatLabel = (v) => String(v),
+  // Real bug found on-device (2026-08-19): dragging this picker sometimes
+  // scrolled the surrounding ScrollView at the same time - an intermittent
+  // Android nested-touch race, not a fixed border/hitbox issue as it first
+  // looked. The native picker (android/.../DrumPickerView.kt) does call
+  // requestDisallowInterceptTouchEvent once its RecyclerView recognizes a
+  // scroll, but Android decides whether an ancestor ScrollView intercepts
+  // a given touch *before* that event reaches the child on each move, so a
+  // fast/early drag can still get stolen on the very first move, before
+  // the picker's own disallow call has had a chance to land - matching the
+  // "sometimes" in the report exactly, not a border being too generous.
+  // Fixing the race itself would mean patching the library's native code;
+  // instead these two optional callbacks let a parent ScrollView disable
+  // its own scrolling for the duration of the touch, so there's no race to
+  // lose in the first place - same "sidestep it, don't out-guess a native
+  // touch-timing race" instinct as this app's own NumberScrollWheel fixes.
+  onInteractionStart,
+  onInteractionEnd,
 }) {
   const items = useMemo(() => {
     const list = [];
@@ -71,7 +88,12 @@ export default function DrumAmountPicker({
   }
 
   return (
-    <View style={localStyles.wrapper}>
+    <View
+      style={localStyles.wrapper}
+      onTouchStart={onInteractionStart}
+      onTouchEnd={onInteractionEnd}
+      onTouchCancel={onInteractionEnd}
+    >
       <VirtualizedDrumPicker
         items={items}
         selectedIndex={selectedIndex}
