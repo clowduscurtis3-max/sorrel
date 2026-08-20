@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, TextInput, Button, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, Button, ActivityIndicator, Pressable, StyleSheet } from 'react-native';
 import {
   useAudioRecorder,
   useAudioRecorderState,
@@ -275,13 +275,33 @@ export default function AffordabilityQuery() {
         </Text>
       )}
 
-      <TextInput
-        style={styles.input}
-        value={text}
-        onChangeText={setText}
-        placeholder={pendingContext ? 'e.g. $50' : 'e.g. Can I afford a $50 dinner?'}
-        editable={!submitting && !transcribing}
-      />
+      {/* Voice: record -> transcribe -> lands in the field to the left as
+          plain editable text. Never submits on its own - "Ask"/"Submit
+          amount" below is still the only way to actually send anything.
+          A compact icon button next to the input instead of its own
+          full-width "Ask by voice" button, per direct user request
+          (2026-08-20) - "clean looking," not a second big button
+          competing with Ask. */}
+      <View style={inlineStyles.inputRow}>
+        <TextInput
+          style={[styles.input, inlineStyles.input]}
+          value={text}
+          onChangeText={setText}
+          placeholder={pendingContext ? 'e.g. $50' : 'e.g. Can I afford a $50 dinner?'}
+          editable={!submitting && !transcribing}
+        />
+        {transcribing ? (
+          <ActivityIndicator style={inlineStyles.micButton} />
+        ) : (
+          <Pressable
+            onPress={onMicPress}
+            disabled={submitting}
+            style={inlineStyles.micButton}
+          >
+            <Text style={inlineStyles.micIcon}>{recorderState.isRecording ? '⏹' : '🎤'}</Text>
+          </Pressable>
+        )}
+      </View>
 
       {/* Phase 13: the wheel is a fallback for the needs_amount state only -
           "not taking up the screen constantly." Writes into the same
@@ -290,19 +310,6 @@ export default function AffordabilityQuery() {
           2026-08-20) rather than one continuous $1-$999,999 wheel - see
           this file's own header comment and DigitAmountPicker.js for why. */}
       {pendingContext && <DigitAmountPicker value={wheelValue} onValueChange={onWheelChange} />}
-
-      {/* Voice: record -> transcribe -> lands in the field above as plain
-          editable text. Never submits on its own - "Ask"/"Submit amount"
-          above is still the only way to actually send anything. */}
-      {transcribing ? (
-        <ActivityIndicator />
-      ) : (
-        <Button
-          title={recorderState.isRecording ? '⏹ Stop' : '🎤 Ask by voice'}
-          onPress={onMicPress}
-          disabled={submitting}
-        />
-      )}
 
       {voiceError && <Text style={styles.errorText}>{voiceError}</Text>}
 
@@ -399,3 +406,27 @@ export default function AffordabilityQuery() {
     </View>
   );
 }
+
+const inlineStyles = StyleSheet.create({
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: 8,
+  },
+  input: {
+    width: 220,
+  },
+  micButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#999',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  micIcon: {
+    fontSize: 20,
+  },
+});
