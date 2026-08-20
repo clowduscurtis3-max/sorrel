@@ -602,4 +602,5 @@ module.exports = {
   applyBudgetEdit,
   currentMonthRange,
   NoHistoryError,
+  HISTORY_DAYS,
 };

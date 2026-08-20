@@ -39,6 +39,7 @@ const { refreshAccountBalances, getAccountsSummary } = require('./accounts');
 const { generateNetWorthSnapshot, getNetWorthSummary } = require('./netWorth');
 const { recomputeNotificationEvents } = require('./notificationEvents');
 const { recomputeSubscriptionAuditEvents } = require('./subscriptionAuditEvents');
+const { getEssentialExpenseEstimate } = require('./emergencyFund');
 const { deliverPendingEventsForUser, runNotificationDelivery } = require('./pushDelivery');
 const { registerDevice, unregisterDevice } = require('./notifications');
 const { logError } = require('./safeLog');
@@ -691,6 +692,20 @@ app.post('/admin/deliver-notifications', requireUser, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message || 'Failed to deliver notifications' });
+  }
+});
+
+// Manual-verification-only route for the emergency-fund investigation's
+// foundation step (see CLAUDE.md) - not called from the app. Same purpose
+// as the other /admin/* routes: lets the estimate be curl'd and eyeballed
+// against real transaction history without any UI built yet.
+app.post('/admin/estimate-essential-expenses', requireUser, async (req, res) => {
+  try {
+    const result = await getEssentialExpenseEstimate(req.userId);
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to estimate essential expenses' });
   }
 });
 

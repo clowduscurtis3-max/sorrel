@@ -23,6 +23,13 @@ const SPEND_CATEGORIES = [
 const FLOW_CATEGORIES = ['Income', 'Transfers'];
 const FRIENDLY_CATEGORIES = [...SPEND_CATEGORIES, ...FLOW_CATEGORIES];
 
+// The necessity/discretionary split budget.js's own AI prompts (generateBudget,
+// proposeRebalance) already hardcode as prose - promoted to a real constant so
+// other deterministic logic (emergencyFund.js) can reuse the exact same split
+// instead of re-typing it. 'Other' is deliberately excluded from both sides -
+// it's a catch-all with no reliable essential/discretionary signal either way.
+const ESSENTIAL_CATEGORIES = ['Groceries', 'Bills & Utilities', 'Transportation', 'Health & Personal Care'];
+
 // Maps Plaid's `personal_finance_category.primary` onto our smaller list.
 // Deliberately does NOT include GENERAL_SERVICES - leaving it unmapped
 // forces those transactions through the Claude path below, which is the
@@ -232,5 +239,6 @@ module.exports = {
   FRIENDLY_CATEGORIES,
   SPEND_CATEGORIES,
   FLOW_CATEGORIES,
+  ESSENTIAL_CATEGORIES,
   normalizeMerchantKey,
 };
