@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, TextInput, Button, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, TextInput, Button, ActivityIndicator, Modal, StyleSheet } from 'react-native';
 import {
   useAudioRecorder,
   useAudioRecorderState,
@@ -76,14 +76,27 @@ function describeProjection(p) {
 //
 // Fixed for real by removing the nesting instead of refereeing it: the
 // wheel now renders inside a plain React Native <Modal> (see
-// wheelModalVisible below), opened by a button rather than shown inline.
-// A Modal mounts into its own separate native window, entirely outside
-// the Budget ScrollView's view hierarchy - there is structurally no
-// shared touch-dispatch chain left for the two to fight over, not just a
-// less-likely-to-lose one. This is the same pattern already proven safe
-// in this app for an analogous problem: AccountMenu.js's own history
-// (Phase 7) - a router-route-based modal caused three compounding bugs
-// before being rebuilt as a plain <Modal>, and it's been solid since.
+// wheelModalVisible below) instead of inline in the ScrollView. A Modal
+// mounts into its own separate native window, entirely outside the
+// Budget ScrollView's view hierarchy - there is structurally no shared
+// touch-dispatch chain left for the two to fight over, not just a
+// less-likely-to-lose one. Same pattern already proven safe in this app
+// for an analogous problem: AccountMenu.js's own history (Phase 7) - a
+// router-route-based modal caused three compounding bugs before being
+// rebuilt as a plain <Modal>, and it's been solid since.
+//
+// Per direct user feedback (2026-08-19, same day): the first cut required
+// an explicit "Pick with wheel" tap and rendered as a full-screen dialog
+// with its own title/Done bar - correctly called out as unnecessary
+// friction for what should be a lightweight popup. Now opens
+// automatically the instant a needs_amount response arrives (same timing
+// the inline wheel always used, pre-Modal) as a small `transparent`,
+// bottom-anchored sheet - the rest of the screen, including the text
+// field the wheel writes into, stays visible and undimmed behind it, so
+// the typed amount is visibly updating live while dragging, not hidden
+// behind an opaque takeover. Tapping the backdrop or "Done" closes it;
+// nothing else about the fix (still a real <Modal>, still structurally
+// outside the ScrollView) changed.
 export default function AffordabilityQuery() {
   const [text, setText] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -201,7 +214,7 @@ export default function AffordabilityQuery() {
         setPendingContext(body.context);
         setText(''); // clears the field for the amount-only reply, not auto-submitted
         setWheelValue(1);
-        setWheelModalVisible(false);
+        setWheelModalVisible(true); // pops up automatically, no extra tap
       } else {
         setPendingContext(null);
         setWheelModalVisible(false);
@@ -290,26 +303,29 @@ export default function AffordabilityQuery() {
           `text` field typed/voice input use, so it needs no separate
           submit path. Swapped to a real native picker (2026-08-19), then
           moved into its own <Modal> the same day (see this file's own
-          header comment) - opened explicitly rather than shown inline, so
-          it stays entirely outside the Budget tab's ScrollView. */}
-      {pendingContext && (
-        <Button title="🔢 Pick with wheel" onPress={() => setWheelModalVisible(true)} />
-      )}
-
+          header comment) - pops up automatically as soon as needs_amount
+          arrives, no extra tap, as a small transparent sheet rather than a
+          full-screen takeover. Still structurally outside the Budget
+          tab's ScrollView, which is the actual fix - just no longer
+          dressed up like a separate screen. */}
       <Modal
         visible={wheelModalVisible}
-        animationType="slide"
+        transparent
+        animationType="fade"
         onRequestClose={() => setWheelModalVisible(false)}
       >
-        <View style={styles.container}>
-          <View style={styles.topBar}>
-            <View />
-            <View>
-              <Button title="Done" onPress={() => setWheelModalVisible(false)} />
-            </View>
-          </View>
-          <View style={styles.centered}>
-            <Text style={styles.rowName}>Pick an amount</Text>
+        {/* Deliberately plain Views here, not Pressable/TouchableOpacity -
+            this session already found (the hard way, via adb logcat) that
+            wrapping this same native picker in a JS-responder-participating
+            component desyncs React Native's own touch bookkeeping. A plain
+            View claims no responder status, so it can't interfere with the
+            picker's native touch handling the way a tap-to-dismiss
+            Pressable backdrop could. Traded away: tap-outside-to-dismiss -
+            "Done" is the only way to close this, which is an acceptable,
+            deliberate trade for not reopening the exact bug class this
+            whole fix exists to avoid. */}
+        <View style={wheelSheetStyles.backdrop}>
+          <View style={wheelSheetStyles.sheet}>
             <DrumAmountPicker
               value={wheelValue}
               onValueChange={onWheelChange}
@@ -318,6 +334,7 @@ export default function AffordabilityQuery() {
               step={1}
               formatLabel={formatAmountLabel}
             />
+            <Button title="Done" onPress={() => setWheelModalVisible(false)} />
           </View>
         </View>
       </Modal>
@@ -430,3 +447,20 @@ export default function AffordabilityQuery() {
     </View>
   );
 }
+
+const wheelSheetStyles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.15)',
+  },
+  sheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingTop: 12,
+    paddingBottom: 24,
+    alignItems: 'center',
+    gap: 8,
+  },
+});
