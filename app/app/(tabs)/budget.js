@@ -1,16 +1,33 @@
 import { useCallback, useState } from 'react';
-import { View, Text, Button, ActivityIndicator, TextInput } from 'react-native';
-// Phase 13: ScrollView specifically from react-native-gesture-handler, not
-// plain react-native - this tab now nests a Gesture.Pan() (NumberScrollWheel,
-// inside AffordabilityQuery) directly inside this scroll container. RN's own
-// ScrollView uses its own native scroll responder, a different gesture
-// system from react-native-gesture-handler's; the two fighting over which
-// owns a vertical touch stream is a well-documented RNGH conflict, and its
-// usual symptom is exactly what showed up on-device here - the inner pan
-// gesture only seeing the touch at release instead of continuously during
-// the drag. RNGH's own ScrollView is a drop-in replacement that shares its
-// gesture-recognition system with Gesture.Pan(), avoiding that fight.
-import { ScrollView } from 'react-native-gesture-handler';
+import { View, Text, Button, ActivityIndicator, TextInput, ScrollView } from 'react-native';
+// Reverted from react-native-gesture-handler's ScrollView back to plain
+// React Native (2026-08-19). It was switched to RNGH's version in Phase 13
+// because this tab then nested a Gesture.Pan() (the old NumberScrollWheel)
+// directly inside this scroll container - that justification is gone,
+// AffordabilityQuery now uses DrumAmountPicker (a genuinely native widget,
+// no RNGH gesture at all), so there's nothing left here for RNGH's
+// ScrollView to coordinate with.
+//
+// OPEN BUG, not yet fixed as of this note: dragging AffordabilityQuery's
+// amount wheel can still partially scroll this ScrollView mid-drag.
+// Confirmed via a controlled on-device A/B (adb-scripted swipes + before/
+// after screenshots + a live logcat pull) that this happens identically
+// under both RNGH's ScrollView and this plain RN one - so it is NOT an
+// RNGH-vs-plain-ScrollView difference, that theory is ruled out, not just
+// unconfirmed. Also confirmed: setting `scrollEnabled={false}` for the
+// ENTIRE needs_amount step (not just reactively per-touch) reduces the
+// scroll distance but does not eliminate it, AND creates a strictly worse
+// failure mode than not locking at all - once the errant scroll happens,
+// the user is completely unable to scroll back up to recover, since
+// scrolling itself is disabled. Reverted that lock entirely for exactly
+// this reason (real on-device report: "the screen scrolled down, and now
+// I can't even scroll up"). Currently plain, unlocked, always-scrollable -
+// the original bug (occasional errant scroll) can still happen, but at
+// least it's recoverable by hand. Next avenue worth trying, not yet
+// attempted: keeping the wheel entirely outside any ScrollView while it's
+// visible (matching the fixed-header-above-a-scrollable-list pattern this
+// app already uses on Home), so there's no ScrollView for it to ever
+// fight with, rather than continuing to manage the conflict reactively.
 import { StatusBar } from 'expo-status-bar';
 import { useFocusEffect } from '@react-navigation/native';
 import { apiFetch, apiErrorMessage } from '../_lib/api';
@@ -38,13 +55,6 @@ export default function Budget() {
   const [loadingProposal, setLoadingProposal] = useState(false);
   const [applyingBudgetEdit, setApplyingBudgetEdit] = useState(false);
   const [error, setError] = useState(null);
-  // Real bug found on-device (2026-08-19): dragging AffordabilityQuery's
-  // amount wheel sometimes scrolled this ScrollView at the same time - an
-  // Android nested-touch race, not a fixed hitbox issue (see
-  // DrumAmountPicker.js's header comment for the full explanation).
-  // Disabling this ScrollView for the duration of a wheel touch sidesteps
-  // the race entirely rather than trying to out-time it.
-  const [wheelScrollLocked, setWheelScrollLocked] = useState(false);
 
   // Step 5: current month's budgeted vs. actual per category. `budgeted`
   // comes back null for a category that's never had a budget generated,
@@ -207,7 +217,7 @@ export default function Budget() {
           <ActivityIndicator />
         </View>
       ) : (
-        <ScrollView style={styles.budgetScreen} scrollEnabled={!wheelScrollLocked}>
+        <ScrollView style={styles.budgetScreen}>
           {/* Phase 5 Step 3 / Phase 13: "Can I afford this?" - decided in
               Phase 7 to live in this tab, since it's fundamentally a
               budget/goal-impact question, not a fifth destination of its
@@ -215,10 +225,7 @@ export default function Budget() {
               same spot rather than keeping two separate front doors. Placed
               above the budget-status list since it's a standalone question,
               not part of the generate/edit flow below it. */}
-          <AffordabilityQuery
-            onWheelInteractionStart={() => setWheelScrollLocked(true)}
-            onWheelInteractionEnd={() => setWheelScrollLocked(false)}
-          />
+          <AffordabilityQuery />
 
           {generatingBudget ? (
             <ActivityIndicator />

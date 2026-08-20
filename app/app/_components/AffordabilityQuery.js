@@ -61,12 +61,19 @@ function describeProjection(p) {
   );
 }
 
-// onWheelInteractionStart/onWheelInteractionEnd: optional, forwarded
-// straight to DrumAmountPicker (see that file's header comment) - lets
-// budget.js's ScrollView disable itself for the duration of a wheel touch,
-// working around a real Android nested-touch race found on-device
-// (2026-08-19). Both no-ops if the caller doesn't pass them.
-export default function AffordabilityQuery({ onWheelInteractionStart, onWheelInteractionEnd }) {
+// OPEN BUG, not fixed as of this note (2026-08-19): dragging the amount
+// wheel below can still partially scroll the parent Budget ScrollView
+// mid-drag - see that file's own header comment for the full history.
+// Three attempts so far all failed or made things worse (raw touch
+// handlers desynced RN's gesture bookkeeping; the wheel's own
+// onValueChanging/onChange still lost the race on a fast swipe; locking
+// scrollEnabled for this component's whole needs_amount lifetime reduced
+// but didn't eliminate the scroll, AND trapped the user unable to scroll
+// back up once it happened - reverted). This component currently has no
+// special handling for it. Next avenue to try: keep the wheel entirely
+// outside any ScrollView while visible, rather than reactively managing
+// scrollEnabled against it.
+export default function AffordabilityQuery() {
   const [text, setText] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -75,6 +82,7 @@ export default function AffordabilityQuery({ onWheelInteractionStart, onWheelInt
   // context a NEEDS_AMOUNT response returned, which the follow-up request
   // echoes back verbatim (see server/index.js's /affordability/query).
   const [pendingContext, setPendingContext] = useState(null);
+
   // The wheel's own numeric value, separate from `text` - it needs a plain
   // number to drive DrumAmountPicker's controlled `value` prop, while
   // `text` stays the one field that's actually submitted (same field
@@ -270,8 +278,6 @@ export default function AffordabilityQuery({ onWheelInteractionStart, onWheelInt
           max={9999}
           step={1}
           formatLabel={formatAmountLabel}
-          onInteractionStart={onWheelInteractionStart}
-          onInteractionEnd={onWheelInteractionEnd}
         />
       )}
 
