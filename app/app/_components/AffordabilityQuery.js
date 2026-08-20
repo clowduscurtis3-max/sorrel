@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, TextInput, Button, ActivityIndicator, Modal, StyleSheet } from 'react-native';
+import { View, Text, TextInput, Button, ActivityIndicator } from 'react-native';
 import {
   useAudioRecorder,
   useAudioRecorderState,
@@ -61,42 +61,35 @@ function describeProjection(p) {
   );
 }
 
-// Real bug, fixed 2026-08-19 after three failed/counterproductive
-// reactive attempts (raw touch handlers desynced RN's own gesture
-// bookkeeping; the wheel's own onValueChanging/onChange still lost the
-// touch-dispatch race on a fast swipe; locking the parent ScrollView's
-// scrollEnabled reduced but didn't eliminate the scroll AND trapped the
-// user unable to scroll back up once it happened - all three reverted,
-// see git history on this file and budget.js for the full trace). Every
-// one of those tried to referee a conflict between two native
-// touch-consuming views nested in the same hierarchy (the picker's
-// RecyclerView and the Budget tab's ScrollView) - a fight that can be
-// lost regardless of how fast the JS side reacts, since the JS thread is
-// never faster than native touch dispatch.
+// OPEN BUG (2026-08-19): dragging the wheel below can partially scroll the
+// parent Budget ScrollView mid-drag. Four things tried this same day, in
+// order: (1) raw View touch handlers toggling scrollEnabled - desynced
+// React Native's own gesture bookkeeping (confirmed via adb logcat);
+// (2) the wheel's own onValueChanging/onChange driving the same toggle -
+// fixed (1)'s desync but still lost the touch-dispatch race on a fast
+// swipe; (3) locking scrollEnabled for the wheel's whole visible lifetime -
+// reduced but didn't eliminate the scroll, AND trapped the user unable to
+// scroll back up once it happened, a strictly worse failure mode, real
+// on-device report: "the screen scrolled down, and now I can't even
+// scroll up"; (4) moving the wheel into its own <Modal> (a separate native
+// window, no shared touch-dispatch chain with the ScrollView at all) -
+// this one actually worked (confirmed on-device: "runs great, super
+// smooth"), but the presentation - an explicit "Pick with wheel" tap plus
+// a popup sheet - was rejected directly by the user as unnecessary
+// friction ("extra work, looks dumb... just fix the scrolling").
 //
-// Fixed for real by removing the nesting instead of refereeing it: the
-// wheel now renders inside a plain React Native <Modal> (see
-// wheelModalVisible below) instead of inline in the ScrollView. A Modal
-// mounts into its own separate native window, entirely outside the
-// Budget ScrollView's view hierarchy - there is structurally no shared
-// touch-dispatch chain left for the two to fight over, not just a
-// less-likely-to-lose one. Same pattern already proven safe in this app
-// for an analogous problem: AccountMenu.js's own history (Phase 7) - a
-// router-route-based modal caused three compounding bugs before being
-// rebuilt as a plain <Modal>, and it's been solid since.
-//
-// Per direct user feedback (2026-08-19, same day): the first cut required
-// an explicit "Pick with wheel" tap and rendered as a full-screen dialog
-// with its own title/Done bar - correctly called out as unnecessary
-// friction for what should be a lightweight popup. Now opens
-// automatically the instant a needs_amount response arrives (same timing
-// the inline wheel always used, pre-Modal) as a small `transparent`,
-// bottom-anchored sheet - the rest of the screen, including the text
-// field the wheel writes into, stays visible and undimmed behind it, so
-// the typed amount is visibly updating live while dragging, not hidden
-// behind an opaque takeover. Tapping the backdrop or "Done" closes it;
-// nothing else about the fix (still a real <Modal>, still structurally
-// outside the ScrollView) changed.
+// Reverted to a plain inline wheel per that direct instruction, combined
+// with a much bigger touch target (see DrumAmountPicker.js's own
+// ITEM_HEIGHT/textSize - roughly doubled) on the user's own theory that a
+// generous hit area with nothing else nearby removes most real-world
+// cases of a drag spilling onto the ScrollView. Worth flagging honestly:
+// this session's own controlled testing (adb-scripted swipes starting
+// well inside the wheel's already-full-width bounds, not near an edge)
+// still reproduced the scroll, so touch-area size alone may not fully
+// eliminate it the way the Modal did - not yet re-tested on-device with
+// the larger size as of this note. If it recurs, the Modal approach is
+// proven to work; the open question would be presentation only (how to
+// make a popup feel like less friction), not whether it's needed.
 export default function AffordabilityQuery() {
   const [text, setText] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -112,12 +105,6 @@ export default function AffordabilityQuery() {
   // `text` stays the one field that's actually submitted (same field
   // voice transcription writes into).
   const [wheelValue, setWheelValue] = useState(1);
-  // Whether the wheel's <Modal> is open - explicit open/close, not tied
-  // directly to pendingContext, so the wheel stays "not taking up the
-  // screen constantly" (only appears on request) even during the
-  // needs_amount step - typed/voice input remain the always-available
-  // default, matching Phase 9's original design.
-  const [wheelModalVisible, setWheelModalVisible] = useState(false);
 
   // Step 4 (moved from ScenarioCheck.js in Phase 13): "buy now vs. wait
   // until your next paycheck" - its own separate loading/error/result
@@ -214,10 +201,8 @@ export default function AffordabilityQuery() {
         setPendingContext(body.context);
         setText(''); // clears the field for the amount-only reply, not auto-submitted
         setWheelValue(1);
-        setWheelModalVisible(true); // pops up automatically, no extra tap
       } else {
         setPendingContext(null);
-        setWheelModalVisible(false);
       }
     } catch (err) {
       console.error(err);
@@ -244,7 +229,6 @@ export default function AffordabilityQuery() {
     setError(null);
     setComparison(null);
     setComparisonError(null);
-    setWheelModalVisible(false);
   }
 
   // Reuses the last successfully-checked amount/category/recurrence
@@ -301,43 +285,19 @@ export default function AffordabilityQuery() {
       {/* Phase 13: the wheel is a fallback for the needs_amount state only -
           "not taking up the screen constantly." Writes into the same
           `text` field typed/voice input use, so it needs no separate
-          submit path. Swapped to a real native picker (2026-08-19), then
-          moved into its own <Modal> the same day (see this file's own
-          header comment) - pops up automatically as soon as needs_amount
-          arrives, no extra tap, as a small transparent sheet rather than a
-          full-screen takeover. Still structurally outside the Budget
-          tab's ScrollView, which is the actual fix - just no longer
-          dressed up like a separate screen. */}
-      <Modal
-        visible={wheelModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setWheelModalVisible(false)}
-      >
-        {/* Deliberately plain Views here, not Pressable/TouchableOpacity -
-            this session already found (the hard way, via adb logcat) that
-            wrapping this same native picker in a JS-responder-participating
-            component desyncs React Native's own touch bookkeeping. A plain
-            View claims no responder status, so it can't interfere with the
-            picker's native touch handling the way a tap-to-dismiss
-            Pressable backdrop could. Traded away: tap-outside-to-dismiss -
-            "Done" is the only way to close this, which is an acceptable,
-            deliberate trade for not reopening the exact bug class this
-            whole fix exists to avoid. */}
-        <View style={wheelSheetStyles.backdrop}>
-          <View style={wheelSheetStyles.sheet}>
-            <DrumAmountPicker
-              value={wheelValue}
-              onValueChange={onWheelChange}
-              min={1}
-              max={9999}
-              step={1}
-              formatLabel={formatAmountLabel}
-            />
-            <Button title="Done" onPress={() => setWheelModalVisible(false)} />
-          </View>
-        </View>
-      </Modal>
+          submit path. Plain inline render per direct user instruction
+          (2026-08-19) - see this file's own header comment for the Modal
+          attempt that preceded this and why it was reverted. */}
+      {pendingContext && (
+        <DrumAmountPicker
+          value={wheelValue}
+          onValueChange={onWheelChange}
+          min={1}
+          max={9999}
+          step={1}
+          formatLabel={formatAmountLabel}
+        />
+      )}
 
       {/* Voice: record -> transcribe -> lands in the field above as plain
           editable text. Never submits on its own - "Ask"/"Submit amount"
@@ -447,20 +407,3 @@ export default function AffordabilityQuery() {
     </View>
   );
 }
-
-const wheelSheetStyles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.15)',
-  },
-  sheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingTop: 12,
-    paddingBottom: 24,
-    alignItems: 'center',
-    gap: 8,
-  },
-});

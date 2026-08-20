@@ -8,26 +8,30 @@ import { View, Text, Button, ActivityIndicator, TextInput, ScrollView } from 're
 // no RNGH gesture at all), so there's nothing left here for RNGH's
 // ScrollView to coordinate with.
 //
-// OPEN BUG, not yet fixed as of this note: dragging AffordabilityQuery's
-// amount wheel can still partially scroll this ScrollView mid-drag.
-// Confirmed via a controlled on-device A/B (adb-scripted swipes + before/
-// after screenshots + a live logcat pull) that this happens identically
-// under both RNGH's ScrollView and this plain RN one - so it is NOT an
-// RNGH-vs-plain-ScrollView difference, that theory is ruled out, not just
-// unconfirmed. Also confirmed: setting `scrollEnabled={false}` for the
-// ENTIRE needs_amount step (not just reactively per-touch) reduces the
-// scroll distance but does not eliminate it, AND creates a strictly worse
-// failure mode than not locking at all - once the errant scroll happens,
-// the user is completely unable to scroll back up to recover, since
-// scrolling itself is disabled. Reverted that lock entirely for exactly
-// this reason (real on-device report: "the screen scrolled down, and now
-// I can't even scroll up"). Currently plain, unlocked, always-scrollable -
-// the original bug (occasional errant scroll) can still happen, but at
-// least it's recoverable by hand. Next avenue worth trying, not yet
-// attempted: keeping the wheel entirely outside any ScrollView while it's
-// visible (matching the fixed-header-above-a-scrollable-list pattern this
-// app already uses on Home), so there's no ScrollView for it to ever
-// fight with, rather than continuing to manage the conflict reactively.
+// OPEN BUG, not confirmed fixed as of this note (2026-08-19): dragging
+// AffordabilityQuery's amount wheel can partially scroll this ScrollView
+// mid-drag. Confirmed via a controlled on-device A/B (adb-scripted swipes
+// + before/after screenshots + a live logcat pull) that this happens
+// identically under both RNGH's ScrollView and this plain RN one - so it
+// is NOT an RNGH-vs-plain-ScrollView difference, ruled out, not just
+// unconfirmed. Also tried and reverted: locking `scrollEnabled={false}`
+// for the whole needs_amount step reduced but didn't eliminate the
+// scroll, AND trapped the user unable to scroll back up once it happened
+// - worse than not locking at all. A <Modal>-based fix (wheel rendered in
+// its own native window, structurally outside this ScrollView's touch
+// hierarchy) was built and worked, but was rejected on direct user
+// feedback as unnecessary presentation friction ("extra work, looks
+// dumb"). Current approach, same session: plain inline wheel (like
+// before any of this), combined with a much larger touch target
+// (DrumAmountPicker.js's ITEM_HEIGHT roughly doubled) on the theory that
+// a generous hit area with nothing rendered beside the wheel removes most
+// real-world cases of a drag spilling onto this ScrollView. Not yet
+// re-tested on-device with the larger size - this session's own earlier
+// controlled testing reproduced the scroll even with swipes starting well
+// inside the wheel's (already full-width) bounds, so size alone may not
+// fully close it the way the Modal did. If it recurs, the Modal is a
+// proven-working fallback; the remaining question would be presentation,
+// not whether the fix itself works.
 import { StatusBar } from 'expo-status-bar';
 import { useFocusEffect } from '@react-navigation/native';
 import { apiFetch, apiErrorMessage } from '../_lib/api';

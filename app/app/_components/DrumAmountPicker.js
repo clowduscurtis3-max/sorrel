@@ -29,16 +29,28 @@ import { DrumPicker, withVirtualized } from 'react-native-drum-picker';
 // strings ("$1", "$2", ...) already satisfy.
 const VirtualizedDrumPicker = withVirtualized(DrumPicker);
 
-const ITEM_HEIGHT = 40;
+// Doubled from the original 40 (2026-08-19), per direct user instruction:
+// nothing else sits beside this wheel while it's showing, so there's no
+// real risk of a bigger hit area accidentally landing on something else -
+// only upside. textSize/selectedTextSize scaled up to match so the numbers
+// look intentional at this size rather than small and lost in a much
+// taller row.
+const ITEM_HEIGHT = 80;
 const VISIBLE_ITEM_COUNT = 5;
+const TEXT_SIZE = 26;
+const SELECTED_TEXT_SIZE = 32;
 
 // This component used to also expose onInteractionStart/onInteractionEnd
 // so a parent ScrollView could disable itself while the wheel was being
-// touched. Removed (2026-08-19) after three straight attempts at fixing a
-// real on-device bug (dragging this wheel can partially scroll the parent
-// Budget ScrollView) all either failed to fully stop it or made things
-// worse - see budget.js's own header comment for the full history and
-// current open-bug status. Not fixed as of this note.
+// touched, then briefly moved into a <Modal> to sidestep the conflict
+// structurally - both approaches worked or partially worked, but per
+// direct user feedback (2026-08-19) the ScrollView conflict should instead
+// be addressed by making this wheel's touch target generously large
+// (nothing else renders next to it while it's showing, so there's no
+// meaningful downside), reverting to a plain inline render. See
+// AffordabilityQuery.js's and budget.js's own header comments for the
+// full history and current open-bug status - not confirmed fixed by size
+// alone as of this note, still needs an on-device retest.
 export default function DrumAmountPicker({
   value,
   onValueChange,
@@ -84,6 +96,8 @@ export default function DrumAmountPicker({
         selectedIndex={selectedIndex}
         itemHeight={ITEM_HEIGHT}
         visibleItemCount={VISIBLE_ITEM_COUNT}
+        textSize={TEXT_SIZE}
+        selectedTextSize={SELECTED_TEXT_SIZE}
         hapticFeedback
         onChange={handleChange}
         style={localStyles.picker}
