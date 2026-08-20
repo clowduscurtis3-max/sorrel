@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, TextInput, Button, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, Button, ActivityIndicator, Modal } from 'react-native';
 import {
   useAudioRecorder,
   useAudioRecorderState,
@@ -61,18 +61,29 @@ function describeProjection(p) {
   );
 }
 
-// OPEN BUG, not fixed as of this note (2026-08-19): dragging the amount
-// wheel below can still partially scroll the parent Budget ScrollView
-// mid-drag - see that file's own header comment for the full history.
-// Three attempts so far all failed or made things worse (raw touch
-// handlers desynced RN's gesture bookkeeping; the wheel's own
-// onValueChanging/onChange still lost the race on a fast swipe; locking
-// scrollEnabled for this component's whole needs_amount lifetime reduced
-// but didn't eliminate the scroll, AND trapped the user unable to scroll
-// back up once it happened - reverted). This component currently has no
-// special handling for it. Next avenue to try: keep the wheel entirely
-// outside any ScrollView while visible, rather than reactively managing
-// scrollEnabled against it.
+// Real bug, fixed 2026-08-19 after three failed/counterproductive
+// reactive attempts (raw touch handlers desynced RN's own gesture
+// bookkeeping; the wheel's own onValueChanging/onChange still lost the
+// touch-dispatch race on a fast swipe; locking the parent ScrollView's
+// scrollEnabled reduced but didn't eliminate the scroll AND trapped the
+// user unable to scroll back up once it happened - all three reverted,
+// see git history on this file and budget.js for the full trace). Every
+// one of those tried to referee a conflict between two native
+// touch-consuming views nested in the same hierarchy (the picker's
+// RecyclerView and the Budget tab's ScrollView) - a fight that can be
+// lost regardless of how fast the JS side reacts, since the JS thread is
+// never faster than native touch dispatch.
+//
+// Fixed for real by removing the nesting instead of refereeing it: the
+// wheel now renders inside a plain React Native <Modal> (see
+// wheelModalVisible below), opened by a button rather than shown inline.
+// A Modal mounts into its own separate native window, entirely outside
+// the Budget ScrollView's view hierarchy - there is structurally no
+// shared touch-dispatch chain left for the two to fight over, not just a
+// less-likely-to-lose one. This is the same pattern already proven safe
+// in this app for an analogous problem: AccountMenu.js's own history
+// (Phase 7) - a router-route-based modal caused three compounding bugs
+// before being rebuilt as a plain <Modal>, and it's been solid since.
 export default function AffordabilityQuery() {
   const [text, setText] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -88,6 +99,12 @@ export default function AffordabilityQuery() {
   // `text` stays the one field that's actually submitted (same field
   // voice transcription writes into).
   const [wheelValue, setWheelValue] = useState(1);
+  // Whether the wheel's <Modal> is open - explicit open/close, not tied
+  // directly to pendingContext, so the wheel stays "not taking up the
+  // screen constantly" (only appears on request) even during the
+  // needs_amount step - typed/voice input remain the always-available
+  // default, matching Phase 9's original design.
+  const [wheelModalVisible, setWheelModalVisible] = useState(false);
 
   // Step 4 (moved from ScenarioCheck.js in Phase 13): "buy now vs. wait
   // until your next paycheck" - its own separate loading/error/result
@@ -184,8 +201,10 @@ export default function AffordabilityQuery() {
         setPendingContext(body.context);
         setText(''); // clears the field for the amount-only reply, not auto-submitted
         setWheelValue(1);
+        setWheelModalVisible(false);
       } else {
         setPendingContext(null);
+        setWheelModalVisible(false);
       }
     } catch (err) {
       console.error(err);
@@ -212,6 +231,7 @@ export default function AffordabilityQuery() {
     setError(null);
     setComparison(null);
     setComparisonError(null);
+    setWheelModalVisible(false);
   }
 
   // Reuses the last successfully-checked amount/category/recurrence
@@ -268,18 +288,39 @@ export default function AffordabilityQuery() {
       {/* Phase 13: the wheel is a fallback for the needs_amount state only -
           "not taking up the screen constantly." Writes into the same
           `text` field typed/voice input use, so it needs no separate
-          submit path. Swapped to a real native picker (2026-08-19) -
-          see DrumAmountPicker.js for why. */}
+          submit path. Swapped to a real native picker (2026-08-19), then
+          moved into its own <Modal> the same day (see this file's own
+          header comment) - opened explicitly rather than shown inline, so
+          it stays entirely outside the Budget tab's ScrollView. */}
       {pendingContext && (
-        <DrumAmountPicker
-          value={wheelValue}
-          onValueChange={onWheelChange}
-          min={1}
-          max={9999}
-          step={1}
-          formatLabel={formatAmountLabel}
-        />
+        <Button title="🔢 Pick with wheel" onPress={() => setWheelModalVisible(true)} />
       )}
+
+      <Modal
+        visible={wheelModalVisible}
+        animationType="slide"
+        onRequestClose={() => setWheelModalVisible(false)}
+      >
+        <View style={styles.container}>
+          <View style={styles.topBar}>
+            <View />
+            <View>
+              <Button title="Done" onPress={() => setWheelModalVisible(false)} />
+            </View>
+          </View>
+          <View style={styles.centered}>
+            <Text style={styles.rowName}>Pick an amount</Text>
+            <DrumAmountPicker
+              value={wheelValue}
+              onValueChange={onWheelChange}
+              min={1}
+              max={9999}
+              step={1}
+              formatLabel={formatAmountLabel}
+            />
+          </View>
+        </View>
+      </Modal>
 
       {/* Voice: record -> transcribe -> lands in the field above as plain
           editable text. Never submits on its own - "Ask"/"Submit amount"
