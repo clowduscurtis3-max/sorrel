@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { View, Text, Button, ActivityIndicator, TextInput, ScrollView } from 'react-native';
+import { View, Text, Button, ActivityIndicator, TextInput, ScrollView, StyleSheet } from 'react-native';
 // Reverted from react-native-gesture-handler's ScrollView back to plain
 // React Native (2026-08-19). It was switched to RNGH's version in Phase 13
 // because this tab then nested a Gesture.Pan() (the old NumberScrollWheel)
@@ -216,6 +216,11 @@ export default function Budget() {
               not part of the generate/edit flow below it. */}
           <AffordabilityQuery />
 
+          {/* Full-width divider between the affordability question and the
+              budget-status list below it, per direct user request
+              (2026-08-20) - the two were visually running together. */}
+          <View style={localStyles.sectionDivider} />
+
           {generatingBudget ? (
             <ActivityIndicator />
           ) : (
@@ -309,3 +314,12 @@ export default function Budget() {
     </View>
   );
 }
+
+const localStyles = StyleSheet.create({
+  sectionDivider: {
+    alignSelf: 'stretch',
+    borderBottomWidth: 1,
+    borderBottomColor: '#ccc',
+    marginVertical: 12,
+  },
+});

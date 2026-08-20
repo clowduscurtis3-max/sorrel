@@ -275,6 +275,18 @@ export default function AffordabilityQuery() {
         </Text>
       )}
 
+      {/* Phase 13: the wheel is a fallback for the needs_amount state only -
+          "not taking up the screen constantly." Writes into the same
+          `text` field typed/voice input use, so it needs no separate
+          submit path. Now a per-digit odometer (DigitAmountPicker,
+          2026-08-20) rather than one continuous $1-$999,999 wheel - see
+          this file's own header comment and DigitAmountPicker.js for why.
+          Rendered above the text/mic row (moved 2026-08-20, direct user
+          request) so the wheel - the primary way to answer once it's
+          showing - reads as the focal point, with typed/voice entry below
+          it as the alternative rather than the first thing seen. */}
+      {pendingContext && <DigitAmountPicker value={wheelValue} onValueChange={onWheelChange} />}
+
       {/* Voice: record -> transcribe -> lands in the field to the left as
           plain editable text. Never submits on its own - "Ask"/"Submit
           amount" below is still the only way to actually send anything.
@@ -302,14 +314,6 @@ export default function AffordabilityQuery() {
           </Pressable>
         )}
       </View>
-
-      {/* Phase 13: the wheel is a fallback for the needs_amount state only -
-          "not taking up the screen constantly." Writes into the same
-          `text` field typed/voice input use, so it needs no separate
-          submit path. Now a per-digit odometer (DigitAmountPicker,
-          2026-08-20) rather than one continuous $1-$999,999 wheel - see
-          this file's own header comment and DigitAmountPicker.js for why. */}
-      {pendingContext && <DigitAmountPicker value={wheelValue} onValueChange={onWheelChange} />}
 
       {voiceError && <Text style={styles.errorText}>{voiceError}</Text>}
 
