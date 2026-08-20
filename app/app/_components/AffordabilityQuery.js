@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { View, Text, TextInput, Button, ActivityIndicator, Pressable, StyleSheet } from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons';
 import {
   useAudioRecorder,
   useAudioRecorderState,
@@ -308,9 +309,12 @@ export default function AffordabilityQuery() {
           <Pressable
             onPress={onMicPress}
             disabled={submitting}
-            style={inlineStyles.micButton}
+            style={[
+              inlineStyles.micButton,
+              recorderState.isRecording ? inlineStyles.micButtonRecording : inlineStyles.micButtonIdle,
+            ]}
           >
-            <Text style={inlineStyles.micIcon}>{recorderState.isRecording ? '⏹' : '🎤'}</Text>
+            <MaterialIcons name={recorderState.isRecording ? 'stop' : 'mic'} size={22} color="#fff" />
           </Pressable>
         )}
       </View>
@@ -421,16 +425,23 @@ const inlineStyles = StyleSheet.create({
   input: {
     width: 220,
   },
+  // Solid filled circle + a real Material Icons glyph (Google's own icon
+  // set, already ships with Expo - no new native dependency), per direct
+  // user request (2026-08-20): "not some emoji mic... the one Google
+  // uses." Blue while idle (tap to start), red while actively recording
+  // (tap to stop) - the same color language as system mic-mute controls,
+  // so the color alone signals state, not just the icon swap.
   micButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#999',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  micIcon: {
-    fontSize: 20,
+  micButtonIdle: {
+    backgroundColor: '#1a73e8',
+  },
+  micButtonRecording: {
+    backgroundColor: '#d93025',
   },
 });

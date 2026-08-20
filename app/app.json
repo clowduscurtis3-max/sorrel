@@ -47,7 +47,8 @@
           "microphonePermission": "Allow Pocket Accountant to use your microphone to ask about a purchase by voice."
         }
       ],
-      "expo-asset"
+      "expo-asset",
+      "expo-font"
     ],
     "extra": {
       "eas": {
