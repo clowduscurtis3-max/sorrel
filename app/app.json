@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Pocket Accountant",
+    "name": "Sorrel",
     "slug": "pocket-accountant",
     "scheme": "pocketaccountant",
     "version": "1.0.0",
@@ -44,7 +44,7 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "Allow Pocket Accountant to use your microphone to ask about a purchase by voice."
+          "microphonePermission": "Allow Sorrel to use your microphone to ask about a purchase by voice."
         }
       ],
       "expo-asset",

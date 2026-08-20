@@ -1,5 +1,29 @@
 import { StyleSheet } from 'react-native';
 
+// Sorrel brand palette (CLAUDE.md "Color palette" note, 2026-08-13) -
+// dark-forest-green/sage/cream, light theme. Named by role so future
+// screens import `colors` rather than re-typing hex values.
+export const colors = {
+  darkest: '#0F2B23',
+  dark: '#1E4335',
+  primary: '#2D6A4F',
+  accent: '#6DAF8A',
+  sage: '#A7CBB3',
+  background: '#F4F6F2',
+  card: '#EDECE7',
+  // Semantic colors - not part of the 7-hex Sorrel brand palette above
+  // (which has no warning/error/positive roles), so kept as their own
+  // named group rather than forced into a brand hue that doesn't fit
+  // their meaning. Values are the pre-existing hardcoded hex this app
+  // already used for these purposes, just centralized here.
+  warning: '#b8860b',
+  warningText: '#7a5c00',
+  error: '#b00020',
+  positive: '#3a6b3a',
+  reviewWarning: '#a06600',
+  muted: '#666',
+};
+
 // Shared subset of the old app/App.js styles object, copied verbatim
 // (Phase 7 Step 1 sub-step 1.2). Only the keys needed by sign-in.js/
 // goal-intake.js/the current Home placeholder so far - later sub-steps
@@ -8,7 +32,7 @@ import { StyleSheet } from 'react-native';
 export const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.background,
     paddingTop: 60,
   },
   goalScreen: {
@@ -47,10 +71,11 @@ export const styles = StyleSheet.create({
   },
   input: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#999',
+    borderColor: colors.sage,
     borderRadius: 4,
     padding: 8,
     fontSize: 15,
+    color: colors.darkest,
   },
   // Without an explicit height, @react-native-picker/picker's Android
   // native view can render with zero measured height inside a flex/scroll
@@ -64,10 +89,10 @@ export const styles = StyleSheet.create({
     height: 50,
     width: '100%',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#999',
+    borderColor: colors.sage,
     borderRadius: 4,
-    color: '#000',
-    backgroundColor: '#fff',
+    color: colors.darkest,
+    backgroundColor: colors.background,
   },
   centered: {
     flex: 1,
@@ -77,15 +102,16 @@ export const styles = StyleSheet.create({
   },
   text: {
     fontSize: 16,
+    color: colors.darkest,
   },
   smallText: {
     fontSize: 13,
-    color: '#444',
+    color: colors.dark,
     textAlign: 'center',
   },
   errorText: {
     fontSize: 14,
-    color: '#b00020',
+    color: colors.error,
     textAlign: 'center',
   },
   // Added for Home tab (sub-step 1.3) - ported verbatim from the old
@@ -112,14 +138,14 @@ export const styles = StyleSheet.create({
   },
   alertRow: {
     borderLeftWidth: 3,
-    borderLeftColor: '#b8860b',
+    borderLeftColor: colors.warning,
     paddingLeft: 10,
     paddingVertical: 2,
     gap: 2,
   },
   alertText: {
     fontSize: 14,
-    color: '#7a5c00',
+    color: colors.warningText,
   },
   errorBanner: {
     alignItems: 'center',
@@ -133,7 +159,8 @@ export const styles = StyleSheet.create({
   sectionHeader: {
     fontSize: 14,
     fontWeight: '600',
-    backgroundColor: '#f2f2f2',
+    backgroundColor: colors.card,
+    color: colors.darkest,
     paddingHorizontal: 16,
     paddingVertical: 8,
   },
@@ -141,7 +168,7 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#ddd',
+    borderBottomColor: colors.sage,
   },
   rowMain: {
     flexDirection: 'row',
@@ -151,14 +178,16 @@ export const styles = StyleSheet.create({
     fontSize: 15,
     flexShrink: 1,
     paddingRight: 8,
+    color: colors.darkest,
   },
   rowAmount: {
     fontSize: 15,
     fontWeight: '500',
+    color: colors.darkest,
   },
   recurringTag: {
     fontSize: 11,
-    color: '#3a6b3a',
+    color: colors.positive,
     marginTop: 2,
   },
   reviewRow: {
@@ -168,7 +197,7 @@ export const styles = StyleSheet.create({
   },
   reviewText: {
     fontSize: 12,
-    color: '#a06600',
+    color: colors.reviewWarning,
   },
   categoryPicker: {
     flexDirection: 'row',
@@ -192,7 +221,7 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 6,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#eee',
+    borderBottomColor: colors.sage,
   },
   // Added for Recurring tab (sub-step 1.5) - ported verbatim from the old
   // app/App.js styles object. Distinguishes the three recurring-spend
@@ -201,7 +230,7 @@ export const styles = StyleSheet.create({
   recurringGroupHeader: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#666',
+    color: colors.muted,
     marginTop: 10,
     marginBottom: 2,
   },
@@ -233,7 +262,7 @@ export const styles = StyleSheet.create({
   plaidItemBlock: {
     gap: 4,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#ddd',
+    borderBottomColor: colors.sage,
     paddingBottom: 10,
   },
 });

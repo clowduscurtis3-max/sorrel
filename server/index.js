@@ -182,7 +182,7 @@ app.post('/link-token', requireUser, async (req, res) => {
 
       const response = await plaidClient.linkTokenCreate({
         user: { client_user_id: req.userId },
-        client_name: 'Pocket Accountant',
+        client_name: 'Sorrel',
         country_codes: ['US'],
         language: 'en',
         access_token: accessToken,
@@ -192,7 +192,7 @@ app.post('/link-token', requireUser, async (req, res) => {
 
     const response = await plaidClient.linkTokenCreate({
       user: { client_user_id: req.userId },
-      client_name: 'Pocket Accountant',
+      client_name: 'Sorrel',
       products: ['transactions'],
       country_codes: ['US'],
       language: 'en',

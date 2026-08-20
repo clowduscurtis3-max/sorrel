@@ -9,7 +9,7 @@ import Constants from 'expo-constants';
 async function ensureAndroidChannel() {
   if (Platform.OS !== 'android') return;
   await Notifications.setNotificationChannelAsync('default', {
-    name: 'Pocket Accountant',
+    name: 'Sorrel',
     importance: Notifications.AndroidImportance.DEFAULT,
   });
 }

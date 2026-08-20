@@ -35,7 +35,7 @@ export default function SignIn() {
 
   return (
     <View style={styles.centered}>
-      <Text style={styles.text}>Pocket Accountant</Text>
+      <Text style={styles.text}>Sorrel</Text>
       <Button title="Sign in with Google" onPress={signInWithGoogle} />
       {error && <Text style={styles.errorText}>{error}</Text>}
       <StatusBar style="auto" />
