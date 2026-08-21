@@ -302,12 +302,22 @@ export default function AffordabilityQuery() {
       // against a different (or now-superseded) checked amount.
       setComparison(null);
       setComparisonError(null);
-      if (body.status === 'needs_amount') {
+      if (
+        body.status === 'needs_amount' ||
+        body.status === 'needs_financing_confirmation' ||
+        body.status === 'needs_finance_term'
+      ) {
         setPendingContext(body.context);
         setText(''); // clears the field for the amount-only reply, not auto-submitted
         setWheelValue(1);
       } else {
+        // Real bug found on-device (2026-08-21): a terminal status (result/
+        // insufficient_data/unsupported) used to leave whatever was last
+        // typed/submitted sitting in the field - the conversation was over,
+        // but the input still showed a stale reply from partway through it.
         setPendingContext(null);
+        setText('');
+        setWheelValue(1);
       }
     } catch (err) {
       console.error(err);
@@ -326,6 +336,15 @@ export default function AffordabilityQuery() {
   function onWheelChange(v) {
     setWheelValue(v);
     setText(formatAmountLabel(v));
+  }
+
+  // "Will this be financed?" turn: the only two replies the backend accepts
+  // here are its fixed 'yes'/'no' button values (see server/index.js's
+  // deterministic financing-confirmation branch, no free text parsed for
+  // this turn) - so these bypass onAsk()/the text field entirely rather
+  // than routing through it.
+  function answerFinancingConfirmation(answer) {
+    submit(answer, pendingContext);
   }
 
   function startOver() {
@@ -373,6 +392,14 @@ export default function AffordabilityQuery() {
 
   const result = response?.status === 'result' ? response.result : null;
   const tone = result ? STATUS_TONE[result.status] || 'positive' : 'positive';
+  const awaitingFinancing = pendingContext?.awaiting === 'financing_confirmation';
+  // "60 months" / "5 years" isn't a dollar amount - the wheel doesn't apply
+  // and the field's placeholder/button label need their own wording. Same
+  // treatment for the 0%-promo-plan term question (furniture/appliances) -
+  // it's the identical "how long" shape, just a different financing path
+  // server-side (see server/index.js's nextFinancingStep).
+  const awaitingFinanceTerm =
+    pendingContext?.awaiting === 'finance_term' || pendingContext?.awaiting === 'promo_term';
 
   return (
     <View style={{ gap: 16 }}>
@@ -398,49 +425,80 @@ export default function AffordabilityQuery() {
         </View>
       )}
 
-      {/* Phase 13: the wheel is a fallback for the needs_amount state only -
-          "not taking up the screen constantly." Writes into the same
-          `text` field typed/voice input use, so it needs no separate
-          submit path. DigitAmountPicker already renders its own card, not
-          re-wrapped here. */}
-      {pendingContext && <DigitAmountPicker value={wheelValue} onValueChange={onWheelChange} />}
-
-      {/* Voice: record -> transcribe -> lands in the field to the left as
-          plain editable text. Never submits on its own - "Ask"/"Submit
-          amount" below is still the only way to actually send anything. */}
-      <View style={inlineStyles.inputRow}>
-        <TextInput
-          style={[styles.input, inlineStyles.input]}
-          value={text}
-          onChangeText={setText}
-          placeholder={pendingContext ? 'e.g. $50' : 'e.g. Can I afford a $50 dinner?'}
-          placeholderTextColor={colors.placeholder}
-          editable={!submitting && !transcribing}
-        />
-        {transcribing ? (
-          <ActivityIndicator style={inlineStyles.micButton} />
+      {/* "Will this be financed?" turn: only the two fixed Yes/No replies
+          the backend's deterministic branch accepts (see
+          answerFinancingConfirmation above) - no text/voice/wheel input for
+          this turn, so there's nothing ambiguous to type. */}
+      {awaitingFinancing ? (
+        submitting ? (
+          <ActivityIndicator />
         ) : (
-          <Pressable
-            onPress={onMicPress}
-            disabled={submitting}
-            accessibilityRole="button"
-            accessibilityLabel={recorderState.isRecording ? 'Stop recording' : 'Ask by voice'}
-            style={[
-              inlineStyles.micButton,
-              recorderState.isRecording ? inlineStyles.micButtonRecording : inlineStyles.micButtonIdle,
-            ]}
-          >
-            <MaterialIcons name={recorderState.isRecording ? 'stop' : 'mic'} size={22} color={colors.background} />
-          </Pressable>
-        )}
-      </View>
-
-      {voiceError && <Text style={styles.errorText}>{voiceError}</Text>}
-
-      {submitting ? (
-        <ActivityIndicator />
+          <View style={{ flexDirection: 'row', gap: 12, justifyContent: 'center' }}>
+            <View style={{ flex: 1 }}>
+              <PrimaryButton title="Yes" onPress={() => answerFinancingConfirmation('yes')} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <PrimaryButton title="No" onPress={() => answerFinancingConfirmation('no')} />
+            </View>
+          </View>
+        )
       ) : (
-        <PrimaryButton title={pendingContext ? 'Submit amount' : 'Ask'} onPress={onAsk} disabled={transcribing || recorderState.isRecording} />
+        <>
+          {/* Phase 13: the wheel is a fallback for the needs_amount state
+              only - "not taking up the screen constantly." Writes into the
+              same `text` field typed/voice input use, so it needs no
+              separate submit path. DigitAmountPicker already renders its
+              own card, not re-wrapped here. Doesn't apply to the
+              finance-term turn - "60 months" isn't a dollar amount. */}
+          {pendingContext && !awaitingFinanceTerm && (
+            <DigitAmountPicker value={wheelValue} onValueChange={onWheelChange} />
+          )}
+
+          {/* Voice: record -> transcribe -> lands in the field to the left
+              as plain editable text. Never submits on its own - "Ask"/
+              "Submit amount" below is still the only way to actually send
+              anything. */}
+          <View style={inlineStyles.inputRow}>
+            <TextInput
+              style={[styles.input, inlineStyles.input]}
+              value={text}
+              onChangeText={setText}
+              placeholder={
+                awaitingFinanceTerm ? 'e.g. 60 months' : pendingContext ? 'e.g. $50' : 'e.g. Can I afford a $50 dinner?'
+              }
+              placeholderTextColor={colors.placeholder}
+              editable={!submitting && !transcribing}
+            />
+            {transcribing ? (
+              <ActivityIndicator style={inlineStyles.micButton} />
+            ) : (
+              <Pressable
+                onPress={onMicPress}
+                disabled={submitting}
+                accessibilityRole="button"
+                accessibilityLabel={recorderState.isRecording ? 'Stop recording' : 'Ask by voice'}
+                style={[
+                  inlineStyles.micButton,
+                  recorderState.isRecording ? inlineStyles.micButtonRecording : inlineStyles.micButtonIdle,
+                ]}
+              >
+                <MaterialIcons name={recorderState.isRecording ? 'stop' : 'mic'} size={22} color={colors.background} />
+              </Pressable>
+            )}
+          </View>
+
+          {voiceError && <Text style={styles.errorText}>{voiceError}</Text>}
+
+          {submitting ? (
+            <ActivityIndicator />
+          ) : (
+            <PrimaryButton
+              title={awaitingFinanceTerm ? 'Submit term' : pendingContext ? 'Submit amount' : 'Ask'}
+              onPress={onAsk}
+              disabled={transcribing || recorderState.isRecording}
+            />
+          )}
+        </>
       )}
 
       {response && !pendingContext && (
@@ -491,6 +549,46 @@ export default function AffordabilityQuery() {
             </View>
           </View>
 
+          {/* Only present when the Amount above is a computed estimate, not
+              a number the user typed - states the real source plainly
+              rather than leaving it implicit in the advisor paragraph
+              alone (see server/financeRate.js's header for why this has to
+              come from a real published rate, not an AI guess). */}
+          {result.rate_estimate && (
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Estimated payment</Text>
+              <Text style={styles.smallText}>
+                Based on a {result.rate_estimate.term_months}-month term on $
+                {result.rate_estimate.total_price.toFixed(2)} at the average new-auto-loan rate of{' '}
+                {result.rate_estimate.annual_rate_percent}% APR (published by the Federal Reserve as of{' '}
+                {result.rate_estimate.as_of_date}), the estimated payment is $
+                {result.rate_estimate.estimated_payment.toFixed(2)}/month. This is an estimate, not a real
+                quote - your actual rate depends on your credit and lender.
+              </Text>
+            </View>
+          )}
+
+          {/* Furniture/appliance-style 0%-promo plan - a genuine even-split
+              calculation (no rate invented, no external call), but the two
+              caveats matter as much as the number itself: whether a 0%
+              plan is actually offered isn't something Sorrel can verify,
+              and missing the payoff window is a real, often-retroactive
+              risk (see server/index.js's nextFinancingStep header). */}
+          {result.promo_plan_estimate && (
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Estimated payment (0% plan)</Text>
+              <Text style={styles.smallText}>
+                If this is financed on a 0%-interest plan over {result.promo_plan_estimate.term_months} months, $
+                {result.promo_plan_estimate.total_price.toFixed(2)} works out to $
+                {result.promo_plan_estimate.estimated_payment.toFixed(2)}/month.
+              </Text>
+              <Text style={[styles.smallText, { marginTop: 8 }]}>
+                {result.promo_plan_estimate.confirmation_caveat}
+              </Text>
+              <Text style={[styles.smallText, { marginTop: 8 }]}>{result.promo_plan_estimate.risk_caveat}</Text>
+            </View>
+          )}
+
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Why</Text>
             <ScenarioResult result={result} />
@@ -510,6 +608,20 @@ export default function AffordabilityQuery() {
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Your goal</Text>
               <Text style={styles.smallText}>{describeGoalCallout(result.goal_impact)}</Text>
+            </View>
+          )}
+
+          {/* Context, not a second pass/fail gate (see CLAUDE.md) - only
+              shown when a total price was actually mentioned somewhere in
+              this conversation and a real liquid balance is on file. */}
+          {result.total_price_comparison && (
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Total price</Text>
+              <Text style={styles.smallText}>
+                The ${result.total_price_comparison.total_price.toFixed(2)} total price is about{' '}
+                {result.total_price_comparison.ratio.toFixed(1)}x your available cash ($
+                {result.total_price_comparison.liquid_balance.toFixed(2)}).
+              </Text>
             </View>
           )}
 

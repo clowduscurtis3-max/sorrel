@@ -2,6 +2,10 @@
 .env
 .env.local
 *.env
+# Catches accidental backup/save copies too (e.g. server/.env.save, found
+# untracked and containing real secrets 2026-08-21 - *.env alone doesn't
+# match a .save suffix appended after .env).
+.env.*
 !.env.example
 
 # node

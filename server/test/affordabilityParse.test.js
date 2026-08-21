@@ -43,6 +43,41 @@ test('recognizes every required real-world amount format', () => {
   }
 });
 
+test('a 4+ digit amount typed without comma separators traces to its full value, not a truncated prefix - real guardrail-defeat bug found on-device (2026-08-21)', () => {
+  // "$1500" used to extract a candidate of 150 (not 1500) - the comma-group
+  // branch was `(?:,\d{3})*` (zero-or-more) instead of `+` (one-or-more),
+  // so an un-grouped 4+ digit run satisfied it after matching only the
+  // first 1-3 digits, silently dropping the rest. Since 150 genuinely is a
+  // substring of "$1500", the guardrail would have accepted it as
+  // legitimate if the model ever picked it - this is exactly the class of
+  // defeat this file's guardrail exists to prevent. Surfaced by real
+  // voice-transcribed input ("fifteen hundred" -> "$1500" in the text
+  // field, evaluated as $150).
+  const cases = [
+    ['Can I afford a $1500 TV?', 1500],
+    ['Can I afford a $12000 car?', 12000],
+    ['Can I afford 1500 dollars for a TV?', 1500],
+    ['Can I afford 1500 bucks for a TV?', 1500],
+    ['$999999', 999999],
+  ];
+  for (const [text, amount] of cases) {
+    assert.equal(
+      validateStatedAmountAgainstRawInput(text, amount),
+      true,
+      `expected ${amount} to trace to "${text}"`
+    );
+  }
+});
+
+test('the old truncated-prefix reading no longer validates once the full amount is also present', () => {
+  // Direct regression check on the failure mode itself: 150 must NOT
+  // independently validate against "$1500" now that extraction correctly
+  // reads the whole number - if this ever regresses, this test is the one
+  // that catches the guardrail silently accepting a truncated value again.
+  assert.equal(validateStatedAmountAgainstRawInput('Can I afford a $1500 TV?', 150), false);
+  assert.equal(validateStatedAmountAgainstRawInput('Can I afford a $12000 car?', 120), false);
+});
+
 test('multiple amounts: both a real purchase price and real context amount independently trace', () => {
   // Correct *selection* between these is the classifier's job (tested live
   // against real Claude calls, see the Step 2 report) - the validator's own
@@ -132,6 +167,9 @@ test('sanitizeParsedOutput: well-formed output passes through with amount_discar
     amount_discarded: false,
     recurrence: 'once',
     wants_timeline: false,
+    financing_relevant: false,
+    total_price_stated: null,
+    total_price_discarded: false,
   });
 });
 
@@ -196,5 +234,61 @@ test('every declared intent is a real, whitelisted value', () => {
   for (const intent of PARSER_INTENTS) {
     const result = sanitizeParsedOutput({ intent }, 'irrelevant');
     assert.equal(result.intent, intent);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// financing_relevant / total_price_stated (big-ticket financing detection)
+// ---------------------------------------------------------------------------
+
+test('sanitizeParsedOutput: financing_relevant coerces to strict boolean, defaults false', () => {
+  assert.equal(
+    sanitizeParsedOutput({ intent: 'affordability_check', financing_relevant: true }, 'irrelevant')
+      .financing_relevant,
+    true
+  );
+  for (const bad of [false, undefined, null, 'true', 1]) {
+    assert.equal(
+      sanitizeParsedOutput({ intent: 'affordability_check', financing_relevant: bad }, 'irrelevant')
+        .financing_relevant,
+      false
+    );
+  }
+});
+
+test('sanitizeParsedOutput: a real total_price_stated that traces to raw text survives', () => {
+  const result = sanitizeParsedOutput(
+    { intent: 'affordability_check', total_price_stated: 35000 },
+    'Can I afford to finance a $35,000 car?'
+  );
+  assert.equal(result.total_price_stated, 35000);
+  assert.equal(result.total_price_discarded, false);
+});
+
+test('sanitizeParsedOutput: a fabricated total_price_stated not in the raw text is discarded', () => {
+  const result = sanitizeParsedOutput(
+    { intent: 'affordability_check', total_price_stated: 35000 },
+    'Can I afford to finance a car?'
+  );
+  assert.equal(result.total_price_stated, null);
+  assert.equal(result.total_price_discarded, true);
+});
+
+test('sanitizeParsedOutput: total_price_stated independent of amount_stated - both can be set from the same message', () => {
+  const result = sanitizeParsedOutput(
+    { intent: 'affordability_check', amount_stated: 650, total_price_stated: 35000, recurrence: 'monthly' },
+    'Can I afford to finance a $35,000 car at $650 a month?'
+  );
+  assert.equal(result.amount_stated, 650);
+  assert.equal(result.total_price_stated, 35000);
+});
+
+test('sanitizeParsedOutput: a non-numeric, non-finite, zero, or negative total_price_stated is discarded outright', () => {
+  for (const bad of [NaN, Infinity, -35000, 0, '35000']) {
+    const result = sanitizeParsedOutput(
+      { intent: 'affordability_check', total_price_stated: bad },
+      'Can I afford to finance a $35,000 car?'
+    );
+    assert.equal(result.total_price_stated, null);
   }
 });

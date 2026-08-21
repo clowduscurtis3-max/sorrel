@@ -59,6 +59,7 @@ const {
   extractCandidateAmounts,
 } = require('./affordabilityParse');
 const { transcribeAudio } = require('./transcribe');
+const { parseFinanceTermMonths, computeEstimatedPayment, getCurrentAutoLoanRate } = require('./financeRate');
 
 // Where we send the system browser once Gmail linking finishes, so the app
 // (watching for this scheme via WebBrowser.openAuthSessionAsync) resolves.
@@ -1226,14 +1227,159 @@ const MAX_AFFORDABILITY_QUERY_LENGTH = 500;
 // is deliberately stripped rather than accepted from context - the whole
 // point of the follow-up turn is a fresh amount pulled from *this* message,
 // never carried over from the prior one.
+//
+// total_price_stated is handled differently: unlike amount_stated, it's
+// meant to survive across multiple follow-up turns (financing confirmation,
+// then the monthly-payment reply), not be refreshed each turn - and there's
+// no current-turn raw text to trace it back to at this point (it was stated
+// in an earlier message), so it's stripped before the shared amount-guardrail
+// path and re-attached afterward with only a type/finite/positive check, not
+// a raw-text trace check. It was already traced once, when first extracted.
 function sanitizeClarificationContext(raw) {
-  const sanitized = sanitizeParsedOutput({ ...raw, amount_stated: null }, '');
+  const sanitized = sanitizeParsedOutput(
+    { ...raw, amount_stated: null, total_price_stated: null },
+    ''
+  );
+  const totalPriceStated =
+    typeof raw?.total_price_stated === 'number' &&
+    Number.isFinite(raw.total_price_stated) &&
+    raw.total_price_stated > 0
+      ? Math.round(raw.total_price_stated * 100) / 100
+      : null;
   return {
     intent: sanitized.intent,
     category: sanitized.category,
     recurrence: sanitized.recurrence,
     wants_timeline: sanitized.wants_timeline,
+    financing_relevant: sanitized.financing_relevant,
+    total_price_stated: totalPriceStated,
+    awaiting: ['financing_confirmation', 'total_price', 'finance_term', 'promo_term'].includes(raw?.awaiting)
+      ? raw.awaiting
+      : null,
   };
+}
+
+// Once financing is established (recurrence forced to 'monthly' by the
+// caller) and no direct monthly-payment amount is known yet, decides what
+// to ask next.
+//
+// - Vehicle purchases (category === 'Transportation') get the real-rate
+//   estimate path (a live FRED auto-loan rate - see financeRate.js).
+// - Big-ticket Shopping-category items (furniture, appliances,
+//   electronics) get the 0%-promo path instead: these are commonly sold
+//   on deferred-interest "12 months, no interest" plans, a genuinely
+//   different repayment structure than an amortizing loan, and FRED has
+//   no current published rate for this category to fetch anyway (checked
+//   2026-08-21 - the only furniture-credit series on FRED is a
+//   discontinued one from 1926-1946). Rather than inventing a rate, this
+//   computes an exact, non-guessed even-split payment (total price ÷
+//   term, genuinely $0 assumed interest) and leans on the advisor-voice
+//   explanation to carry two honest caveats: this assumes a 0%-interest
+//   plan is actually offered (the user should confirm with the retailer -
+//   Sorrel has no way to verify that), and deferred interest, if the
+//   balance isn't paid off within the promotional window, is typically
+//   applied retroactively to the *entire original* balance, not just
+//   what's left - a materially different and worse outcome than a normal
+//   loan running past term.
+// - Every other financeable category keeps asking for the monthly payment
+//   directly, unchanged from the original financing fix.
+function nextFinancingStep(ctx) {
+  const baseContext = {
+    intent: ctx.intent,
+    category: ctx.category,
+    recurrence: 'monthly',
+    wants_timeline: ctx.wants_timeline,
+    financing_relevant: ctx.financing_relevant,
+    total_price_stated: ctx.total_price_stated,
+  };
+  if (ctx.category === 'Transportation' || ctx.category === 'Shopping') {
+    if (ctx.total_price_stated === null) {
+      return {
+        status: 'needs_amount',
+        message: "What's the total price?",
+        context: { ...baseContext, awaiting: 'total_price' },
+      };
+    }
+    if (ctx.category === 'Transportation') {
+      return {
+        status: 'needs_finance_term',
+        message: 'How long will the finance term be?',
+        context: { ...baseContext, awaiting: 'finance_term' },
+      };
+    }
+    return {
+      status: 'needs_finance_term',
+      message: 'How long would the payment plan be?',
+      context: { ...baseContext, awaiting: 'promo_term' },
+    };
+  }
+  return { status: 'needs_amount', message: 'What would the monthly payment be?', context: baseContext };
+}
+
+// Shared by the direct-amount path and the rate-estimate path below - one
+// implementation of "evaluate, explain, attach the total-price disclosure,
+// respond" rather than two copies that could drift apart.
+async function respondWithAffordabilityResult(
+  req,
+  res,
+  {
+    now,
+    today,
+    amount,
+    category,
+    recurrence,
+    recurrenceWasAmbiguous,
+    totalPriceStated,
+    rateEstimate,
+    promoPlanEstimate,
+  }
+) {
+  const scenarioContext = await loadScenarioContext(req.userId, now);
+  const result = evaluateScenario({
+    context: scenarioContext,
+    scenario: { amount, category, date: today, recurrence },
+  });
+  if (recurrenceWasAmbiguous) {
+    result.limitations = [
+      ...result.limitations,
+      "This was evaluated as a one-time purchase - the question didn't make the recurring frequency clear.",
+    ];
+  }
+  if (rateEstimate) {
+    result.rate_estimate = rateEstimate;
+    result.limitations = [...result.limitations, rateEstimate.caveat];
+  }
+  if (promoPlanEstimate) {
+    result.promo_plan_estimate = promoPlanEstimate;
+    result.limitations = [
+      ...result.limitations,
+      promoPlanEstimate.confirmation_caveat,
+      promoPlanEstimate.risk_caveat,
+    ];
+  }
+  // Same Step 5 explanation call /scenarios/evaluate already makes for an
+  // identical result shape - reusing the existing, already cost-justified
+  // mechanism, not a new AI call site. Reads result.limitations, so it
+  // inherits the rate-estimate caveat above for free, no prompt change.
+  result.explanation = await explainScenario(result);
+
+  // Total-price-vs-liquid-balance disclosure: context only, never a second
+  // pass/fail gate (see CLAUDE.md). Skipped entirely (not shown as 0%/N-A)
+  // when no liquid balance is on file, rather than showing a misleading
+  // ratio.
+  if (recurrence === 'monthly' && totalPriceStated) {
+    const accountsSummary = await getAccountsSummary(req.userId);
+    const liquidBalance = accountsSummary.total_depository_available;
+    if (typeof liquidBalance === 'number' && liquidBalance > 0) {
+      result.total_price_comparison = {
+        total_price: totalPriceStated,
+        liquid_balance: liquidBalance,
+        ratio: Math.round((totalPriceStated / liquidBalance) * 100) / 100,
+      };
+    }
+  }
+
+  return res.json({ status: 'result', result });
 }
 
 app.post('/affordability/query', requireUser, async (req, res) => {
@@ -1251,7 +1397,144 @@ app.post('/affordability/query', requireUser, async (req, res) => {
     return res.status(400).json({ error: 'context must be an object if provided' });
   }
 
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+
   try {
+    const clarificationBase = context ? sanitizeClarificationContext(context) : null;
+
+    // Deterministic yes/no branch for the "will this be financed?" turn -
+    // the frontend only ever sends its two fixed button values here, never
+    // free text, so no Claude call and no amount extraction is needed. This
+    // must be checked before the generic context-present branch below,
+    // which would otherwise try to read this reply as a dollar amount.
+    if (clarificationBase?.awaiting === 'financing_confirmation') {
+      const confirmed = text.trim().toLowerCase() === 'yes';
+      if (!confirmed) {
+        return res.json({
+          status: 'needs_amount',
+          message: 'How much will it cost?',
+          context: {
+            intent: clarificationBase.intent,
+            category: clarificationBase.category,
+            recurrence: clarificationBase.recurrence,
+            wants_timeline: clarificationBase.wants_timeline,
+            financing_relevant: clarificationBase.financing_relevant,
+            total_price_stated: null,
+          },
+        });
+      }
+      return res.json(nextFinancingStep(clarificationBase));
+    }
+
+    // Total price for a vehicle being financed - only ever asked when
+    // nextFinancingStep already confirmed category === 'Transportation' and
+    // no total was known yet. Deterministic, same guardrailed number
+    // extraction the regular amount follow-up uses - no Claude call.
+    if (clarificationBase?.awaiting === 'total_price') {
+      const candidates = [...extractCandidateAmounts(text)];
+      const totalPrice = candidates.length > 0 ? candidates[0] : null;
+      if (totalPrice === null) {
+        // Same "couldn't parse, ask again" pattern the rest of this route
+        // already falls into for an unparseable amount reply.
+        return res.json({
+          status: 'needs_amount',
+          message: "What's the total price?",
+          context: { ...clarificationBase, awaiting: 'total_price' },
+        });
+      }
+      return res.json(nextFinancingStep({ ...clarificationBase, total_price_stated: totalPrice }));
+    }
+
+    // Finance term reply ("60 months" / "5 years" / "60") - deterministic
+    // parsing, then the one real external call this feature makes (a real
+    // published rate, never a guessed one - see financeRate.js's header).
+    if (clarificationBase?.awaiting === 'finance_term') {
+      const termMonths = parseFinanceTermMonths(text);
+      if (termMonths === null) {
+        return res.json({
+          status: 'needs_finance_term',
+          message: 'How long will the finance term be? (e.g. "60 months")',
+          context: { ...clarificationBase, awaiting: 'finance_term' },
+        });
+      }
+
+      let rate;
+      try {
+        rate = await getCurrentAutoLoanRate();
+      } catch (err) {
+        logError('affordability: FRED rate fetch failed', err);
+        return res.json({
+          status: 'insufficient_data',
+          detail:
+            "Couldn't pull current average loan rates right now - try again in a bit, or tell Sorrel the monthly payment directly if you already know it.",
+        });
+      }
+
+      const estimatedPayment = computeEstimatedPayment({
+        totalPrice: clarificationBase.total_price_stated,
+        termMonths,
+        annualRatePercent: rate.rate,
+      });
+
+      return respondWithAffordabilityResult(req, res, {
+        now,
+        today,
+        amount: estimatedPayment,
+        category: clarificationBase.category,
+        recurrence: 'monthly',
+        recurrenceWasAmbiguous: false,
+        totalPriceStated: clarificationBase.total_price_stated,
+        rateEstimate: {
+          estimated_payment: estimatedPayment,
+          annual_rate_percent: rate.rate,
+          as_of_date: rate.as_of_date,
+          term_months: termMonths,
+          total_price: clarificationBase.total_price_stated,
+          source: `Federal Reserve (FRED series ${rate.series_id})`,
+          caveat: `This is an estimated payment based on the average new-auto-loan rate published by the Federal Reserve (${rate.rate}% as of ${rate.as_of_date}) - not a real quote. Your actual rate depends on your credit and lender.`,
+        },
+      });
+    }
+
+    // Payment-plan term reply for a Shopping-category item (furniture,
+    // appliances, electronics) - no external rate call, no guess. These
+    // are commonly sold on deferred-interest "N months, no interest"
+    // plans (a real, different repayment structure than an amortizing
+    // loan - see nextFinancingStep's header), so the estimate here is an
+    // exact even split (total price / term) under an explicitly-stated
+    // 0%-interest assumption, not an approximation of anything.
+    if (clarificationBase?.awaiting === 'promo_term') {
+      const termMonths = parseFinanceTermMonths(text);
+      if (termMonths === null) {
+        return res.json({
+          status: 'needs_finance_term',
+          message: 'How long would the payment plan be? (e.g. "12 months")',
+          context: { ...clarificationBase, awaiting: 'promo_term' },
+        });
+      }
+
+      const totalPrice = clarificationBase.total_price_stated;
+      const estimatedPayment = computeEstimatedPayment({ totalPrice, termMonths, annualRatePercent: 0 });
+
+      return respondWithAffordabilityResult(req, res, {
+        now,
+        today,
+        amount: estimatedPayment,
+        category: clarificationBase.category,
+        recurrence: 'monthly',
+        recurrenceWasAmbiguous: false,
+        totalPriceStated: totalPrice,
+        promoPlanEstimate: {
+          estimated_payment: estimatedPayment,
+          term_months: termMonths,
+          total_price: totalPrice,
+          confirmation_caveat: `This assumes a common interest-free promotional plan (many retailers offer 12 months or more at 0% interest) - check with the retailer to confirm this specific plan is actually available for this purchase.`,
+          risk_caveat: `If the balance isn't paid off within the promotional window, deferred interest is typically applied retroactively to the entire original amount, not just what's left - which can end up costing significantly more than a normal loan.`,
+        },
+      });
+    }
+
     let parsed;
     if (context) {
       // Clarification follow-up: intent/category/recurrence were already
@@ -1263,12 +1546,18 @@ app.post('/affordability/query', requireUser, async (req, res) => {
       // is used - a genuine but minor UX edge case (not a safety issue: any
       // amount used here is still guaranteed to be something the user
       // actually typed in this message).
-      const base = sanitizeClarificationContext(context);
       const candidates = [...extractCandidateAmounts(text)];
-      parsed = sanitizeParsedOutput(
-        { ...base, amount_stated: candidates.length > 0 ? candidates[0] : null },
+      const sanitized = sanitizeParsedOutput(
+        {
+          ...clarificationBase,
+          amount_stated: candidates.length > 0 ? candidates[0] : null,
+          total_price_stated: null,
+        },
         text
       );
+      // total_price_stated is carried through untouched rather than
+      // re-validated against this turn's text - see sanitizeClarificationContext.
+      parsed = { ...sanitized, total_price_stated: clarificationBase.total_price_stated };
     } else {
       parsed = await parseAffordabilityQuery(text);
     }
@@ -1281,13 +1570,13 @@ app.post('/affordability/query', requireUser, async (req, res) => {
       });
     }
 
-    const now = new Date();
-    const today = now.toISOString().slice(0, 10);
     const clarificationContext = {
       intent: parsed.intent,
       category: parsed.category,
       recurrence: parsed.recurrence,
       wants_timeline: parsed.wants_timeline,
+      financing_relevant: parsed.financing_relevant,
+      total_price_stated: parsed.total_price_stated,
     };
 
     // 'unknown' can't be fed to the engine (normalizeScenario only accepts a
@@ -1301,6 +1590,33 @@ app.post('/affordability/query', requireUser, async (req, res) => {
     const recurrenceForEngine = recurrenceWasAmbiguous ? 'once' : parsed.recurrence;
 
     if (parsed.intent === 'affordability_check') {
+      // Big-ticket item named with no amount at all yet, and financing
+      // wasn't already made explicit by the wording (that case is handled
+      // below, via the already-forced 'monthly' recurrence). Only fires on
+      // a fresh classify (no context) - once this question has been
+      // answered (yes or no), the reply always carries context forward and
+      // must never re-trigger it, whether or not the user goes on to give
+      // a usable amount.
+      if (
+        parsed.financing_relevant === true &&
+        parsed.recurrence !== 'monthly' &&
+        parsed.amount_stated === null &&
+        !context
+      ) {
+        return res.json({
+          status: 'needs_financing_confirmation',
+          message: 'Will this be financed?',
+          context: { ...clarificationContext, awaiting: 'financing_confirmation' },
+        });
+      }
+      // Financing already established (explicit language up front, e.g.
+      // "finance a $35,000 car") but no direct payment amount given yet -
+      // nextFinancingStep decides whether that means the real-rate-estimate
+      // path (Transportation) or the plain monthly-payment ask (everything
+      // else), same as the post-"Yes" branch above.
+      if (parsed.recurrence === 'monthly' && parsed.amount_stated === null) {
+        return res.json(nextFinancingStep(parsed));
+      }
       if (parsed.amount_stated === null) {
         return res.json({
           status: 'needs_amount',
@@ -1308,27 +1624,15 @@ app.post('/affordability/query', requireUser, async (req, res) => {
           context: clarificationContext,
         });
       }
-      const scenarioContext = await loadScenarioContext(req.userId, now);
-      const result = evaluateScenario({
-        context: scenarioContext,
-        scenario: {
-          amount: parsed.amount_stated,
-          category: parsed.category,
-          date: today,
-          recurrence: recurrenceForEngine,
-        },
+      return respondWithAffordabilityResult(req, res, {
+        now,
+        today,
+        amount: parsed.amount_stated,
+        category: parsed.category,
+        recurrence: recurrenceForEngine,
+        recurrenceWasAmbiguous,
+        totalPriceStated: parsed.total_price_stated,
       });
-      if (recurrenceWasAmbiguous) {
-        result.limitations = [
-          ...result.limitations,
-          "This was evaluated as a one-time purchase - the question didn't make the recurring frequency clear.",
-        ];
-      }
-      // Same Step 5 explanation call /scenarios/evaluate already makes for
-      // an identical result shape - reusing the existing, already
-      // cost-justified mechanism, not a new AI call site.
-      result.explanation = await explainScenario(result);
-      return res.json({ status: 'result', result });
     }
 
     if (parsed.intent === 'maximum_comfortable_amount') {
