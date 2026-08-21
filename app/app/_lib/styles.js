@@ -22,6 +22,11 @@ export const colors = {
   positive: '#3a6b3a',
   reviewWarning: '#a06600',
   muted: '#666',
+  // Translucent placeholder text color (Budget-tab Sorrel restyle,
+  // 2026-08-20) - found on-device: TextInput's platform-default
+  // placeholder color was unreadable against the restyle's light card
+  // background, close enough to white to be effectively invisible.
+  placeholder: 'rgba(30, 67, 53, 0.35)',
 };
 
 // Shared subset of the old app/App.js styles object, copied verbatim
@@ -264,5 +269,90 @@ export const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.sage,
     paddingBottom: 10,
+  },
+  // Added for the Budget-tab Sorrel restyle (2026-08-20). `card` is the
+  // rounded/filled section pattern the mockup uses throughout but that
+  // didn't exist anywhere in this app before this pass (every prior
+  // section here is a flat hairline row or a left-border accent, never a
+  // filled rounded box) - new, not a reuse of an existing key.
+  card: {
+    backgroundColor: colors.card,
+    borderRadius: 14,
+    padding: 16,
+    gap: 8,
+  },
+  cardTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.darkest,
+  },
+  // Pill button replacing native <Button> within the affordability flow
+  // only (see PrimaryButton.js) - this app's other screens keep using
+  // plain <Button> deliberately, not refactored as part of this pass.
+  primaryButton: {
+    backgroundColor: colors.darkest,
+    borderRadius: 28,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
+  },
+  primaryButtonDisabled: {
+    backgroundColor: colors.sage,
+  },
+  primaryButtonText: {
+    color: colors.background,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  // Chat-bubble pair for AffordabilityQuery's query/clarification exchange
+  // - the one turn of back-and-forth this flow actually keeps (see
+  // pendingContext), not a growing conversation log.
+  chatBubbleAssistant: {
+    backgroundColor: colors.card,
+    borderRadius: 16,
+    borderTopLeftRadius: 4,
+    padding: 12,
+    maxWidth: '85%',
+    alignSelf: 'flex-start',
+  },
+  chatBubbleAssistantText: {
+    color: colors.darkest,
+    fontSize: 14,
+  },
+  chatBubbleUser: {
+    backgroundColor: colors.darkest,
+    borderRadius: 16,
+    borderTopRightRadius: 4,
+    padding: 12,
+    maxWidth: '85%',
+    alignSelf: 'flex-end',
+  },
+  chatBubbleUserText: {
+    color: colors.background,
+    fontSize: 14,
+  },
+  // Comparison table on the "Add payment vs. wait" screen - deliberately
+  // only 2 rows are ever rendered here (Discretionary spending, Goal
+  // progress), see that screen's own build notes for why the mockup's
+  // other 3 rows were dropped rather than styled.
+  comparisonTableRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.sage,
+  },
+  comparisonTableLabel: {
+    fontSize: 13,
+    color: colors.dark,
+    flexShrink: 1,
+    paddingRight: 8,
+  },
+  comparisonTableValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.darkest,
   },
 });

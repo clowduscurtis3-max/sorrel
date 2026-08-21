@@ -532,6 +532,19 @@ app.get('/goal/progress', requireUser, async (req, res) => {
   try {
     const progress = await getGoalProgress(req.userId);
     if (!progress) return res.status(404).json({ error: 'No goal set' });
+
+    // Only computed for an emergency-fund goal - every other goal_type
+    // pays zero extra cost for this. Best-effort: an estimate failure
+    // shouldn't take down goal progress itself, which is otherwise
+    // unrelated data the rest of the app depends on.
+    if (progress.goal_type === 'emergency_fund') {
+      try {
+        progress.essential_expense_estimate = await getEssentialExpenseEstimate(req.userId);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
     res.json({ progress });
   } catch (err) {
     console.error(err);

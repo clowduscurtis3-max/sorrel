@@ -47,6 +47,7 @@ function computeGoalProgress({ goal, netSaved, goalCreatedAt, now = new Date() }
     // the honest thing to show, just without a percent/target framing.
     return {
       has_target: false,
+      goal_type: goal.goal_type,
       saved_amount: saved,
       message:
         saved > 0
@@ -67,6 +68,7 @@ function computeGoalProgress({ goal, netSaved, goalCreatedAt, now = new Date() }
 
   const base = {
     has_target: true,
+    goal_type: goal.goal_type,
     saved_amount: saved,
     target_amount: target,
     percent_complete: percent,

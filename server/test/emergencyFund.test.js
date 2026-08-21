@@ -89,3 +89,27 @@ test('#6 transactions older than the HISTORY_DAYS window are excluded from the a
   );
   assert.deepEqual(result, { averageMonthlyEssential: 100, monthsOfHistory: 2 });
 });
+
+test('#7 a refund/credit in an essential category pushing the total non-positive refuses rather than returning a negative "essential expenses" figure - real bug found by /code-review (2026-08-20)', () => {
+  const result = estimateEssentialMonthlyExpenses(
+    [
+      // a large utility credit posted as a negative Bills & Utilities amount
+      tx({ date: '2026-07-01', category: 'Bills & Utilities', amount: -500 }),
+      tx({ date: '2026-07-05', category: 'Groceries', amount: 50 }),
+      tx({ date: '2026-08-01', category: 'Groceries', amount: 50 }),
+    ],
+    NOW
+  );
+  assert.deepEqual(result, { non_positive_essential_spend: true, monthsOfHistory: 2 });
+});
+
+test('#8 exactly zero essential spend also refuses, not just negative', () => {
+  const result = estimateEssentialMonthlyExpenses(
+    [
+      tx({ date: '2026-07-01', category: 'Dining', amount: 50 }), // discretionary only
+      tx({ date: '2026-08-01', category: 'Dining', amount: 50 }),
+    ],
+    NOW
+  );
+  assert.deepEqual(result, { non_positive_essential_spend: true, monthsOfHistory: 2 });
+});

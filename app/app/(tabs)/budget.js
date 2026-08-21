@@ -20,7 +20,7 @@ import { View, Text, Button, ActivityIndicator, TextInput, ScrollView, StyleShee
 import { StatusBar } from 'expo-status-bar';
 import { useFocusEffect } from '@react-navigation/native';
 import { apiFetch, apiErrorMessage } from '../_lib/api';
-import { styles } from '../_lib/styles';
+import { styles, colors } from '../_lib/styles';
 import { useAppData } from '../_lib/appData';
 import AffordabilityQuery from '../_components/AffordabilityQuery';
 
@@ -319,7 +319,7 @@ const localStyles = StyleSheet.create({
   sectionDivider: {
     alignSelf: 'stretch',
     borderBottomWidth: 1,
-    borderBottomColor: '#ccc',
+    borderBottomColor: colors.sage,
     marginVertical: 12,
   },
 });

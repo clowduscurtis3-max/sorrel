@@ -66,6 +66,19 @@ function estimateEssentialMonthlyExpenses(transactions, now = new Date()) {
     // spend - excluded from every total, same as summarizeSpending().
   }
 
+  // Real bug found by /code-review (2026-08-20): a refund/credit posted
+  // under an essential category (e.g. a utility credit, an insurance
+  // payout) can push essentialTotal negative - a nonsensical "essential
+  // monthly expenses" figure this file's own header promises never to
+  // return. The uncategorized-ratio guard below doesn't catch this case
+  // (when totalSpend <= 0 the ratio is forced to 0, not flagged), so this
+  // needs its own explicit check, checked first since a non-positive
+  // total makes the number itself meaningless regardless of how clean
+  // the categorization otherwise is.
+  if (essentialTotal <= 0) {
+    return { non_positive_essential_spend: true, monthsOfHistory };
+  }
+
   const totalSpend = essentialTotal + otherTotal + uncategorizedTotal;
   const uncategorizedRatio = totalSpend > 0 ? uncategorizedTotal / totalSpend : 0;
 
@@ -83,16 +96,30 @@ function estimateEssentialMonthlyExpenses(transactions, now = new Date()) {
   };
 }
 
-// Thin I/O wrapper, same shape as getGoalProgress in goalProgress.js - no
-// date filter here, the pure function above does its own windowing.
+// Thin I/O wrapper, same shape as getGoalProgress in goalProgress.js.
+// Bounds the query itself to the same HISTORY_DAYS window
+// estimateEssentialMonthlyExpenses would filter to anyway - this is now
+// called from GET /goal/progress (a routinely-hit route, not just an
+// occasional admin curl), so pulling a user's entire transaction history
+// on every call would be real, avoidable cost at scale. The pure
+// function's own filtering stays in place as a second, harmless guard
+// (a boundary transaction landing just inside the DB query but just
+// outside the exact cutoff still gets excluded correctly), not removed.
 async function getEssentialExpenseEstimate(userId) {
+  const now = new Date();
+  const cutoff = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - HISTORY_DAYS)
+  );
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+
   const { data: transactions, error } = await supabaseAdmin
     .from('transactions')
     .select('date, amount, category')
-    .eq('user_id', userId);
+    .eq('user_id', userId)
+    .gte('date', cutoffStr);
   if (error) throw error;
 
-  return estimateEssentialMonthlyExpenses(transactions || []);
+  return estimateEssentialMonthlyExpenses(transactions || [], now);
 }
 
 module.exports = {

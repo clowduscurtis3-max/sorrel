@@ -1,17 +1,27 @@
 import { View, Text } from 'react-native';
-import { styles } from '../_lib/styles';
+import { styles, colors } from '../_lib/styles';
 
 // Phase 13: extracted out of ScenarioCheck.js (Phase 5 Step 3/4), which is
 // being deleted as part of consolidating the "Can I afford this?" tool onto
 // the Budget tab. This file is now the single home for rendering a scenario
-// result and a buy-now-vs-wait comparison - moved verbatim, no rendering
-// changes, since AffordabilityQuery.js (Phase 9) already reused both
-// unchanged and that reuse is exactly what's being preserved here.
+// result and a buy-now-vs-wait comparison.
+//
+// Budget-tab Sorrel restyle (2026-08-20): the status_label/confidence lines
+// this component used to render itself were dropped - AffordabilityQuery.js
+// now owns showing status (the CheckBadge + title above this component),
+// so repeating it here read as redundant once that chrome existed. This
+// component's job narrowed to just the explanation/tradeoffs/limitations
+// text - still the single home for that rendering, reused unchanged by
+// both the single-check result and each side of the buy-now-vs-wait
+// comparison, so the two can't drift into two different renderings of the
+// same result shape. `label` is kept as an optional prop for any future
+// caller that still wants a heading here, even though no current call site
+// passes one (the comparison screen shows its own heading instead now).
 
-// Matches scenario.js's own severity levels - a plain text marker rather
-// than color, consistent with this app's "no visual polish yet" plainness
-// everywhere else.
-const SEVERITY_MARKER = { high: '!! ', medium: '! ', low: '' };
+// Matches scenario.js's own severity levels - color instead of the old
+// plain-text "!!"/"!" prefix markers, now that this app has a real palette
+// to draw the distinction from.
+const SEVERITY_COLOR = { high: colors.error, medium: colors.warning, low: colors.dark };
 
 // Reused for both the single-check result and each side of the buy-now-vs-
 // wait comparison, so the two don't drift into two slightly different
@@ -20,8 +30,6 @@ export function ScenarioResult({ label, result }) {
   return (
     <View style={styles.reviewRow}>
       {label && <Text style={styles.smallText}>{label}</Text>}
-      <Text style={styles.rowName}>{result.status_label}</Text>
-      <Text style={styles.smallText}>Confidence: {result.confidence}</Text>
       {/* Step 5: when Claude's paragraph is available it already covers the
           same ground as the tradeoffs/limitations bullets below (direct
           user feedback, on-device - showing both read as redundant). The
@@ -32,8 +40,7 @@ export function ScenarioResult({ label, result }) {
       ) : (
         <>
           {result.tradeoffs.map((t, i) => (
-            <Text key={`t-${i}`} style={styles.smallText}>
-              {SEVERITY_MARKER[t.severity]}
+            <Text key={`t-${i}`} style={[styles.smallText, { color: SEVERITY_COLOR[t.severity] }]}>
               {t.text}
             </Text>
           ))}

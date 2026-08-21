@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, TextInput, Button, ActivityIndicator, Pressable, StyleSheet } from 'react-native';
+import { View, Text, TextInput, ActivityIndicator, Pressable, StyleSheet } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import {
   useAudioRecorder,
@@ -9,10 +9,54 @@ import {
   setAudioModeAsync,
 } from 'expo-audio';
 import { apiFetch, apiErrorMessage } from '../_lib/api';
-import { styles } from '../_lib/styles';
+import { styles, colors } from '../_lib/styles';
 import { formatAmountLabel } from '../_lib/amountPicker';
+import { useAppData } from '../_lib/appData';
 import { ScenarioResult, describeComparisonDifference } from './ScenarioResult';
 import DigitAmountPicker from './DigitAmountPicker';
+import PrimaryButton from './PrimaryButton';
+import { LeafAvatar, CheckBadge, CarIllustration, MountainIllustration } from './Illustrations';
+
+// "A few things to consider" (comparison screen) - 30 days, matching the
+// mockup's own "in the next 30 days" copy. Deliberately independent of
+// Home's UPCOMING_BILLS_WINDOW_DAYS (7 days, a short glance list there) -
+// this card is a single summed total, not a list, so a longer window
+// reads better here without the two ever needing to agree.
+//
+// No lower bound on `days`, matching Home's own filter exactly (`(tabs)/
+// index.js`'s upcomingBills: `days <= UPCOMING_BILLS_WINDOW_DAYS`, no
+// `days >= 0`) - an earlier version of this function added one, which
+// real /code-review (2026-08-20) caught as a genuine inconsistency: the
+// same underlying data would report two different totals depending on
+// which screen you're on, since Home deliberately still counts an
+// overdue bill (shown there as "expected recently") as upcoming. Not
+// extracted into one shared helper both screens import - that would mean
+// touching Home's file, outside this restyle's own scope guardrails
+// (Budget tab only); logged as a reasonable future cleanup instead.
+const UPCOMING_BILLS_CARD_WINDOW_DAYS = 30;
+
+function upcomingBillsTotal(subscriptionAudit, now = new Date()) {
+  if (!subscriptionAudit?.recurring_bills?.length) return null;
+  const todayUtc = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+  const total = subscriptionAudit.recurring_bills.reduce((sum, bill) => {
+    const days = Math.round(
+      (new Date(`${bill.next_expected_date}T00:00:00Z`) - todayUtc) / (1000 * 60 * 60 * 24)
+    );
+    return days <= UPCOMING_BILLS_CARD_WINDOW_DAYS ? sum + bill.typical_amount : sum;
+  }, 0);
+  return Math.round(total * 100) / 100;
+}
+
+// Pure, deterministic - "months of expenses" is just saved ÷ essential
+// average, both real numbers already on goalProgress. Not a new financial
+// calculation, just display-side arithmetic over two values the backend
+// already computed (getGoalProgress's saved_amount, emergencyFund.js's
+// averageMonthlyEssential).
+function monthsOfExpenses(goalProgress) {
+  const essential = goalProgress?.essential_expense_estimate?.averageMonthlyEssential;
+  if (!essential || essential <= 0) return null;
+  return goalProgress.saved_amount / essential;
+}
 
 // Phase 9 Step 4, moved to the Budget tab in Phase 13: the "can I afford
 // this?" entry point - one text field, one submit action, one structured
@@ -45,6 +89,14 @@ import DigitAmountPicker from './DigitAmountPicker';
 // new code to support a third input method (extractCandidateAmounts/
 // validateStatedAmountAgainstRawInput already handle whatever string
 // reaches them).
+//
+// Budget-tab Sorrel restyle (2026-08-20): presentation-only pass over all
+// of the above - every function in this file that touches `apiFetch`,
+// `pendingContext`, the recorder, or the wheel is unchanged from Phase 13.
+// The one new piece of state is `originalQuestion`, added purely so the
+// mockup's chat-bubble pair can still show the user's original question
+// once `text` itself has been cleared for the amount-only reply - it does
+// not feed into `submit()` or the backend contract at all.
 
 function describeProjection(p) {
   if (p.status === 'already_affordable') {
@@ -59,6 +111,49 @@ function describeProjection(p) {
     `for this by ${p.projected_date} — about ${days} day${days === 1 ? '' : 's'} from now.`
   );
 }
+
+// Pure, deterministic - template text over goal_impact's already-computed
+// fields (delay_days/stalls_goal/projected_date_after), same discipline as
+// describeComparisonDifference below. Never invents a number that isn't
+// already on goalImpact.
+function describeGoalCallout(goalImpact) {
+  if (!goalImpact?.available) return null;
+  if (goalImpact.stalls_goal) {
+    return "This would stop your goal from advancing at its current pace.";
+  }
+  if (!goalImpact.delay_days || goalImpact.delay_days <= 0) {
+    return "This won't slow your progress toward your goal.";
+  }
+  return (
+    `This pushes your projected goal date back about ${goalImpact.delay_days} ` +
+    `day${goalImpact.delay_days === 1 ? '' : 's'}, to around ${goalImpact.projected_date_after}.`
+  );
+}
+
+// Short two-word-ish label for the comparison table's Goal progress row -
+// same fields describeGoalCallout uses, just condensed for a table cell
+// instead of a sentence.
+function shortGoalImpactLabel(goalImpact) {
+  if (!goalImpact?.available) return 'Not available';
+  if (goalImpact.stalls_goal) return 'Stalls goal';
+  if (!goalImpact.delay_days || goalImpact.delay_days <= 0) return 'On track';
+  return `Delayed ${goalImpact.delay_days}d`;
+}
+
+// Badge tone per result status - never a reassuring green check on a risky
+// or unknown result. See Illustrations.js's CheckBadge header for why this
+// mapping exists as a real design decision, not an incidental default.
+const STATUS_TONE = {
+  comfortable: 'positive',
+  affordable_with_tradeoff: 'positive',
+  risky_timing: 'caution',
+  insufficient_data: 'neutral',
+};
+
+// Text-color counterpart to STATUS_TONE/CheckBadge's fill colors, for the
+// smaller inline status labels (comparison cards, max_comfortable) that
+// show status as colored text rather than a full badge.
+const STATUS_TEXT_COLOR = { positive: colors.primary, caution: colors.warning, neutral: colors.muted };
 
 // Long history (2026-08-19/20) of the wheel's amount-selection design,
 // worth keeping since the final answer isn't obvious from the code alone:
@@ -93,6 +188,12 @@ function describeProjection(p) {
 // no tiering, no precision lost. See DigitAmountPicker.js's own header
 // for the full reasoning.
 export default function AffordabilityQuery() {
+  // "A few things to consider" (comparison screen) - goalProgress and
+  // subscriptionAudit are already fetched app-wide by AppDataProvider
+  // (Home/Goal tabs already consume both), reused here with zero new
+  // fetch plumbing.
+  const { goalProgress, subscriptionAudit } = useAppData();
+
   const [text, setText] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -101,6 +202,8 @@ export default function AffordabilityQuery() {
   // context a NEEDS_AMOUNT response returned, which the follow-up request
   // echoes back verbatim (see server/index.js's /affordability/query).
   const [pendingContext, setPendingContext] = useState(null);
+  // Restyle-only addition (2026-08-20) - see this file's header comment.
+  const [originalQuestion, setOriginalQuestion] = useState('');
 
   // The wheel's own numeric value, separate from `text` - it needs a plain
   // number to drive DigitAmountPicker's controlled `value` prop, while
@@ -216,6 +319,7 @@ export default function AffordabilityQuery() {
 
   function onAsk() {
     if (!text.trim()) return;
+    if (!pendingContext) setOriginalQuestion(text);
     submit(text, pendingContext || undefined);
   }
 
@@ -231,6 +335,7 @@ export default function AffordabilityQuery() {
     setError(null);
     setComparison(null);
     setComparisonError(null);
+    setOriginalQuestion('');
   }
 
   // Reuses the last successfully-checked amount/category/recurrence
@@ -266,41 +371,50 @@ export default function AffordabilityQuery() {
     }
   }
 
+  const result = response?.status === 'result' ? response.result : null;
+  const tone = result ? STATUS_TONE[result.status] || 'positive' : 'positive';
+
   return (
-    <View style={styles.budgetRow}>
-      <Text style={styles.rowName}>Can I afford this?</Text>
+    <View style={{ gap: 16 }}>
+      <View style={{ alignItems: 'center', gap: 4 }}>
+        <LeafAvatar size={48} />
+        <Text style={[styles.cardTitle, { fontSize: 19 }]}>Can I afford this?</Text>
+        <Text style={styles.smallText}>Tell Sorrel what you're thinking about.</Text>
+      </View>
 
       {pendingContext && (
-        <Text style={styles.smallText}>
-          {response?.message || 'How much?'}
-        </Text>
+        <View style={{ gap: 8 }}>
+          {!!originalQuestion && (
+            <View style={styles.chatBubbleUser}>
+              <Text style={styles.chatBubbleUserText}>{originalQuestion}</Text>
+            </View>
+          )}
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8 }}>
+            <LeafAvatar size={28} />
+            <View style={styles.chatBubbleAssistant}>
+              <Text style={styles.chatBubbleAssistantText}>{response?.message || 'How much?'}</Text>
+            </View>
+          </View>
+        </View>
       )}
 
       {/* Phase 13: the wheel is a fallback for the needs_amount state only -
           "not taking up the screen constantly." Writes into the same
           `text` field typed/voice input use, so it needs no separate
-          submit path. Now a per-digit odometer (DigitAmountPicker,
-          2026-08-20) rather than one continuous $1-$999,999 wheel - see
-          this file's own header comment and DigitAmountPicker.js for why.
-          Rendered above the text/mic row (moved 2026-08-20, direct user
-          request) so the wheel - the primary way to answer once it's
-          showing - reads as the focal point, with typed/voice entry below
-          it as the alternative rather than the first thing seen. */}
+          submit path. DigitAmountPicker already renders its own card, not
+          re-wrapped here. */}
       {pendingContext && <DigitAmountPicker value={wheelValue} onValueChange={onWheelChange} />}
 
       {/* Voice: record -> transcribe -> lands in the field to the left as
           plain editable text. Never submits on its own - "Ask"/"Submit
-          amount" below is still the only way to actually send anything.
-          A compact icon button next to the input instead of its own
-          full-width "Ask by voice" button, per direct user request
-          (2026-08-20) - "clean looking," not a second big button
-          competing with Ask. */}
+          amount" below is still the only way to actually send anything. */}
       <View style={inlineStyles.inputRow}>
         <TextInput
           style={[styles.input, inlineStyles.input]}
           value={text}
           onChangeText={setText}
           placeholder={pendingContext ? 'e.g. $50' : 'e.g. Can I afford a $50 dinner?'}
+          placeholderTextColor={colors.placeholder}
           editable={!submitting && !transcribing}
         />
         {transcribing ? (
@@ -309,12 +423,14 @@ export default function AffordabilityQuery() {
           <Pressable
             onPress={onMicPress}
             disabled={submitting}
+            accessibilityRole="button"
+            accessibilityLabel={recorderState.isRecording ? 'Stop recording' : 'Ask by voice'}
             style={[
               inlineStyles.micButton,
               recorderState.isRecording ? inlineStyles.micButtonRecording : inlineStyles.micButtonIdle,
             ]}
           >
-            <MaterialIcons name={recorderState.isRecording ? 'stop' : 'mic'} size={22} color="#fff" />
+            <MaterialIcons name={recorderState.isRecording ? 'stop' : 'mic'} size={22} color={colors.background} />
           </Pressable>
         )}
       </View>
@@ -324,62 +440,152 @@ export default function AffordabilityQuery() {
       {submitting ? (
         <ActivityIndicator />
       ) : (
-        <Button
-          title={pendingContext ? 'Submit amount' : 'Ask'}
-          onPress={onAsk}
-          disabled={transcribing || recorderState.isRecording}
-        />
+        <PrimaryButton title={pendingContext ? 'Submit amount' : 'Ask'} onPress={onAsk} disabled={transcribing || recorderState.isRecording} />
       )}
 
       {response && !pendingContext && (
-        <Button title="Ask something else" onPress={startOver} />
+        <Pressable onPress={startOver} accessibilityRole="button" accessibilityLabel="Ask something else">
+          <Text style={[styles.smallText, { color: colors.primary, textDecorationLine: 'underline' }]}>
+            Ask something else
+          </Text>
+        </Pressable>
       )}
 
       {error && <Text style={styles.errorText}>{error}</Text>}
 
       {response?.status === 'unsupported' && (
-        <Text style={styles.smallText}>{response.message}</Text>
+        <View style={styles.card}>
+          <Text style={styles.smallText}>{response.message}</Text>
+        </View>
       )}
 
       {response?.status === 'insufficient_data' && (
-        <Text style={styles.smallText}>{response.detail}</Text>
+        <View style={styles.card}>
+          <Text style={styles.smallText}>{response.detail}</Text>
+        </View>
       )}
 
-      {response?.status === 'result' && response.result && (
-        <>
-          <ScenarioResult result={response.result} />
+      {result && (
+        <View style={{ gap: 16 }}>
+          <View style={{ alignItems: 'center', gap: 8 }}>
+            <CheckBadge size={56} tone={tone} />
+            <Text style={[styles.cardTitle, { fontSize: 20, textAlign: 'center' }]}>{result.status_label}</Text>
+          </View>
 
-          {/* Explicit secondary action, never auto-run alongside the plain
-              result above - "not an extra tap that should've been
-              automatic," per the brief, unless that stops feeling right
-              once actually used. */}
+          <View style={styles.card}>
+            <View style={styles.comparisonTableRow}>
+              <Text style={styles.comparisonTableLabel}>Amount</Text>
+              <Text style={styles.comparisonTableValue}>${result.scenario.amount.toFixed(2)}</Text>
+            </View>
+            <View style={styles.comparisonTableRow}>
+              <Text style={styles.comparisonTableLabel}>Recurrence</Text>
+              <Text style={styles.comparisonTableValue}>
+                {result.scenario.recurrence === 'once'
+                  ? 'One-time'
+                  : result.scenario.recurrence[0].toUpperCase() + result.scenario.recurrence.slice(1)}
+              </Text>
+            </View>
+            <View style={[styles.comparisonTableRow, { borderBottomWidth: 0 }]}>
+              <Text style={styles.comparisonTableLabel}>Category</Text>
+              <Text style={styles.comparisonTableValue}>{result.scenario.category || 'Not specified'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Why</Text>
+            <ScenarioResult result={result} />
+          </View>
+
+          {result.budget_impact?.available && (
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>After adding this payment</Text>
+              <Text style={styles.smallText}>
+                You'd have ${result.budget_impact.total_remaining_after.toFixed(2)} left in your budget this
+                period.
+              </Text>
+            </View>
+          )}
+
+          {result.goal_impact?.available && (
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Your goal</Text>
+              <Text style={styles.smallText}>{describeGoalCallout(result.goal_impact)}</Text>
+            </View>
+          )}
+
           {comparing ? (
             <ActivityIndicator />
           ) : (
-            <Button title="Compare: buy now vs. wait" onPress={checkComparison} />
+            <PrimaryButton title="Compare: buy now vs. wait" onPress={checkComparison} />
           )}
 
           {comparisonError && <Text style={styles.errorText}>{comparisonError}</Text>}
 
           {comparison && comparison.available === false && (
-            <Text style={styles.smallText}>
-              No recurring income has been detected yet, so there's no real payday to compare
-              waiting against.
-            </Text>
+            <View style={styles.card}>
+              <Text style={styles.smallText}>
+                No recurring income has been detected yet, so there's no real payday to compare
+                waiting against.
+              </Text>
+            </View>
           )}
 
           {comparison && comparison.available === true && (
-            <View style={styles.reviewRow}>
+            <View style={{ gap: 16 }}>
               {(() => {
                 const [buyNow, wait] = comparison.comparison.scenarios;
                 const [diff] = comparison.comparison.differences;
                 return (
                   <>
-                    <ScenarioResult label="Buy now" result={buyNow.result} />
-                    <ScenarioResult
-                      label={`Wait until your paycheck on ${wait.result.scenario.date}`}
-                      result={wait.result}
-                    />
+                    <View style={{ flexDirection: 'row', gap: 12 }}>
+                      <View style={[styles.card, { flex: 1, alignItems: 'center' }]}>
+                        <CarIllustration size={64} />
+                        <Text style={styles.cardTitle}>Buy now</Text>
+                        {/* Real gap found by /code-review (2026-08-20):
+                            trimming status_label out of ScenarioResult
+                            (screen 2's own badge/title replaced it there)
+                            silently dropped status display from these two
+                            comparison sides too, with nothing else showing
+                            it - restored here, specific to this call site. */}
+                        <Text style={{ color: STATUS_TEXT_COLOR[STATUS_TONE[buyNow.result.status] || 'positive'], fontWeight: '600', fontSize: 13 }}>
+                          {buyNow.result.status_label}
+                        </Text>
+                        <ScenarioResult result={buyNow.result} />
+                      </View>
+                      <View style={[styles.card, { flex: 1, alignItems: 'center' }]}>
+                        <MountainIllustration size={64} />
+                        <Text style={styles.cardTitle}>Wait until {wait.result.scenario.date}</Text>
+                        <Text style={{ color: STATUS_TEXT_COLOR[STATUS_TONE[wait.result.status] || 'positive'], fontWeight: '600', fontSize: 13 }}>
+                          {wait.result.status_label}
+                        </Text>
+                        <ScenarioResult result={wait.result} />
+                      </View>
+                    </View>
+
+                    {/* Only 2 rows shown, deliberately - both have real
+                        backing computation (charge_this_period,
+                        goal_impact). The mockup's other 3 rows
+                        (Monthly flexibility, Emergency fund impact,
+                        Financial buffer) have no real distinguishing
+                        number behind them anywhere in the engine, so they
+                        are not shown rather than fabricated - see this
+                        restyle's own build notes in CLAUDE.md. */}
+                    <View style={styles.card}>
+                      <View style={styles.comparisonTableRow}>
+                        <Text style={styles.comparisonTableLabel}>Discretionary spending (buy now)</Text>
+                        <Text style={styles.comparisonTableValue}>
+                          -${buyNow.result.budget_impact?.charge_this_period?.toFixed(2) ?? '—'}
+                        </Text>
+                      </View>
+                      <View style={[styles.comparisonTableRow, { borderBottomWidth: 0 }]}>
+                        <Text style={styles.comparisonTableLabel}>Goal progress</Text>
+                        <Text style={styles.comparisonTableValue}>
+                          {shortGoalImpactLabel(buyNow.result.goal_impact)} vs{' '}
+                          {shortGoalImpactLabel(wait.result.goal_impact)}
+                        </Text>
+                      </View>
+                    </View>
+
                     {diff && (
                       <Text style={styles.smallText}>
                         {describeComparisonDifference({
@@ -389,25 +595,119 @@ export default function AffordabilityQuery() {
                         })}
                       </Text>
                     )}
+
+                    {/* "Sorrel's take" - comparison.explanation was already
+                        fetched from the backend (explainComparison in
+                        scenarioExplain.js, same never-invent-a-number
+                        guardrail as the single-check explanation) but
+                        never rendered before this restyle. */}
+                    {comparison.explanation && (
+                      <View style={styles.card}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <LeafAvatar size={24} />
+                          <Text style={styles.cardTitle}>Sorrel's take</Text>
+                        </View>
+                        <Text style={styles.text}>{comparison.explanation}</Text>
+                      </View>
+                    )}
+
+                    {/* "A few things to consider" - pulled from data
+                        already fetched app-wide (useAppData), no new
+                        network calls. Each card only renders when its own
+                        data is actually available - never a placeholder
+                        or an invented number. */}
+                    {(goalProgress || subscriptionAudit) && (
+                      <View style={{ gap: 8 }}>
+                        <Text style={styles.cardTitle}>A few things to consider</Text>
+
+                        {goalProgress?.goal_type === 'emergency_fund' && (
+                          <View style={styles.card}>
+                            <Text style={styles.cardTitle}>Emergency fund</Text>
+                            {goalProgress.essential_expense_estimate?.insufficient_history ? (
+                              <Text style={styles.smallText}>
+                                Not enough spending history yet to estimate how many months of
+                                expenses you have covered.
+                              </Text>
+                            ) : goalProgress.essential_expense_estimate?.uncategorized_ratio_too_high ? (
+                              <Text style={styles.smallText}>
+                                Too much unreviewed spending right now to estimate this
+                                confidently.
+                              </Text>
+                            ) : goalProgress.essential_expense_estimate?.non_positive_essential_spend ? (
+                              <Text style={styles.smallText}>
+                                A recent refund or credit is throwing off this estimate right now -
+                                check back once your next few essential bills have posted.
+                              </Text>
+                            ) : monthsOfExpenses(goalProgress) != null ? (
+                              <Text style={styles.smallText}>
+                                You have ${goalProgress.saved_amount.toFixed(2)} set aside — about{' '}
+                                {monthsOfExpenses(goalProgress).toFixed(1)} months of essential
+                                expenses.
+                              </Text>
+                            ) : (
+                              <Text style={styles.smallText}>
+                                You have ${goalProgress.saved_amount.toFixed(2)} set aside.
+                              </Text>
+                            )}
+                          </View>
+                        )}
+
+                        {goalProgress && (
+                          <View style={styles.card}>
+                            <Text style={styles.cardTitle}>Goal progress</Text>
+                            <Text style={styles.smallText}>{goalProgress.message}</Text>
+                          </View>
+                        )}
+
+                        {upcomingBillsTotal(subscriptionAudit) != null && (
+                          <View style={styles.card}>
+                            <Text style={styles.cardTitle}>Upcoming bills</Text>
+                            <Text style={styles.smallText}>
+                              You have ${upcomingBillsTotal(subscriptionAudit).toFixed(2)} in bills
+                              due in the next {UPCOMING_BILLS_CARD_WINDOW_DAYS} days.
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    )}
                   </>
                 );
               })()}
             </View>
           )}
-        </>
+        </View>
       )}
 
+      {/* Real bug found by /code-review (2026-08-20): maximum_comfortable_amount
+          and affordable_date both return {status: 'result', ...} with NO
+          `.result` field (only affordability_check's response has one) - so
+          gating these on `result` (= response.result) the way the block
+          above is gated made both of these render nothing at all, a full
+          regression of two of the three affordability intents. Gated on
+          `response?.status === 'result'` directly instead, matching what
+          the original pre-restyle code did, and kept as independent
+          siblings rather than nested inside the `result &&` block above. */}
       {response?.status === 'result' && response.max_comfortable && (
-        <View style={styles.reviewRow}>
-          <Text style={styles.rowName}>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>
             Comfortable up to ${response.max_comfortable.max_comfortable_amount.toFixed(2)}
+          </Text>
+          <Text
+            style={{
+              color:
+                STATUS_TEXT_COLOR[STATUS_TONE[response.max_comfortable.boundary_result.status] || 'positive'],
+              fontWeight: '600',
+              fontSize: 13,
+            }}
+          >
+            {response.max_comfortable.boundary_result.status_label}
           </Text>
           <ScenarioResult result={response.max_comfortable.boundary_result} />
         </View>
       )}
 
       {response?.status === 'result' && response.projection && (
-        <View style={styles.reviewRow}>
+        <View style={styles.card}>
           <Text style={styles.smallText}>{describeProjection(response.projection)}</Text>
         </View>
       )}
@@ -428,9 +728,10 @@ const inlineStyles = StyleSheet.create({
   // Solid filled circle + a real Material Icons glyph (Google's own icon
   // set, already ships with Expo - no new native dependency), per direct
   // user request (2026-08-20): "not some emoji mic... the one Google
-  // uses." Blue while idle (tap to start), red while actively recording
-  // (tap to stop) - the same color language as system mic-mute controls,
-  // so the color alone signals state, not just the icon swap.
+  // uses." Now palette-derived (colors.primary/colors.error) rather than
+  // the original hardcoded #1a73e8/#d93025 - same semantic meaning
+  // (color alone signals idle vs. recording state), restyled as part of
+  // the Budget-tab Sorrel pass.
   micButton: {
     width: 44,
     height: 44,
@@ -439,9 +740,9 @@ const inlineStyles = StyleSheet.create({
     justifyContent: 'center',
   },
   micButtonIdle: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: colors.primary,
   },
   micButtonRecording: {
-    backgroundColor: '#d93025',
+    backgroundColor: colors.error,
   },
 });
