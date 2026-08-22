@@ -14,3 +14,8 @@
 process.env.SUPABASE_URL ||= 'http://localhost:54321';
 process.env.SUPABASE_SERVICE_ROLE_KEY ||= 'test-service-role-key-not-a-real-secret';
 process.env.ANTHROPIC_API_KEY ||= 'test-anthropic-key-not-a-real-secret';
+// A real, random 32-byte key (decodes correctly for crypto.js's AES-256
+// validation and for the HMAC-signing helpers in affordabilityParse.js/
+// googleOAuth.js) - generated once for this file, not reused anywhere real.
+// Not a secret: nothing this suite encrypts/signs with it is genuine data.
+process.env.ENCRYPTION_KEY ||= 'tmokek1ou8PhvsIgDkTVhPkWVZV+IcFv2b+rbH8F1M4=';

@@ -15,6 +15,7 @@ import { useAppData } from '../_lib/appData';
 import { ScenarioResult, describeComparisonDifference } from './ScenarioResult';
 import DigitAmountPicker from './DigitAmountPicker';
 import PrimaryButton from './PrimaryButton';
+import AffordabilityChat from './AffordabilityChat';
 import { LeafAvatar, CheckBadge, CarIllustration, MountainIllustration } from './Illustrations';
 
 // "A few things to consider" (comparison screen) - 30 days, matching the
@@ -98,7 +99,12 @@ function monthsOfExpenses(goalProgress) {
 // once `text` itself has been cleared for the amount-only reply - it does
 // not feed into `submit()` or the backend contract at all.
 
-function describeProjection(p) {
+// Exported for AffordabilityChat.js's own inline result card
+// (project_affordable_date's tool result is the identical shape this
+// function already renders here) - real bug found by adversarial review
+// (2026-08-22): the chat originally assumed every tool result matched
+// evaluate_scenario's shape and crashed on this one (and three others).
+export function describeProjection(p) {
   if (p.status === 'already_affordable') {
     return (
       `You already have enough saved for this — $${p.saved_amount.toFixed(2)} toward the ` +
@@ -128,6 +134,28 @@ function describeGoalCallout(goalImpact) {
     `This pushes your projected goal date back about ${goalImpact.delay_days} ` +
     `day${goalImpact.delay_days === 1 ? '' : 's'}, to around ${goalImpact.projected_date_after}.`
   );
+}
+
+// "AI-narrated responses + conversation memory" follow-up (CLAUDE.md): the
+// full tradeoffs/limitations list read as a long, list-y block once several
+// caveats stack up (found on-device testing the financing flow) - trimmed
+// to a short, glance-able template (2-4 bullets straight off already-
+// computed fields) with a "More details" link into a real chat
+// (AffordabilityChat.js) for anyone who wants the full picture or a genuine
+// follow-up. Deterministic, no new Claude call - same cost-conscious
+// default as describeGoalCallout/describeComparisonDifference right next
+// to this. The full explanation paragraph isn't dropped, just relocated:
+// it becomes the chat's own opening message (see AffordabilityChat.js),
+// not shown twice.
+function shortResultSummary(result) {
+  const bullets = [];
+  const topTradeoff = result.tradeoffs?.[0];
+  if (topTradeoff) bullets.push(topTradeoff.text);
+  const goalLine = describeGoalCallout(result.goal_impact);
+  if (goalLine) bullets.push(goalLine);
+  const topLimitation = result.limitations?.[0];
+  if (topLimitation) bullets.push(topLimitation);
+  return bullets.slice(0, 3);
 }
 
 // Short two-word-ish label for the comparison table's Goal progress row -
@@ -218,6 +246,23 @@ export default function AffordabilityQuery() {
   const [comparing, setComparing] = useState(false);
   const [comparisonError, setComparisonError] = useState(null);
   const [comparison, setComparison] = useState(null);
+
+  // "AI-narrated responses + conversation memory" follow-up: which result
+  // (if any) a "More details" tap opened the chat for - the chat itself
+  // holds no state here beyond this, since its own conversation is fully
+  // local to AffordabilityChat.js and discarded when it closes.
+  const [chatAnchorResult, setChatAnchorResult] = useState(null);
+  // Real bug found by adversarial review (2026-08-22): AffordabilityChat is
+  // always mounted (only `visible` toggles), and its own message state is
+  // seeded via a useState lazy initializer that only ever runs once on
+  // first mount - so reopening "More details" for a DIFFERENT purchase kept
+  // showing the previous purchase's full transcript instead of starting
+  // fresh, directly contradicting that file's own "starts from the same
+  // anchor_result's explanation, not where this one left off" contract.
+  // Incrementing this on every open and passing it as AffordabilityChat's
+  // `key` forces a genuine remount (fresh internal state) each time,
+  // regardless of whether it's the same or a different purchase.
+  const [chatKey, setChatKey] = useState(0);
 
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState = useAudioRecorderState(recorder);
@@ -591,7 +636,23 @@ export default function AffordabilityQuery() {
 
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Why</Text>
-            <ScenarioResult result={result} />
+            {shortResultSummary(result).map((line, i) => (
+              <Text key={i} style={styles.smallText}>
+                {line}
+              </Text>
+            ))}
+            <Pressable
+              onPress={() => {
+                setChatAnchorResult(result);
+                setChatKey((k) => k + 1);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="More details"
+            >
+              <Text style={[styles.smallText, { color: colors.primary, textDecorationLine: 'underline' }]}>
+                More details
+              </Text>
+            </Pressable>
           </View>
 
           {result.budget_impact?.available && (
@@ -823,6 +884,13 @@ export default function AffordabilityQuery() {
           <Text style={styles.smallText}>{describeProjection(response.projection)}</Text>
         </View>
       )}
+
+      <AffordabilityChat
+        key={chatKey}
+        visible={!!chatAnchorResult}
+        onClose={() => setChatAnchorResult(null)}
+        anchorResult={chatAnchorResult}
+      />
     </View>
   );
 }

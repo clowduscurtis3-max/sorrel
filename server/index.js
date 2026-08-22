@@ -57,9 +57,14 @@ const {
   parseAffordabilityQuery,
   sanitizeParsedOutput,
   extractCandidateAmounts,
+  signTotalPrice,
+  verifyTotalPrice,
+  signObjectIntegrity,
+  verifyObjectIntegrity,
 } = require('./affordabilityParse');
 const { transcribeAudio } = require('./transcribe');
 const { parseFinanceTermMonths, computeEstimatedPayment, getCurrentAutoLoanRate } = require('./financeRate');
+const { runAffordabilityChatTurn } = require('./affordabilityChat');
 
 // Where we send the system browser once Gmail linking finishes, so the app
 // (watching for this scheme via WebBrowser.openAuthSessionAsync) resolves.
@@ -1232,20 +1237,23 @@ const MAX_AFFORDABILITY_QUERY_LENGTH = 500;
 // meant to survive across multiple follow-up turns (financing confirmation,
 // then the monthly-payment reply), not be refreshed each turn - and there's
 // no current-turn raw text to trace it back to at this point (it was stated
-// in an earlier message), so it's stripped before the shared amount-guardrail
-// path and re-attached afterward with only a type/finite/positive check, not
-// a raw-text trace check. It was already traced once, when first extracted.
-function sanitizeClarificationContext(raw) {
+// in an earlier message). It was already traced once, when first extracted
+// - but since this app has no server-side session, the client-echoed
+// `context` is the ONLY place that already-traced value lives between
+// turns, and nothing stopped a tampered/buggy client from sending back a
+// different number than the one this process actually produced (a real gap
+// found by /code-review, 2026-08-22 - see signTotalPrice/verifyTotalPrice
+// in affordabilityParse.js for the fix and full reasoning). So this is now
+// verified as a signed token, not accepted as a plain client-supplied
+// number - anything that doesn't verify (missing, forged, expired, or
+// signed for a different user) collapses to null, the same "no total price
+// known yet" state as if it had never been mentioned.
+function sanitizeClarificationContext(raw, userId) {
   const sanitized = sanitizeParsedOutput(
     { ...raw, amount_stated: null, total_price_stated: null },
     ''
   );
-  const totalPriceStated =
-    typeof raw?.total_price_stated === 'number' &&
-    Number.isFinite(raw.total_price_stated) &&
-    raw.total_price_stated > 0
-      ? Math.round(raw.total_price_stated * 100) / 100
-      : null;
+  const totalPriceStated = verifyTotalPrice(userId, raw?.total_price_stated, sanitized.category);
   return {
     intent: sanitized.intent,
     category: sanitized.category,
@@ -1259,31 +1267,49 @@ function sanitizeClarificationContext(raw) {
   };
 }
 
+// A standard retail deferred-interest promo period - 12 months is the
+// common default across major furniture/appliance/electronics retailers
+// (Ashley, Best Buy, etc.). Used only to skip asking a question the user
+// often can't answer yet (see the Shopping branch below) - never presented
+// as a fact about the specific purchase, always disclosed as an assumption
+// in the resulting caveat text.
+const DEFAULT_PROMO_TERM_MONTHS = 12;
+
 // Once financing is established (recurrence forced to 'monthly' by the
 // caller) and no direct monthly-payment amount is known yet, decides what
-// to ask next.
+// to ask next (or, for the Shopping case, just answers).
 //
 // - Vehicle purchases (category === 'Transportation') get the real-rate
-//   estimate path (a live FRED auto-loan rate - see financeRate.js).
+//   estimate path (a live FRED auto-loan rate - see financeRate.js) and
+//   still ask for the finance term directly - unlike a retail promo
+//   period, a car loan's term is a real decision the buyer is expected to
+//   already have in mind (e.g. "60 months"), not a store default, so
+//   asking is the honest move here, not friction to remove.
 // - Big-ticket Shopping-category items (furniture, appliances,
 //   electronics) get the 0%-promo path instead: these are commonly sold
-//   on deferred-interest "12 months, no interest" plans, a genuinely
+//   on deferred-interest "N months, no interest" plans, a genuinely
 //   different repayment structure than an amortizing loan, and FRED has
 //   no current published rate for this category to fetch anyway (checked
 //   2026-08-21 - the only furniture-credit series on FRED is a
-//   discontinued one from 1926-1946). Rather than inventing a rate, this
-//   computes an exact, non-guessed even-split payment (total price ÷
-//   term, genuinely $0 assumed interest) and leans on the advisor-voice
-//   explanation to carry two honest caveats: this assumes a 0%-interest
-//   plan is actually offered (the user should confirm with the retailer -
-//   Sorrel has no way to verify that), and deferred interest, if the
-//   balance isn't paid off within the promotional window, is typically
-//   applied retroactively to the *entire original* balance, not just
-//   what's left - a materially different and worse outcome than a normal
-//   loan running past term.
+//   discontinued one from 1926-1946). Unlike the car case, someone asking
+//   "can I afford this couch on a payment plan?" often genuinely doesn't
+//   know the plan length yet - real friction confirmed directly by the
+//   user testing this on-device (2026-08-22) - so this no longer asks:
+//   it defaults to DEFAULT_PROMO_TERM_MONTHS and computes an exact,
+//   non-guessed even-split payment (total price ÷ term, genuinely $0
+//   assumed interest) immediately. This is not the same class of "guess"
+//   the app's core "never invent a price" rule forbids - no dollar figure
+//   is fabricated, only a term default, and it's disclosed explicitly in
+//   the caveat rather than presented as fact. Two honest caveats still
+//   apply either way: this assumes a 0%-interest plan is actually offered
+//   (the user should confirm with the retailer - Sorrel has no way to
+//   verify that), and deferred interest, if the balance isn't paid off
+//   within the promotional window, is typically applied retroactively to
+//   the *entire original* balance, not just what's left - a materially
+//   different and worse outcome than a normal loan running past term.
 // - Every other financeable category keeps asking for the monthly payment
 //   directly, unchanged from the original financing fix.
-function nextFinancingStep(ctx) {
+async function nextFinancingStep(req, res, now, today, ctx) {
   const baseContext = {
     intent: ctx.intent,
     category: ctx.category,
@@ -1294,26 +1320,67 @@ function nextFinancingStep(ctx) {
   };
   if (ctx.category === 'Transportation' || ctx.category === 'Shopping') {
     if (ctx.total_price_stated === null) {
-      return {
+      return respondWithContext(res, req.userId, {
         status: 'needs_amount',
         message: "What's the total price?",
         context: { ...baseContext, awaiting: 'total_price' },
-      };
+      });
     }
     if (ctx.category === 'Transportation') {
-      return {
+      return respondWithContext(res, req.userId, {
         status: 'needs_finance_term',
         message: 'How long will the finance term be?',
         context: { ...baseContext, awaiting: 'finance_term' },
-      };
+      });
     }
-    return {
-      status: 'needs_finance_term',
-      message: 'How long would the payment plan be?',
-      context: { ...baseContext, awaiting: 'promo_term' },
+    const totalPrice = ctx.total_price_stated;
+    const estimatedPayment = computeEstimatedPayment({
+      totalPrice,
+      termMonths: DEFAULT_PROMO_TERM_MONTHS,
+      annualRatePercent: 0,
+    });
+    return respondWithAffordabilityResult(req, res, {
+      now,
+      today,
+      amount: estimatedPayment,
+      category: ctx.category,
+      recurrence: 'monthly',
+      recurrenceWasAmbiguous: false,
+      totalPriceStated: totalPrice,
+      promoPlanEstimate: {
+        estimated_payment: estimatedPayment,
+        term_months: DEFAULT_PROMO_TERM_MONTHS,
+        total_price: totalPrice,
+        confirmation_caveat: `This assumes a standard ${DEFAULT_PROMO_TERM_MONTHS}-month, 0%-interest promotional plan (the most common retail offer) - check with the retailer to confirm this specific plan is actually available for this purchase, and let Sorrel know if yours is a different length.`,
+        risk_caveat: `If the balance isn't paid off within the promotional window, deferred interest is typically applied retroactively to the entire original amount, not just what's left - which can end up costing significantly more than a normal loan.`,
+      },
+    });
+  }
+  return respondWithContext(res, req.userId, {
+    status: 'needs_amount',
+    message: 'What would the monthly payment be?',
+    context: baseContext,
+  });
+}
+
+// The one place a `context` object is actually signed before leaving this
+// process - see sanitizeClarificationContext's header for why a plain
+// number there is a real "invent a price" guardrail gap once the client
+// echoes it back untouched on a later turn. Every res.json(...) call in the
+// /affordability/query route below that includes a `context` field goes
+// through this instead of calling res.json directly, so there's exactly
+// one place this can be forgotten rather than one per call site.
+function respondWithContext(res, userId, payload) {
+  if (payload && payload.context && typeof payload.context === 'object') {
+    payload = {
+      ...payload,
+      context: {
+        ...payload.context,
+        total_price_stated: signTotalPrice(userId, payload.context.total_price_stated, payload.context.category),
+      },
     };
   }
-  return { status: 'needs_amount', message: 'What would the monthly payment be?', context: baseContext };
+  return res.json(payload);
 }
 
 // Shared by the direct-amount path and the rate-estimate path below - one
@@ -1357,16 +1424,18 @@ async function respondWithAffordabilityResult(
       promoPlanEstimate.risk_caveat,
     ];
   }
-  // Same Step 5 explanation call /scenarios/evaluate already makes for an
-  // identical result shape - reusing the existing, already cost-justified
-  // mechanism, not a new AI call site. Reads result.limitations, so it
-  // inherits the rate-estimate caveat above for free, no prompt change.
-  result.explanation = await explainScenario(result);
-
   // Total-price-vs-liquid-balance disclosure: context only, never a second
   // pass/fail gate (see CLAUDE.md). Skipped entirely (not shown as 0%/N-A)
   // when no liquid balance is on file, rather than showing a misleading
-  // ratio.
+  // ratio. Computed BEFORE explainScenario below - real ordering bug found
+  // by /code-review (2026-08-22): this used to run after the explanation
+  // call, so the AI paragraph could never reference or reconcile the
+  // total-price disclosure shown right below it in the UI, even though
+  // rate_estimate/promo_plan_estimate (attached earlier, same pattern)
+  // already could. Not a safety issue either way (explainScenario's prompt
+  // already forbids stating anything not in its input JSON, so the old
+  // order just silently under-used available context, never fabricated
+  // anything) - moved for a more complete explanation, not a guardrail fix.
   if (recurrence === 'monthly' && totalPriceStated) {
     const accountsSummary = await getAccountsSummary(req.userId);
     const liquidBalance = accountsSummary.total_depository_available;
@@ -1378,6 +1447,25 @@ async function respondWithAffordabilityResult(
       };
     }
   }
+
+  // Same Step 5 explanation call /scenarios/evaluate already makes for an
+  // identical result shape - reusing the existing, already cost-justified
+  // mechanism, not a new AI call site. Reads result.limitations and (now)
+  // result.total_price_comparison, so it inherits both for free, no prompt
+  // change.
+  result.explanation = await explainScenario(result);
+
+  // Real guardrail gap found by /code-review (2026-08-22): this is the
+  // exact result object the client later hands back as `anchor_result` to
+  // POST /affordability/chat, verbatim, on every turn of that follow-up
+  // conversation - which trusts it as "already real and computed" with no
+  // way to tell a genuine result apart from a tampered one, since this app
+  // has no server-side session. Signed here, right before it ever leaves
+  // this process, so /affordability/chat can verify it later - see
+  // verifyObjectIntegrity's own header in affordabilityParse.js for the
+  // full reasoning (same class of fix as total_price_stated's signing,
+  // for a bigger object).
+  result._integrity = signObjectIntegrity(req.userId, result);
 
   return res.json({ status: 'result', result });
 }
@@ -1401,7 +1489,7 @@ app.post('/affordability/query', requireUser, async (req, res) => {
   const today = now.toISOString().slice(0, 10);
 
   try {
-    const clarificationBase = context ? sanitizeClarificationContext(context) : null;
+    const clarificationBase = context ? sanitizeClarificationContext(context, req.userId) : null;
 
     // Deterministic yes/no branch for the "will this be financed?" turn -
     // the frontend only ever sends its two fixed button values here, never
@@ -1411,7 +1499,7 @@ app.post('/affordability/query', requireUser, async (req, res) => {
     if (clarificationBase?.awaiting === 'financing_confirmation') {
       const confirmed = text.trim().toLowerCase() === 'yes';
       if (!confirmed) {
-        return res.json({
+        return respondWithContext(res, req.userId, {
           status: 'needs_amount',
           message: 'How much will it cost?',
           context: {
@@ -1424,7 +1512,7 @@ app.post('/affordability/query', requireUser, async (req, res) => {
           },
         });
       }
-      return res.json(nextFinancingStep(clarificationBase));
+      return nextFinancingStep(req, res, now, today, clarificationBase);
     }
 
     // Total price for a vehicle being financed - only ever asked when
@@ -1437,13 +1525,16 @@ app.post('/affordability/query', requireUser, async (req, res) => {
       if (totalPrice === null) {
         // Same "couldn't parse, ask again" pattern the rest of this route
         // already falls into for an unparseable amount reply.
-        return res.json({
+        return respondWithContext(res, req.userId, {
           status: 'needs_amount',
           message: "What's the total price?",
           context: { ...clarificationBase, awaiting: 'total_price' },
         });
       }
-      return res.json(nextFinancingStep({ ...clarificationBase, total_price_stated: totalPrice }));
+      return nextFinancingStep(req, res, now, today, {
+        ...clarificationBase,
+        total_price_stated: totalPrice,
+      });
     }
 
     // Finance term reply ("60 months" / "5 years" / "60") - deterministic
@@ -1452,7 +1543,7 @@ app.post('/affordability/query', requireUser, async (req, res) => {
     if (clarificationBase?.awaiting === 'finance_term') {
       const termMonths = parseFinanceTermMonths(text);
       if (termMonths === null) {
-        return res.json({
+        return respondWithContext(res, req.userId, {
           status: 'needs_finance_term',
           message: 'How long will the finance term be? (e.g. "60 months")',
           context: { ...clarificationBase, awaiting: 'finance_term' },
@@ -1507,7 +1598,7 @@ app.post('/affordability/query', requireUser, async (req, res) => {
     if (clarificationBase?.awaiting === 'promo_term') {
       const termMonths = parseFinanceTermMonths(text);
       if (termMonths === null) {
-        return res.json({
+        return respondWithContext(res, req.userId, {
           status: 'needs_finance_term',
           message: 'How long would the payment plan be? (e.g. "12 months")',
           context: { ...clarificationBase, awaiting: 'promo_term' },
@@ -1603,7 +1694,7 @@ app.post('/affordability/query', requireUser, async (req, res) => {
         parsed.amount_stated === null &&
         !context
       ) {
-        return res.json({
+        return respondWithContext(res, req.userId, {
           status: 'needs_financing_confirmation',
           message: 'Will this be financed?',
           context: { ...clarificationContext, awaiting: 'financing_confirmation' },
@@ -1615,10 +1706,10 @@ app.post('/affordability/query', requireUser, async (req, res) => {
       // path (Transportation) or the plain monthly-payment ask (everything
       // else), same as the post-"Yes" branch above.
       if (parsed.recurrence === 'monthly' && parsed.amount_stated === null) {
-        return res.json(nextFinancingStep(parsed));
+        return nextFinancingStep(req, res, now, today, parsed);
       }
       if (parsed.amount_stated === null) {
-        return res.json({
+        return respondWithContext(res, req.userId, {
           status: 'needs_amount',
           message: 'How much will it cost?',
           context: clarificationContext,
@@ -1657,7 +1748,7 @@ app.post('/affordability/query', requireUser, async (req, res) => {
 
     if (parsed.intent === 'affordable_date') {
       if (parsed.amount_stated === null) {
-        return res.json({
+        return respondWithContext(res, req.userId, {
           status: 'needs_amount',
           message: 'How much are you trying to afford?',
           context: clarificationContext,
@@ -1702,6 +1793,92 @@ app.post('/affordability/query', requireUser, async (req, res) => {
     // raw query text itself either way.
     logError('Failed to process affordability query:', err);
     res.status(500).json({ error: 'Failed to process affordability query' });
+  }
+});
+
+// Follow-up chat, additive on top of /affordability/query above - purely for
+// going deeper on a purchase that route already answered once ("what if the
+// term were longer", "what about waiting"), not a replacement. See
+// affordabilityChat.js's own header for the full design (session-only
+// memory, tool-use over the same deterministic engine, the amount/term
+// guardrail applied to tool arguments specifically). No persistent
+// conversation storage anywhere - `messages` is resent in full by the
+// client on every call, same statelessness as /affordability/query's own
+// `context` echo, just generalized to a whole thread.
+const MAX_CHAT_MESSAGES = 60; // ~30 user turns - generous headroom over the
+// chat module's own MAX_USER_TURNS cap, which is what actually ends a long
+// conversation; this is just a defensive shape/size bound on the request.
+const MAX_CHAT_MESSAGE_LENGTH = 2000;
+
+function validateChatMessages(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) return 'messages must be a non-empty array';
+  if (messages.length > MAX_CHAT_MESSAGES) return `messages must be ${MAX_CHAT_MESSAGES} or fewer`;
+  for (const m of messages) {
+    if (!m || (m.role !== 'user' && m.role !== 'assistant')) {
+      return 'each message must have role "user" or "assistant"';
+    }
+    if (typeof m.text !== 'string' || m.text.trim().length === 0) {
+      return 'each message must have non-empty text';
+    }
+    if (m.text.length > MAX_CHAT_MESSAGE_LENGTH) {
+      return `each message must be ${MAX_CHAT_MESSAGE_LENGTH} characters or fewer`;
+    }
+  }
+  if (messages[messages.length - 1].role !== 'user') return 'the last message must be from the user';
+  return null;
+}
+
+app.post('/affordability/chat', requireUser, async (req, res) => {
+  const { anchor_result: anchorResult, messages } = req.body || {};
+
+  if (!anchorResult || typeof anchorResult !== 'object' || Array.isArray(anchorResult)) {
+    return res.status(400).json({ error: 'anchor_result is required' });
+  }
+  // Real guardrail gap found by /code-review (2026-08-22): anchor_result
+  // used to be trusted verbatim from the client with only a type check -
+  // the chat's own system prompt tells Claude every number in it is
+  // "already real and computed," so a tampered client could have fed it a
+  // fabricated result (an inflated budget, a fake status, invented
+  // tradeoffs) and had those numbers narrated straight back as verified
+  // fact. respondWithAffordabilityResult now signs every result before it
+  // ever leaves the process (see that function's own comment); this is
+  // where that signature is actually checked, same fail-closed treatment
+  // as every other signed value in this file - invalid/missing/expired all
+  // collapse to the same 400, not a silent fallback to trusting it anyway.
+  if (!verifyObjectIntegrity(req.userId, anchorResult)) {
+    return res
+      .status(400)
+      .json({ error: 'anchor_result is invalid or has expired - start again from a fresh check.' });
+  }
+  const messagesError = validateChatMessages(messages);
+  if (messagesError) {
+    return res.status(400).json({ error: messagesError });
+  }
+
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+
+  try {
+    const context = await loadScenarioContext(req.userId, now);
+    // _integrity itself is stripped before this reaches the system prompt -
+    // it's a meaningless opaque token to the model, not part of the real
+    // financial facts it's meant to reason from.
+    const { _integrity, ...anchorResultForPrompt } = anchorResult;
+    const { text, new_result: newResult, too_long: tooLong } = await runAffordabilityChatTurn({
+      anchorResult: anchorResultForPrompt,
+      messages,
+      context,
+      today,
+    });
+    res.json({ text, new_result: newResult || null, too_long: !!tooLong });
+  } catch (err) {
+    // Same reasoning as /affordability/query's own catch block - failures
+    // here can originate from the Anthropic call inside
+    // runAffordabilityChatTurn, so logError (never console.error(err)
+    // directly) to keep provider error payloads out of the logs. Never
+    // logs the conversation text either way.
+    logError('Failed to process affordability chat turn:', err);
+    res.status(500).json({ error: 'Failed to process affordability chat turn' });
   }
 });
 

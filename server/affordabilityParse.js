@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const Anthropic = require('@anthropic-ai/sdk');
 const { logError } = require('./safeLog');
 const { SPEND_CATEGORIES } = require('./categorize');
@@ -124,7 +125,24 @@ function extractCandidateAmounts(rawText) {
     return claimed.some(([cs, ce]) => start < ce && end > cs);
   }
 
+  // Real bug found by an adversarial /code-review pass (2026-08-22),
+  // exactly the failure class the comma-truncation fix below was already
+  // guarding against: `addSpecific` never checked `overlapsClaimed` at
+  // all, only `addBare` did - so two DIFFERENT specific patterns could
+  // both claim the same digits under two different scales. "$1.5k" matched
+  // both the $-amount pattern (reading "$1.5", ignoring the trailing "k")
+  // AND the k-shorthand pattern (reading the whole "$1.5k" as 1500),
+  // producing two "valid," guardrail-passing candidates 1000x apart -
+  // `validateStatedAmountAgainstRawInput(text, 1.5)` returned true, so a
+  // misclassified `amount_stated: 1.5` from Claude would have been wrongly
+  // accepted, and the deterministic `awaiting: 'total_price'` reply path
+  // (`candidates[0]`) would have used 1.5 outright with no LLM involved at
+  // all. Fixed by making `addSpecific` overlap-aware too, and by running
+  // the k-shorthand pattern FIRST - it's the more specific match, since it
+  // captures the multiplier that a bare $-amount/dollars/bucks pattern
+  // would otherwise read as a decimal and stop.
   function addSpecific(n, start, end) {
+    if (overlapsClaimed(start, end)) return;
     if (Number.isFinite(n) && n > 0) {
       found.push({ value: Math.round(n * 100) / 100, start });
       claimed.push([start, end]);
@@ -138,6 +156,12 @@ function extractCandidateAmounts(rawText) {
     }
   }
 
+  // 1.2k / $1.2k shorthand - deliberately run before the $/dollars/bucks
+  // patterns below (see the overlap comment above) so it claims the full
+  // "1.2k"-shaped span first.
+  for (const m of text.matchAll(/\$?(\d+(?:\.\d+)?)\s?[kK]\b/g)) {
+    addSpecific(parseFloat(m[1]) * 1000, m.index, m.index + m[0].length);
+  }
   // $1,200.50 / $50 / $0.99 / $1500 (no comma grouping)
   //
   // Real bug found by /code-review-equivalent investigation (2026-08-21):
@@ -156,10 +180,6 @@ function extractCandidateAmounts(rawText) {
   // un-grouped 4+ digit run instead of accepting a truncated prefix.
   for (const m of text.matchAll(/\$\s?(\d{1,3}(?:,\d{3})+|\d+)(\.\d{1,2})?/g)) {
     addSpecific(parseFloat(m[1].replace(/,/g, '') + (m[2] || '')), m.index, m.index + m[0].length);
-  }
-  // 1.2k / $1.2k shorthand
-  for (const m of text.matchAll(/\$?(\d+(?:\.\d+)?)\s?[kK]\b/g)) {
-    addSpecific(parseFloat(m[1]) * 1000, m.index, m.index + m[0].length);
   }
   // "50 dollars" / "50 bucks" / "1500 dollars" - same `*`-vs-`+` bug and
   // same fix as the $ pattern above; unanchored here (no literal `$` to
@@ -187,6 +207,198 @@ function extractCandidateAmounts(rawText) {
   const candidates = new Set(); // insertion order preserved = textual order
   for (const { value } of found) candidates.add(value);
   return candidates;
+}
+
+// ---------------------------------------------------------------------------
+// Generic signed-JSON round trip - a value must survive an untrusted
+// channel (the client-echoed `context` object, or a chat's `anchor_result`)
+// across multiple turns, with this app having no server-side session to
+// check it against. Same technique Gmail OAuth's `state` param already uses
+// for an analogous problem (see googleOAuth.js's signState/verifyState) -
+// HMAC-sign the payload (bound to the user id, with an expiry) before it
+// ever leaves this process, only ever accept it back as verified, never a
+// plain client-supplied value.
+//
+// The payload is base64url-encoded before signing/embedding in the token -
+// deliberate, not incidental: an earlier version of `signTotalPrice` joined
+// `${amount}.${expiresAt}.${sig}` with the raw decimal amount as one of the
+// segments, and `.` is both the field delimiter AND a decimal point. A real
+// bug found by /code-review (2026-08-22): any non-whole-dollar amount (e.g.
+// $34,999.99, an entirely ordinary car price) produced a 4-part string that
+// split on '.' into the wrong number of segments and silently failed
+// verification - a genuine, freshly-signed, unexpired token collapsing to
+// "no total price known" for a completely normal input. base64url's
+// alphabet (letters/digits/`-`/`_`) never contains `.`, so encoding the
+// payload first removes this whole class of delimiter collision.
+// ---------------------------------------------------------------------------
+
+const SIGNED_PAYLOAD_TTL_MS = 30 * 60 * 1000; // generous for a multi-step financing/chat conversation, short enough not to leave a long-lived forgeable value lying around if one ever leaked.
+
+function getPayloadSigningKey() {
+  const b64 = process.env.ENCRYPTION_KEY;
+  if (!b64) throw new Error('ENCRYPTION_KEY is not set.');
+  // HMAC-derived from the same key server/crypto.js uses for AES, but with
+  // a distinct label (domain separation, same technique googleOAuth.js
+  // already uses for its own state-signing key) so this is cryptographically
+  // a different key, not a reuse of the AES key for a second purpose.
+  return crypto.createHmac('sha256', Buffer.from(b64, 'base64')).update('affordability-signed-payload-v1').digest();
+}
+
+// `payload` can be any JSON-serializable value. Returns a signed token
+// string, or null if `payload` is undefined (nothing to sign).
+function signPayload(userId, payload, ttlMs = SIGNED_PAYLOAD_TTL_MS) {
+  if (payload === undefined) return null;
+  const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  const expiresAt = Date.now() + ttlMs;
+  const sig = crypto
+    .createHmac('sha256', getPayloadSigningKey())
+    .update(`${userId}.${encoded}.${expiresAt}`)
+    .digest('base64url');
+  return `${encoded}.${expiresAt}.${sig}`;
+}
+
+// Returns the verified, parsed payload, or null if the token is missing,
+// malformed, forged, expired, or was signed for a different user - every
+// one of those cases collapses to the same honest "nothing verified" state
+// as if the value had never been provided at all.
+function verifyPayload(userId, token) {
+  if (token === null || token === undefined || token === '') return null;
+  const parts = String(token).split('.');
+  if (parts.length !== 3) return null;
+  const [encoded, expiresAtStr, sig] = parts;
+
+  const expectedSig = crypto
+    .createHmac('sha256', getPayloadSigningKey())
+    .update(`${userId}.${encoded}.${expiresAtStr}`)
+    .digest('base64url');
+
+  const sigBuf = Buffer.from(sig);
+  const expectedBuf = Buffer.from(expectedSig);
+  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
+
+  const expiresAt = Number(expiresAtStr);
+  if (!Number.isFinite(expiresAt) || Date.now() > expiresAt) return null;
+
+  try {
+    return JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Detached integrity signature for a whole result object - a third,
+// distinct guardrail gap found by an adversarial /code-review pass
+// (2026-08-22), same root cause as total_price_stated's but for a bigger
+// object: the "AI-narrated responses + conversation memory" chat feature
+// takes an `anchor_result` (a full evaluateScenario()-shaped object -
+// status, tradeoffs, budget/goal numbers, etc.) straight from the client on
+// every turn, with no server-side session to check it against. The chat's
+// own system prompt tells Claude this object is "already real and computed
+// - safe to reference any number from this directly" - so a tampered
+// client sending a fabricated anchor_result (an inflated budget, a fake
+// "comfortable" status, invented tradeoff numbers) would have gotten those
+// numbers narrated straight back as verified fact, the exact violation the
+// scalar total_price_stated fix above was built to prevent, reopened one
+// endpoint over for a much larger payload.
+//
+// Unlike signPayload/verifyPayload (which round-trip the value INSIDE the
+// token, doubling its size), this is a genuinely detached signature: the
+// object itself stays plain, readable JSON the client actually renders
+// (the "Why" card, the chat's opening message) - only a compact
+// `expiresAt.sig` token is attached as an extra `_integrity` field.
+// `canonicalize` recursively sorts object keys (arrays keep their real
+// order) before signing/verifying so the signature isn't fragile to
+// incidental key-ordering differences between how the object was built
+// server-side and how it round-trips through the client's own JSON
+// parse/stringify.
+// ---------------------------------------------------------------------------
+
+function canonicalize(value) {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === 'object') {
+    return Object.keys(value)
+      .sort()
+      .reduce((acc, key) => {
+        acc[key] = canonicalize(value[key]);
+        return acc;
+      }, {});
+  }
+  return value;
+}
+
+// Call on a result object BEFORE attaching `_integrity` to it - returns the
+// token to attach as that field. `obj` itself is never embedded in the
+// token (unlike signPayload) - the object stays plain JSON, this is purely
+// a tamper-evidence stamp over its content.
+function signObjectIntegrity(userId, obj, ttlMs = SIGNED_PAYLOAD_TTL_MS) {
+  const canonical = JSON.stringify(canonicalize(obj));
+  const expiresAt = Date.now() + ttlMs;
+  const sig = crypto
+    .createHmac('sha256', getPayloadSigningKey())
+    .update(`${userId}.${canonical}.${expiresAt}`)
+    .digest('base64url');
+  return `${expiresAt}.${sig}`;
+}
+
+// `obj` is the full, client-supplied object, expected to carry its own
+// `_integrity` field (as attached by signObjectIntegrity above). Returns
+// true only if that field is a genuine, unexpired signature over
+// everything else in the object exactly as received - any tampering with
+// any field (not just an obvious one), a missing/malformed `_integrity`,
+// or an expired one all fail closed to false.
+function verifyObjectIntegrity(userId, obj) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
+  const { _integrity, ...rest } = obj;
+  if (typeof _integrity !== 'string') return false;
+  const parts = _integrity.split('.');
+  if (parts.length !== 2) return false;
+  const [expiresAtStr, sig] = parts;
+
+  const canonical = JSON.stringify(canonicalize(rest));
+  const expectedSig = crypto
+    .createHmac('sha256', getPayloadSigningKey())
+    .update(`${userId}.${canonical}.${expiresAtStr}`)
+    .digest('base64url');
+
+  const sigBuf = Buffer.from(sig);
+  const expectedBuf = Buffer.from(expectedSig);
+  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) return false;
+
+  const expiresAt = Number(expiresAtStr);
+  if (!Number.isFinite(expiresAt) || Date.now() > expiresAt) return false;
+  return true;
+}
+
+// total_price_stated needs to survive across multiple follow-up turns
+// (financing confirmation, then a term reply, in server/index.js's
+// financing flow) - there's no current-turn raw text to trace it back to on
+// those later turns, it was already traced once when first extracted.
+//
+// `category` is bound into the signed payload alongside the amount, not
+// just checked separately - a second real gap found by the same
+// /code-review pass: without this binding, a tampered client could
+// establish a valid signed price under one category (e.g. Shopping's
+// 0%-promo math) and then replay the same still-valid token after swapping
+// the plaintext `category` field to a different one (e.g. Transportation's
+// live-FRED-rate amortization math) - a real number applied to a financing
+// mechanism the user never actually asserted. Binding means the category
+// used to verify must be the exact one the price was originally signed
+// under; any mismatch (tampered or not) fails closed to null, the same
+// "no total price known" state as if it were never signed at all.
+function signTotalPrice(userId, amount, category) {
+  if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) return null;
+  const rounded = Math.round(amount * 100) / 100;
+  return signPayload(userId, { amount: rounded, category: category ?? null });
+}
+
+function verifyTotalPrice(userId, token, category) {
+  const payload = verifyPayload(userId, token);
+  if (!payload || typeof payload !== 'object') return null;
+  if (payload.category !== (category ?? null)) return null;
+  const { amount } = payload;
+  if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) return null;
+  return amount;
 }
 
 function validateStatedAmountAgainstRawInput(rawText, amountStated) {
@@ -315,6 +527,12 @@ module.exports = {
   validateStatedAmountAgainstRawInput,
   extractCandidateAmounts,
   sanitizeParsedOutput,
+  signPayload,
+  verifyPayload,
+  signObjectIntegrity,
+  verifyObjectIntegrity,
+  signTotalPrice,
+  verifyTotalPrice,
   PARSER_INTENTS,
   RECURRENCE_STATES,
 };

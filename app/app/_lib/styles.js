@@ -306,9 +306,12 @@ export const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
   },
-  // Chat-bubble pair for AffordabilityQuery's query/clarification exchange
-  // - the one turn of back-and-forth this flow actually keeps (see
-  // pendingContext), not a growing conversation log.
+  // Chat-bubble pair, originally added for AffordabilityQuery's own single
+  // query/clarification exchange (see pendingContext) - since reused
+  // unchanged by AffordabilityChat.js for a real, growing back-and-forth
+  // (the "AI-narrated responses + conversation memory" follow-up), so this
+  // is no longer "the one turn this flow keeps," just the shared bubble
+  // look both screens draw from.
   chatBubbleAssistant: {
     backgroundColor: colors.card,
     borderRadius: 16,
