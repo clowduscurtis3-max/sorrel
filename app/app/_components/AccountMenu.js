@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Modal, View, Text, Button, ActivityIndicator, Alert } from 'react-native';
+import { Modal, View, Text, Button, ActivityIndicator, Alert, Switch } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as WebBrowser from 'expo-web-browser';
 import { createPlaidLinkSession } from 'react-native-plaid-link-sdk';
 import { apiFetch, apiErrorMessage, GMAIL_REDIRECT } from '../_lib/api';
-import { styles } from '../_lib/styles';
+import { styles, colors } from '../_lib/styles';
 import { useSessionContext } from '../_lib/session';
 import { useAppData } from '../_lib/appData';
+import { getBiometricLockEnabled, setBiometricLockEnabled } from '../_lib/biometricPreference';
 
 // Found tap-testing Step 3's relink flow on-device, 2026-08-16: Plaid's
 // Android SDK calls onExit with a truthy but completely empty `error`
@@ -89,6 +90,13 @@ export default function AccountMenu({ visible, onClose }) {
   // comment) - Home's Overview/per-bank filter needs the same list.
   const [actioningItemId, setActioningItemId] = useState(null);
 
+  // Phase 20: the same on-device preference the root layout's biometric
+  // lock screen reads/writes (`_lib/biometricPreference.js`). That screen
+  // can only ever turn this off (it's not reachable once already
+  // unlocked), so this is the one place to turn it back on - without this,
+  // switching it off there would be a one-way door.
+  const [biometricLockEnabled, setBiometricLockEnabledState] = useState(true);
+
   async function fetchGmailStatus() {
     try {
       const res = await apiFetch('/gmail/status');
@@ -116,8 +124,14 @@ export default function AccountMenu({ visible, onClose }) {
     if (visible) {
       fetchGmailStatus();
       refetchPlaidItems();
+      getBiometricLockEnabled().then(setBiometricLockEnabledState);
     }
   }, [visible]);
+
+  async function handleToggleBiometricLock(nextEnabled) {
+    setBiometricLockEnabledState(nextEnabled);
+    await setBiometricLockEnabled(nextEnabled);
+  }
 
   // Real bug found by adversarial review, 2026-08-13: handleSignOut below
   // (the "Sign out" button) already guards against a native Fabric
@@ -466,6 +480,15 @@ export default function AccountMenu({ visible, onClose }) {
           {error && <Text style={styles.errorText}>{error}</Text>}
 
           <View style={{ flex: 1 }} />
+
+          <View style={[styles.header, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
+            <Text style={styles.smallText}>Require Face ID / Fingerprint to unlock</Text>
+            <Switch
+              value={biometricLockEnabled}
+              onValueChange={handleToggleBiometricLock}
+              trackColor={{ false: colors.sage, true: colors.primary }}
+            />
+          </View>
 
           <View style={styles.header}>
             <Button title="Sign out" onPress={handleSignOut} />

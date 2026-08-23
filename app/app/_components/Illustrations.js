@@ -10,32 +10,58 @@ import { colors } from '../_lib/styles';
 // build's own EAS-rebuild note, this file only renders correctly on a
 // build that includes it).
 
-// The circular leaf/sprout mark from the Sorrel brand sheet (CLAUDE.md),
-// used as the assistant's avatar next to its chat bubble - the one
-// illustration here with a real existing design to match against, rather
-// than an original composition.
+// The circular leaf/sprout mark from the Sorrel brand sheet (CLAUDE.md) -
+// used as the assistant's avatar next to its chat bubble on the Budget
+// tab, the sorrel wordmark lockup (SorrelWordmark.js), and the Phase 20
+// lock screen's reassurance line, so this one definition is the app's
+// single source of truth for the mark, not a per-usage copy.
+//
+// Redrawn 2026-08-22 to match the user's own final reference mockup
+// exactly, replacing an earlier symmetric version (a closed circle, a
+// straight vertical stem, two same-color leaflets branching evenly) that
+// didn't match once a more detailed reference image made the real design
+// unambiguous: an OPEN circle (the ring has a gap in the lower-left where
+// the stem visibly exits it, rather than fully containing the plant), a
+// diagonal stem crossing through that gap, and three leaflets at
+// different points along the stem - a larger light one upper-right, a
+// smaller light one mid-stem, and a smaller darker one near the base.
+// Verified by rendering this exact path data to a PNG and comparing
+// side-by-side against a cropped/zoomed copy of the reference before
+// wiring it in, not eyeballed against the small on-screen icon alone.
 export function LeafAvatar({ size = 32 }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 32 32">
-      <Circle cx="16" cy="16" r="14" stroke={colors.primary} strokeWidth="1.5" fill="none" />
       <Path
-        d="M16 24 L16 12"
-        stroke={colors.primary}
-        strokeWidth="1.5"
+        d="M 4.74 22.5 A 13 13 0 1 1 11.55 28.22"
+        stroke={colors.dark}
+        strokeWidth="1.6"
         strokeLinecap="round"
         fill="none"
       />
       <Path
-        d="M16 16 C12 15 10 11 11 8 C15 8 18 11 16 16 Z"
-        fill={colors.accent}
-        stroke={colors.primary}
-        strokeWidth="1"
+        d="M 9 26 L 16.5 15.5"
+        stroke={colors.dark}
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        fill="none"
       />
       <Path
-        d="M16 19 C19 18.5 21 16 20.5 13.5 C17 13.5 15 16 16 19 Z"
+        d="M16.5 15.5 C 16.5 10.5 21 8 24.5 9 C 24.5 14 21 16.5 16.5 15.5 Z"
         fill={colors.accent}
-        stroke={colors.primary}
-        strokeWidth="1"
+        stroke={colors.dark}
+        strokeWidth="1.2"
+      />
+      <Path
+        d="M 12.5 21 C 10 19.5 9.5 17 10.5 15 C 13.5 15.5 14.5 18 12.5 21 Z"
+        fill={colors.accent}
+        stroke={colors.dark}
+        strokeWidth="1.1"
+      />
+      <Path
+        d="M 12 24.5 C 14.5 22 17.5 21.5 19.5 23 C 17.5 25.5 14.5 26 12 24.5 Z"
+        fill={colors.primary}
+        stroke={colors.dark}
+        strokeWidth="1.1"
       />
     </Svg>
   );
