@@ -1,5 +1,5 @@
-import { useCallback, useState } from 'react';
-import { View, Text, Button, ActivityIndicator, TextInput, ScrollView, StyleSheet } from 'react-native';
+import { useCallback, useRef, useState } from 'react';
+import { View, Text, Button, Pressable, ActivityIndicator, TextInput, ScrollView, StyleSheet } from 'react-native';
 // Reverted from react-native-gesture-handler's ScrollView back to plain
 // React Native (2026-08-19). It was switched to RNGH's version in Phase 13
 // because this tab then nested a Gesture.Pan() (the old NumberScrollWheel)
@@ -19,20 +19,37 @@ import { View, Text, Button, ActivityIndicator, TextInput, ScrollView, StyleShee
 // the first place.
 import { StatusBar } from 'expo-status-bar';
 import { useFocusEffect } from '@react-navigation/native';
+import { MaterialIcons } from '@expo/vector-icons';
 import { apiFetch, apiErrorMessage } from '../_lib/api';
 import { styles, colors } from '../_lib/styles';
 import { useAppData } from '../_lib/appData';
+import { iconForCategory } from '../_lib/categoryIcons';
+import { statusForCategory, computeSpendStats, computePace, computeMonthProgress } from '../_lib/homeSummary';
 import AffordabilityQuery from '../_components/AffordabilityQuery';
+import PrimaryButton from '../_components/PrimaryButton';
+import BudgetInsightModal from '../_components/BudgetInsightModal';
+import { LeafAvatar } from '../_components/Illustrations';
 
-// Phase 7 Step 1 sub-step 1.4: the real Budget tab, replacing the sub-step
-// 1.2 placeholder. `budgetStatus` and its whole edit/proposal sub-state
-// stay local per the Phase 7 plan (Budget-only, not shared via
-// AppDataProvider) - ported verbatim from old app/App.js's Step 4/5 logic.
-// `refetchAlerts` comes from AppDataProvider since generating/editing a
-// budget can change which overspend alerts are active, and Home's alert
-// section reads that same shared state.
+const STATUS_COLOR = {
+  ok: colors.positive,
+  warning: colors.warning,
+  severe: colors.error,
+  neutral: colors.sage,
+};
+
+// Phase 7 Step 1 sub-step 1.4, redesigned 2026-08-24 to match the user's
+// own reference mockup (dark "let Sorrel do the heavy lifting" banner,
+// stat tiles, per-category cards with a status dot/icon/progress bar).
+// `budgetStatus` and its whole edit/proposal sub-state stay local per the
+// Phase 7 plan (Budget-only, not shared via AppDataProvider) - all of
+// that logic is ported verbatim/unchanged from before this redesign, only
+// the rendering around it changed. `alerts` now also pulled from
+// AppDataProvider (already fetched there) so each category card's status
+// dot/progress-bar color can reuse the exact same severity rule as Home's
+// Financial Health tiles (`statusForCategory` in _lib/homeSummary.js) -
+// one rule, not two independently-drifting copies.
 export default function Budget() {
-  const { refetchAlerts } = useAppData();
+  const { refetchAlerts, alerts } = useAppData();
 
   const [budgetStatus, setBudgetStatus] = useState(null);
   const [loadingBudget, setLoadingBudget] = useState(false);
@@ -45,9 +62,43 @@ export default function Budget() {
   const [applyingBudgetEdit, setApplyingBudgetEdit] = useState(false);
   const [error, setError] = useState(null);
 
+  const scrollRef = useRef(null);
+
+  // Budget Insight pill (2026-08-24) - stateless, recomputed fresh on every
+  // fetch, same convention as budgetStatus/alerts. Fetched independently
+  // from budgetStatus (a hiccup here shouldn't block the rest of the
+  // screen) - the pill just shows a neutral fallback label while loading
+  // or if the fetch fails, same "non-fatal" treatment this app gives
+  // every proactive background fetch.
+  const [insight, setInsight] = useState(null);
+  const [insightModalVisible, setInsightModalVisible] = useState(false);
+
+  async function fetchInsight() {
+    try {
+      const res = await apiFetch('/budget/insight');
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const { insight: data } = await res.json();
+      setInsight(data);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  // Refreshes both budgetStatus (the category list) and the insight pill
+  // itself - passed into BudgetInsightModal so applying cuts or
+  // regenerating updates the whole screen immediately, not just the modal.
+  async function refreshAfterBudgetChange() {
+    await fetchBudgetStatus();
+    await fetchInsight();
+    await refetchAlerts();
+  }
+
   // Step 5: current month's budgeted vs. actual per category. `budgeted`
   // comes back null for a category that's never had a budget generated,
-  // rendered below as "not budgeted" rather than "$0".
+  // rendered below as "not budgeted" rather than "$0". Stores the full
+  // {period_start, period_end, status} response (not just the array, as
+  // before this redesign) - the stat tiles need period_start/period_end
+  // for the same computeMonthProgress/computePace math Home already uses.
   async function fetchBudgetStatus() {
     setLoadingBudget(true);
     setError(null);
@@ -55,7 +106,7 @@ export default function Budget() {
       const res = await apiFetch('/budget/status');
       if (!res.ok) throw new Error('SERVER_ERROR');
       const data = await res.json();
-      setBudgetStatus(data.status || []);
+      setBudgetStatus(data);
     } catch (err) {
       console.error(err);
       setError(apiErrorMessage(err));
@@ -73,6 +124,7 @@ export default function Budget() {
   useFocusEffect(
     useCallback(() => {
       fetchBudgetStatus();
+      fetchInsight();
     }, [])
   );
 
@@ -95,6 +147,7 @@ export default function Budget() {
       }
       await fetchBudgetStatus();
       await refetchAlerts();
+      await fetchInsight();
     } catch (err) {
       console.error(err);
       setError(err.message === 'SERVER_ERROR' ? apiErrorMessage(err) : err.message);
@@ -184,6 +237,7 @@ export default function Budget() {
       cancelEditBudget();
       await fetchBudgetStatus();
       await refetchAlerts();
+      await fetchInsight();
     } catch (err) {
       console.error(err);
       setError(apiErrorMessage(err));
@@ -191,6 +245,15 @@ export default function Budget() {
       setApplyingBudgetEdit(false);
     }
   }
+
+  const rows = budgetStatus?.status || [];
+  const spendStats = computeSpendStats(budgetStatus);
+  const monthProgress = budgetStatus
+    ? computeMonthProgress(budgetStatus.period_start, budgetStatus.period_end)
+    : null;
+  const pace = monthProgress ? computePace(spendStats, monthProgress) : null;
+  const spentPercent = spendStats.budgeted > 0 ? Math.round((spendStats.spent / spendStats.budgeted) * 100) : null;
+  const hasAnyBudget = rows.some((s) => s.budgeted != null);
 
   return (
     <View style={styles.container}>
@@ -206,120 +269,481 @@ export default function Budget() {
           <ActivityIndicator />
         </View>
       ) : (
-        <ScrollView style={styles.budgetScreen}>
+        <ScrollView ref={scrollRef} style={budgetLocalStyles.screen}>
+          <View style={budgetLocalStyles.headerRow}>
+            <Text style={budgetLocalStyles.title}>Budget</Text>
+            <Pressable
+              style={budgetLocalStyles.insightsPill}
+              onPress={() => (insight ? setInsightModalVisible(true) : scrollRef.current?.scrollTo({ y: 0, animated: true }))}
+              accessibilityRole="button"
+              // Visible label always stays "INSIGHTS" (found on-device: the
+              // full pill_text sentence got cut off, unreadable) - the
+              // accessibility label still carries the real insight for
+              // screen readers, since that's read aloud in full rather
+              // than needing to fit in a fixed-width pill.
+              accessibilityLabel={insight ? insight.pill_text : 'Jump to Can I afford this?'}
+            >
+              <MaterialIcons name="auto-awesome" size={14} color={colors.primary} />
+              <Text style={budgetLocalStyles.insightsPillText}>INSIGHTS</Text>
+            </Pressable>
+          </View>
+
           {/* Phase 5 Step 3 / Phase 13: "Can I afford this?" - decided in
               Phase 7 to live in this tab, since it's fundamentally a
               budget/goal-impact question, not a fifth destination of its
               own; Phase 13 consolidated Home's voice/text version onto this
-              same spot rather than keeping two separate front doors. Placed
-              above the budget-status list since it's a standalone question,
-              not part of the generate/edit flow below it. */}
+              same spot rather than keeping two separate front doors. */}
           <AffordabilityQuery />
 
           {/* Full-width divider between the affordability question and the
               budget-status list below it, per direct user request
               (2026-08-20) - the two were visually running together. */}
-          <View style={localStyles.sectionDivider} />
+          <View style={budgetLocalStyles.sectionDivider} />
 
-          {generatingBudget ? (
-            <ActivityIndicator />
-          ) : (
-            <Button
-              title={
-                budgetStatus?.some((s) => s.budgeted != null)
-                  ? 'Regenerate budget from spending history'
-                  : 'Generate budget from spending history'
-              }
-              onPress={generateBudget}
-            />
+          {/* Generate/regenerate banner - was a plain <Button>, restyled
+              2026-08-24 to match the reference mockup's dark card. Same
+              generateBudget() call either way, just a different trigger. */}
+          <View style={budgetLocalStyles.generateCard}>
+            <View style={budgetLocalStyles.generateIconCircle}>
+              <MaterialIcons name="auto-fix-high" size={20} color={colors.background} />
+            </View>
+            <View style={budgetLocalStyles.generateTextCol}>
+              <Text style={budgetLocalStyles.generateTitle}>Let Sorrel do the heavy lifting.</Text>
+              <Text style={budgetLocalStyles.generateSubtitle}>
+                We'll analyze your spending and suggest a smarter budget for you.
+              </Text>
+            </View>
+            {generatingBudget ? (
+              <ActivityIndicator color={colors.background} />
+            ) : (
+              <Pressable
+                style={budgetLocalStyles.generateChip}
+                onPress={generateBudget}
+                accessibilityRole="button"
+                accessibilityLabel={hasAnyBudget ? 'Regenerate budget' : 'Generate budget'}
+              >
+                <Text style={budgetLocalStyles.generateChipText}>
+                  {hasAnyBudget ? 'REGENERATE BUDGET' : 'GENERATE BUDGET'}
+                </Text>
+                <Text style={budgetLocalStyles.generateChipSubtext}>from spending history</Text>
+              </Pressable>
+            )}
+            <View style={budgetLocalStyles.generateLeaf}>
+              <LeafAvatar size={64} />
+            </View>
+          </View>
+
+          {/* Stat tiles - same visual language and same underlying pure
+              functions (_lib/homeSummary.js) as Home's own stat row, so
+              the two screens can never quietly disagree about what "spent
+              so far"/"pace"/"days left" mean. */}
+          {budgetStatus && (
+            <View style={[styles.card, budgetLocalStyles.statRow]}>
+              <View style={budgetLocalStyles.statTile}>
+                <MaterialIcons name="account-balance-wallet" size={18} color={colors.dark} />
+                <Text style={budgetLocalStyles.statLabel}>TOTAL BUDGET</Text>
+                <Text style={budgetLocalStyles.statValue}>${spendStats.budgeted.toFixed(2)}</Text>
+              </View>
+              <View style={budgetLocalStyles.statDivider} />
+              <View style={budgetLocalStyles.statTile}>
+                <MaterialIcons name="pie-chart" size={18} color={colors.dark} />
+                <Text style={budgetLocalStyles.statLabel}>SPENT SO FAR</Text>
+                <Text style={[budgetLocalStyles.statValue, spentPercent > 100 && { color: colors.error }]}>
+                  ${spendStats.spent.toFixed(2)}
+                </Text>
+                {spentPercent != null && (
+                  <Text style={[budgetLocalStyles.statSub, spentPercent > 100 && { color: colors.error }]}>
+                    {spentPercent}% of budget
+                  </Text>
+                )}
+              </View>
+              <View style={budgetLocalStyles.statDivider} />
+              <View style={budgetLocalStyles.statTile}>
+                <MaterialIcons name="show-chart" size={18} color={colors.dark} />
+                <Text style={budgetLocalStyles.statLabel}>PACE</Text>
+                <Text
+                  style={[budgetLocalStyles.statValue, pace && !pace.isAhead && { color: colors.error }]}
+                >
+                  {pace ? `$${pace.aheadBy.toFixed(2)}` : '—'}
+                </Text>
+                <Text
+                  style={[
+                    budgetLocalStyles.statSub,
+                    pace && { color: pace.isAhead ? colors.positive : colors.error },
+                  ]}
+                >
+                  {pace ? (pace.isAhead ? 'ahead of pace' : 'behind pace') : 'not enough data'}
+                </Text>
+              </View>
+              <View style={budgetLocalStyles.statDivider} />
+              <View style={budgetLocalStyles.statTile}>
+                <MaterialIcons name="event" size={18} color={colors.dark} />
+                <Text style={budgetLocalStyles.statLabel}>DAYS LEFT</Text>
+                <Text style={budgetLocalStyles.statValue}>
+                  {monthProgress ? monthProgress.daysRemaining : '—'}
+                </Text>
+                {monthProgress && <Text style={budgetLocalStyles.statSub}>in {monthName()}</Text>}
+              </View>
+            </View>
           )}
 
-          {budgetStatus?.map((s) => (
-            <View key={s.category} style={styles.budgetRow}>
-              <Text style={styles.rowName}>{s.category}</Text>
-              <Text style={styles.smallText}>
-                {s.budgeted == null
-                  ? `spent $${s.actual.toFixed(2)} (not budgeted yet)`
-                  : `spent $${s.actual.toFixed(2)} of $${s.budgeted.toFixed(2)} ($${s.remaining.toFixed(2)} left)`}
-              </Text>
-              {s.reasoning && <Text style={styles.smallText}>{s.reasoning}</Text>}
-
-              {editingBudgetCategory === s.category ? (
-                budgetProposal ? (
-                  <View>
-                    {budgetProposal.summary && (
-                      <Text style={styles.smallText}>{budgetProposal.summary}</Text>
+          {rows.map((s) => {
+            const status = statusForCategory(s.category, s.budgeted, alerts);
+            const percent = s.budgeted > 0 ? Math.min(1, s.actual / s.budgeted) : s.budgeted === 0 ? 1 : 0;
+            const isEditing = editingBudgetCategory === s.category;
+            return (
+              <View key={s.category} style={budgetLocalStyles.categoryCardWrap}>
+                <View style={[budgetLocalStyles.statusDot, { backgroundColor: STATUS_COLOR[status] }]} />
+                <View style={[styles.card, budgetLocalStyles.categoryCard]}>
+                  <View style={budgetLocalStyles.categoryTopRow}>
+                    <View style={budgetLocalStyles.categoryIconCircle}>
+                      <MaterialIcons name={iconForCategory(s.category)} size={18} color={colors.dark} />
+                    </View>
+                    <Text style={budgetLocalStyles.categoryName}>{s.category}</Text>
+                    {!isEditing && (
+                      <Pressable
+                        style={budgetLocalStyles.editChip}
+                        onPress={() => startEditBudget(s.category, s.budgeted)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Edit ${s.category} budget`}
+                      >
+                        <Text style={budgetLocalStyles.editChipText}>EDIT</Text>
+                        <MaterialIcons name="chevron-right" size={16} color={colors.darkest} />
+                      </Pressable>
                     )}
-                    {budgetAdjustments.map((a, i) => (
-                      <View key={a.category} style={styles.budgetRow}>
-                        <Text style={styles.rowName}>{a.category}</Text>
-                        <Text style={styles.smallText}>{a.reasoning}</Text>
+                  </View>
+
+                  <Text style={budgetLocalStyles.categorySpentLine}>
+                    {s.budgeted == null
+                      ? `spent $${s.actual.toFixed(2)} `
+                      : `spent $${s.actual.toFixed(2)} of $${s.budgeted.toFixed(2)} `}
+                    {s.budgeted == null ? (
+                      <Text style={budgetLocalStyles.notBudgetedText}>(not budgeted yet)</Text>
+                    ) : (
+                      <Text
+                        style={{
+                          color: s.remaining < 0 ? colors.error : colors.positive,
+                          fontWeight: '600',
+                        }}
+                      >
+                        ({s.remaining < 0 ? '-' : ''}${Math.abs(s.remaining).toFixed(2)} left)
+                      </Text>
+                    )}
+                  </Text>
+
+                  {s.budgeted != null && (
+                    <View style={budgetLocalStyles.progressTrack}>
+                      <View
+                        style={[
+                          budgetLocalStyles.progressFill,
+                          { width: `${percent * 100}%`, backgroundColor: STATUS_COLOR[status] },
+                        ]}
+                      />
+                    </View>
+                  )}
+
+                  {s.reasoning && <Text style={budgetLocalStyles.reasoningText}>{s.reasoning}</Text>}
+
+                  {isEditing &&
+                    (budgetProposal ? (
+                      <View style={budgetLocalStyles.editSection}>
+                        {budgetProposal.summary && (
+                          <Text style={budgetLocalStyles.reasoningText}>{budgetProposal.summary}</Text>
+                        )}
+                        {budgetAdjustments.map((a, i) => (
+                          <View key={a.category} style={budgetLocalStyles.adjustmentRow}>
+                            <Text style={budgetLocalStyles.categoryName}>{a.category}</Text>
+                            <Text style={budgetLocalStyles.reasoningText}>{a.reasoning}</Text>
+                            <TextInput
+                              style={styles.input}
+                              keyboardType="numeric"
+                              value={String(a.budgeted_amount)}
+                              onChangeText={(text) => {
+                                const updated = [...budgetAdjustments];
+                                updated[i] = { ...a, budgeted_amount: Number(text) || 0 };
+                                setBudgetAdjustments(updated);
+                              }}
+                            />
+                          </View>
+                        ))}
+                        {applyingBudgetEdit ? (
+                          <ActivityIndicator />
+                        ) : (
+                          <View style={budgetLocalStyles.editButtonsRow}>
+                            {budgetAdjustments.length > 0 && (
+                              <PrimaryButton
+                                title="Apply with these changes"
+                                onPress={() => applyBudgetEditNow(true)}
+                              />
+                            )}
+                            <PrimaryButton
+                              title="Apply without rebalancing"
+                              onPress={() => applyBudgetEditNow(false)}
+                            />
+                            <Pressable onPress={cancelEditBudget}>
+                              <Text style={budgetLocalStyles.cancelText}>Cancel</Text>
+                            </Pressable>
+                          </View>
+                        )}
+                      </View>
+                    ) : (
+                      <View style={budgetLocalStyles.editSection}>
                         <TextInput
                           style={styles.input}
                           keyboardType="numeric"
-                          value={String(a.budgeted_amount)}
-                          onChangeText={(text) => {
-                            const updated = [...budgetAdjustments];
-                            updated[i] = { ...a, budgeted_amount: Number(text) || 0 };
-                            setBudgetAdjustments(updated);
-                          }}
+                          placeholder="New budgeted amount"
+                          value={budgetEditAmount}
+                          onChangeText={setBudgetEditAmount}
                         />
+                        {loadingProposal ? (
+                          <ActivityIndicator />
+                        ) : (
+                          <View style={budgetLocalStyles.editButtonsRow}>
+                            <PrimaryButton title="Review" onPress={reviewBudgetEdit} />
+                            <Pressable onPress={cancelEditBudget}>
+                              <Text style={budgetLocalStyles.cancelText}>Cancel</Text>
+                            </Pressable>
+                          </View>
+                        )}
                       </View>
                     ))}
-                    {applyingBudgetEdit ? (
-                      <ActivityIndicator />
-                    ) : (
-                      <>
-                        {budgetAdjustments.length > 0 && (
-                          <Button
-                            title="Apply with these changes"
-                            onPress={() => applyBudgetEditNow(true)}
-                          />
-                        )}
-                        <Button
-                          title="Apply without rebalancing"
-                          onPress={() => applyBudgetEditNow(false)}
-                        />
-                        <Button title="Cancel" onPress={cancelEditBudget} />
-                      </>
-                    )}
-                  </View>
-                ) : (
-                  <View>
-                    <TextInput
-                      style={styles.input}
-                      keyboardType="numeric"
-                      placeholder="New budgeted amount"
-                      value={budgetEditAmount}
-                      onChangeText={setBudgetEditAmount}
-                    />
-                    {loadingProposal ? (
-                      <ActivityIndicator />
-                    ) : (
-                      <>
-                        <Button title="Review" onPress={reviewBudgetEdit} />
-                        <Button title="Cancel" onPress={cancelEditBudget} />
-                      </>
-                    )}
-                  </View>
-                )
-              ) : (
-                <Button title="Edit" onPress={() => startEditBudget(s.category, s.budgeted)} />
-              )}
-            </View>
-          ))}
+                </View>
+              </View>
+            );
+          })}
         </ScrollView>
       )}
+      <BudgetInsightModal
+        visible={insightModalVisible}
+        onClose={() => setInsightModalVisible(false)}
+        insight={insight}
+        onBudgetChanged={refreshAfterBudgetChange}
+      />
       <StatusBar style="auto" />
     </View>
   );
 }
 
-const localStyles = StyleSheet.create({
+function monthName() {
+  return new Date().toLocaleDateString('en-US', { month: 'long' });
+}
+
+const budgetLocalStyles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  title: {
+    fontSize: 26,
+    fontWeight: '700',
+    color: colors.darkest,
+    flexShrink: 0,
+  },
+  insightsPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 1,
+    maxWidth: '62%',
+    marginLeft: 10,
+    gap: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.primary,
+    borderRadius: 16,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  insightsPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primary,
+    flexShrink: 1,
+  },
   sectionDivider: {
     alignSelf: 'stretch',
     borderBottomWidth: 1,
     borderBottomColor: colors.sage,
     marginVertical: 12,
+  },
+  generateCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.darkest,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
+  generateIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  generateTextCol: {
+    flex: 1,
+    gap: 4,
+  },
+  generateTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.background,
+  },
+  generateSubtitle: {
+    fontSize: 12,
+    color: colors.sage,
+  },
+  generateChip: {
+    backgroundColor: colors.background,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+  },
+  generateChipText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.darkest,
+  },
+  generateChipSubtext: {
+    fontSize: 9,
+    color: colors.dark,
+  },
+  generateLeaf: {
+    position: 'absolute',
+    right: -8,
+    bottom: -10,
+    opacity: 0.35,
+  },
+  statRow: {
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  statTile: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 2,
+  },
+  statDivider: {
+    width: StyleSheet.hairlineWidth,
+    backgroundColor: colors.sage,
+    marginHorizontal: 4,
+  },
+  statLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: colors.muted,
+    letterSpacing: 0.3,
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  statValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.darkest,
+  },
+  statSub: {
+    fontSize: 10,
+    color: colors.dark,
+    textAlign: 'center',
+  },
+  categoryCardWrap: {
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginTop: 8,
+    marginRight: 8,
+  },
+  categoryCard: {
+    flex: 1,
+    gap: 8,
+  },
+  categoryTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  categoryIconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  categoryName: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.darkest,
+  },
+  editChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    borderRadius: 8,
+    paddingVertical: 5,
+    paddingHorizontal: 8,
+  },
+  editChipText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.darkest,
+  },
+  categorySpentLine: {
+    fontSize: 13,
+    color: colors.dark,
+  },
+  notBudgetedText: {
+    color: colors.muted,
+    fontStyle: 'italic',
+  },
+  progressTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.background,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: 6,
+    borderRadius: 3,
+  },
+  reasoningText: {
+    fontSize: 12,
+    color: colors.muted,
+    lineHeight: 17,
+  },
+  editSection: {
+    gap: 8,
+    marginTop: 4,
+  },
+  adjustmentRow: {
+    gap: 4,
+    paddingVertical: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.sage,
+  },
+  editButtonsRow: {
+    gap: 8,
+    alignItems: 'flex-start',
+  },
+  cancelText: {
+    fontSize: 13,
+    color: colors.muted,
+    fontWeight: '600',
+    paddingVertical: 6,
   },
 });

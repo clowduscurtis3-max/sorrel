@@ -1,72 +1,66 @@
-import { useState } from 'react';
-import { Button } from 'react-native';
 import { Tabs } from 'expo-router';
+import { MaterialIcons } from '@expo/vector-icons';
 import { AppDataProvider } from '../_lib/appData';
-import AccountMenu from '../_components/AccountMenu';
+import { colors } from '../_lib/styles';
 
-// Phase 7 Step 1: tab shell. Exactly four tabs per the locked-in decision,
-// no fifth "Settings" tab - account-level actions (Gmail link/unlink,
-// re-link bank, sign out) live in AccountMenu, a plain React Native
-// <Modal> toggled by local state here, not a router route (see
-// _components/AccountMenu.js's comment for why - it started as a route and
-// caused three real, compounding on-device bugs). A plain `Button` in the
-// header rather than a real icon - this app has no icon library/dependency
-// anywhere else (every other screen uses plain RN `Button`s), and adding
-// one just for this would be the first visual-polish exception to that
-// otherwise-consistent plainness, not something this phase's "no UI
-// polish" scope calls for.
+// Phase 7 Step 1: tab shell, originally exactly four tabs (Home/Budget/
+// Recurring/Goal) with account-level actions living in a plain <Modal>
+// (AccountMenu.js) toggled from a header button - see this file's prior
+// version / git history for the full reasoning.
 //
-// AppDataProvider is back to wrapping just this file (the original
-// sub-step 1.3 design - "wrapping only the (tabs) group" per the plan) -
-// it only ever needed to move out to the root layout because account-menu
-// was briefly a route living outside this tree; now that it's a plain
-// component rendered right here, that's no longer true.
+// Phase 14 (2026-08-24): revisits that "no fifth Settings tab" decision,
+// per the reference mockup (design-references/home-tab-mockup-2026-08-23.png)
+// and explicit user confirmation - Account is now a real fifth tab
+// (app/(tabs)/account.js) rather than a Modal, and the header button/
+// AppDataProvider-mounted-Modal dance this file used to need
+// (accountMenuMounted, the Fabric-crash-avoidance lazy-mount) is gone
+// entirely along with it, since a normal <Tabs.Screen> never has the
+// "too much native work in one first commit" problem a Modal sitting
+// alongside the Tabs navigator's own first mount did.
+//
+// tabBarIcon added for all five tabs (MaterialIcons, matching the mockup)
+// - the old plain-text-only tab bar predates this app having any icon set
+// installed anywhere; @expo/vector-icons has been a real, direct
+// dependency since the Phase 13 wheel work, so this is no longer the
+// "adding an icon library just for this" tradeoff the original Phase 7
+// comment weighed against.
+const TAB_ICONS = {
+  index: 'home',
+  budget: 'pie-chart',
+  recurring: 'autorenew',
+  goal: 'track-changes',
+  account: 'person',
+};
+
 export default function TabsLayout() {
-  const [showAccountMenu, setShowAccountMenu] = useState(false);
-  // Real crash found on-device, 2026-08-13: right after signing in, the
-  // (tabs) tree's very first mount - this file, AppDataProvider, the Tabs
-  // navigator resolving its own default screen, AND AccountMenu (its
-  // Modal plus every child View/Button inside it) - all landed in the same
-  // initial commit, and that much simultaneous native mounting work raced
-  // Fabric hard enough to throw `RetryableMountingLayerException: Unable
-  // to find viewState for tag N` (confirmed via `adb logcat` - the
-  // component stack at the moment of the crash named AccountMenu,
-  // AppDataProvider, and TabsLayout directly). Same underlying class of
-  // bug as the already-documented notification-tap race in _layout.js
-  // (too much native work landing in one still-settling first paint), just
-  // triggered here by the ordinary post-sign-in navigation into (tabs)
-  // instead of a notification tap.
-  //
-  // `accountMenuMounted` keeps AccountMenu entirely out of that first
-  // commit - it isn't created at all until the user actually taps
-  // "Account" for the first time, so there's meaningfully less native work
-  // competing with the Tabs navigator's own first-mount settling. Once
-  // opened, it stays mounted permanently (never goes back to `false`) so
-  // every close after the first keeps the Modal's normal slide-out
-  // animation and existing behavior - this only changes what happens
-  // before the first tap.
-  const [accountMenuMounted, setAccountMenuMounted] = useState(false);
-
-  function openAccountMenu() {
-    setAccountMenuMounted(true);
-    setShowAccountMenu(true);
-  }
-
   return (
     <AppDataProvider>
       <Tabs
-        screenOptions={{
-          headerRight: () => <Button title="Account" onPress={openAccountMenu} />,
-        }}
+        screenOptions={({ route }) => ({
+          // headerShown: false everywhere (2026-08-24, explicit user
+          // request) - the tab bar's own icon+label already identifies
+          // the screen, so a second native title bar above the content is
+          // redundant on every tab, not just Home (which already had this
+          // for its own reason - a branded header rendered inline). Budget
+          // grew its own in-content "Budget" title as part of its own
+          // redesign the same day, which this also stops duplicating.
+          // `title` below is kept on each Tabs.Screen regardless - it's
+          // still what drives the tab bar's own label text, independent
+          // of whether the header itself is shown.
+          headerShown: false,
+          tabBarActiveTintColor: colors.primary,
+          tabBarInactiveTintColor: colors.muted,
+          tabBarIcon: ({ color, size }) => (
+            <MaterialIcons name={TAB_ICONS[route.name]} size={size} color={color} />
+          ),
+        })}
       >
         <Tabs.Screen name="index" options={{ title: 'Home' }} />
         <Tabs.Screen name="budget" options={{ title: 'Budget' }} />
         <Tabs.Screen name="recurring" options={{ title: 'Recurring' }} />
         <Tabs.Screen name="goal" options={{ title: 'Goal' }} />
+        <Tabs.Screen name="account" options={{ title: 'Account' }} />
       </Tabs>
-      {accountMenuMounted && (
-        <AccountMenu visible={showAccountMenu} onClose={() => setShowAccountMenu(false)} />
-      )}
     </AppDataProvider>
   );
 }

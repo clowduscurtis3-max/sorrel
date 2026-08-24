@@ -73,6 +73,13 @@ export function AppDataProvider({ children }) {
   // is now shared the same way accounts/alerts/etc. already are, rather than
   // two screens independently fetching GET /plaid-items.
   const [plaidItems, setPlaidItems] = useState([]);
+  // Phase 14 (Home synthesis): GET /budget/status was previously only ever
+  // fetched locally by the Budget tab - shared here now too so Home's own
+  // financial-health/spend-pace summary can read the same per-category
+  // totals without a second, drifting fetch. `{period_start, period_end,
+  // status}` verbatim, same "no wrapper key to unwrap" convention as
+  // fetchAccounts below.
+  const [budgetStatus, setBudgetStatus] = useState(null);
   // Phase 8 Step 4: GET /net-worth's own shape verbatim - {current, history}
   // - current is null until the daily snapshot job has run at least once for
   // this user, never fabricated as $0 in the meantime (see netWorth.js).
@@ -174,6 +181,16 @@ export function AppDataProvider({ children }) {
     }
   }
 
+  async function fetchBudgetStatus() {
+    try {
+      const res = await apiFetch('/budget/status');
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      setBudgetStatus(await res.json());
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   useEffect(() => {
     if (!session) return;
     fetchAlerts();
@@ -182,6 +199,7 @@ export function AppDataProvider({ children }) {
     fetchAccounts();
     fetchPlaidItems();
     fetchNetWorth();
+    fetchBudgetStatus();
     registerDeviceForPushNotifications().then((token) => {
       pushTokenRef.current = token;
     });
@@ -203,6 +221,7 @@ export function AppDataProvider({ children }) {
           fetchAccounts();
           fetchPlaidItems();
           fetchNetWorth();
+          fetchBudgetStatus();
         }, 1500);
       }
       appState.current = nextState;
@@ -255,12 +274,14 @@ export function AppDataProvider({ children }) {
         accounts,
         plaidItems,
         netWorth,
+        budgetStatus,
         refetchAlerts: fetchAlerts,
         refetchGoalProgress: fetchGoalProgress,
         refetchSubscriptionAudit: fetchSubscriptionAudit,
         refetchAccounts: fetchAccounts,
         refetchPlaidItems: fetchPlaidItems,
         refetchNetWorth: fetchNetWorth,
+        refetchBudgetStatus: fetchBudgetStatus,
         bankRelinkSignal,
         notifyBankRelinked,
         signOut,

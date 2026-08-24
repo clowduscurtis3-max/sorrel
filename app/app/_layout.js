@@ -1,14 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, AppState, View } from 'react-native';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import * as LocalAuthentication from 'expo-local-authentication';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { supabase } from '../lib/supabase';
-import { apiFetch } from './_lib/api';
+import { apiFetch, forceSignOut } from './_lib/api';
 import { SessionContext } from './_lib/session';
 import BiometricLock from './_components/BiometricLock';
 import { getBiometricLockEnabled } from './_lib/biometricPreference';
+import {
+  LOCK_AFTER_BACKGROUND_MS,
+  SIGN_OUT_AFTER_BACKGROUND_MS,
+  BACKGROUNDED_AT_STORAGE_KEY,
+  SIGNED_OUT_REASON_STORAGE_KEY,
+} from './_lib/sessionTimeouts';
 
 // Phase 4 Step F's event-type -> screen mapping, ported to router.push
 // targets. `(tabs)` is a route group (parens don't appear in the URL), so
@@ -100,6 +107,14 @@ export default function RootLayout() {
   const [checkingGoal, setCheckingGoal] = useState(true);
   const router = useRouter();
   const segments = useSegments();
+
+  // Phase 18/19: read inside the AppState 'change' callback below instead
+  // of closing over `session` directly, so that callback (registered once,
+  // mount-only) always sees the current session rather than whatever it
+  // was at mount time - the exact stale-closure shape already fixed once
+  // for handleNotificationTap's readyRef, below.
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -200,16 +215,242 @@ export default function RootLayout() {
       biometricCheckStartedRef.current = false;
       setBiometricPassed(false);
       setBiometricAvailable(null);
+      // Phase 18/19: same reasoning - a fresh sign-in gets its own fresh
+      // background-elapsed check rather than silently inheriting whatever
+      // the previous session's user already resolved.
+      backgroundElapsedCheckStartedRef.current = false;
+      setBackgroundElapsedCheckDone(false);
     }
   }, [session]);
 
-  // Phase 20 (biometric login), scoped to cold app-open only per the
-  // brief's own explicit go/no-go decision - there's no Phase 18
-  // (inactivity timeout) or Phase 19 (sign-out on close) yet, so there's
-  // no other moment that would need to also re-trigger this. Runs once per
-  // signed-in session, right after the sign-in/goal gate above resolves
-  // (`ready && !target`, i.e. about to render the real (tabs) tree for the
-  // first time) and before <Slot/> ever mounts it.
+  // Phase 18 (inactivity lock) / Phase 19 (sign-out on close). Both share
+  // one mechanism, since there's no reliable "the app was killed" event in
+  // React Native/Expo - a killed-and-relaunched process is
+  // indistinguishable from "backgrounded a long time" from JS's
+  // perspective. A single AsyncStorage-persisted "when did the app last go
+  // to background" timestamp (a plain ref alone would NOT work here - it
+  // wouldn't survive a killed process, which is exactly the case Phase 19
+  // exists to catch) is banded into three outcomes, checked on every
+  // return-to-foreground *and* once on cold start (see the two effects
+  // below - a genuinely fresh process never fires an 'inactive'->'active'
+  // AppState transition, so the cold-start effect is the only thing that
+  // ever catches a real kill-and-relaunch).
+  const [backgroundElapsedCheckDone, setBackgroundElapsedCheckDone] = useState(false);
+  const backgroundElapsedCheckStartedRef = useRef(false);
+  const backgroundTrackingAppStateRef = useRef(AppState.currentState);
+  // A pending debounced "did we actually settle back into the foreground"
+  // check - see the warm-resume listener's own comment for why this is
+  // needed at all (Android can report the app 'active' for a moment for
+  // reasons that have nothing to do with a genuine return).
+  const pendingResumeCheckRef = useRef(null);
+  // Reentrancy guard, same idiom as api.js's own signOutInProgress. This
+  // function has two independent trigger sites (the warm-resume listener
+  // below, and the cold-start effect further down) that can both end up
+  // invoking it within moments of each other right after a fresh sign-in -
+  // `backgroundElapsedCheckStartedRef` only stops the cold-start effect
+  // from firing more than once *itself*, it doesn't stop it from racing an
+  // independently-triggered warm-resume call. Without this guard, two
+  // concurrent calls could both read the same stored timestamp before
+  // either clears it and both independently decide to lock - a real bug
+  // found on-device (2026-08-23): signing in fresh showed two stacked
+  // biometric prompts in a row, one from each racing call.
+  const checkInProgressRef = useRef(false);
+
+  async function checkBackgroundElapsedAndAct() {
+    if (checkInProgressRef.current) return;
+    checkInProgressRef.current = true;
+    try {
+      await checkBackgroundElapsedAndActInner();
+    } catch (err) {
+      // Fail closed, not silently no-op - found by an adversarial review
+      // pass (2026-08-24): with no catch here, an unexpected error partway
+      // through the elapsed-time check (a transient AsyncStorage/Supabase/
+      // LocalAuthentication failure) left the lock/sign-out decision
+      // simply abandoned, same "never silently grant access" gap this
+      // app's other guardrails are explicit about avoiding (ALLOWED_EMAILS,
+      // the biometric check's own fail-closed default). Prefers a lock
+      // (recoverable in one tap) over a full sign-out when biometrics are
+      // actually available, matching the non-error lock branch above; only
+      // falls back to sign-out if even determining that isn't possible.
+      console.error(err);
+      try {
+        const hasHardware = await LocalAuthentication.hasHardwareAsync();
+        const isEnrolled = hasHardware && (await LocalAuthentication.isEnrolledAsync());
+        const lockPref = await getBiometricLockEnabled();
+        if (hasHardware && isEnrolled && lockPref) {
+          setBiometricAvailable(true);
+          biometricCheckStartedRef.current = true;
+          setBiometricPassed(false);
+          await attemptBiometricAuth();
+          return;
+        }
+      } catch (innerErr) {
+        console.error(innerErr);
+      }
+      try {
+        await AsyncStorage.setItem(SIGNED_OUT_REASON_STORAGE_KEY, 'inactivity');
+      } catch (storageErr) {
+        console.error(storageErr);
+      }
+      await forceSignOut().catch((signOutErr) => console.error(signOutErr));
+    } finally {
+      checkInProgressRef.current = false;
+    }
+  }
+
+  async function checkBackgroundElapsedAndActInner() {
+    const stored = await AsyncStorage.getItem(BACKGROUNDED_AT_STORAGE_KEY);
+    // Consumed either way once we actually reach this point - by now the
+    // debounce below has already confirmed this is a genuine, settled
+    // return (or this is the cold-start path, which has no such ambiguity
+    // to begin with), so a stale value must never leak into a later,
+    // unrelated check.
+    await AsyncStorage.removeItem(BACKGROUNDED_AT_STORAGE_KEY);
+    if (!stored) return;
+    // Same reasoning as runBiometricCheck's own fix - re-confirm directly
+    // against the Supabase client singleton rather than `sessionRef`,
+    // which mirrors React state that a spurious RootLayout remount can
+    // reset independently of whether a session is actually valid.
+    const { data } = await supabase.auth.getSession();
+    if (!data.session) return;
+    const backgroundedAt = parseInt(stored, 10);
+    if (!Number.isFinite(backgroundedAt)) return;
+    const elapsed = Date.now() - backgroundedAt;
+
+    if (elapsed < LOCK_AFTER_BACKGROUND_MS) return; // short elapsed: no-op
+
+    // Determine biometric availability directly, live, rather than trusting
+    // the `biometricAvailable` state - on a cold relaunch (the real Phase
+    // 19 "was actually closed" case) this whole check runs *before* Phase
+    // 20's own detection has had a chance to run even once in this fresh
+    // process, so that state is still `null` (undetermined) here, not a
+    // reliable "not available" signal. A live check also correctly picks
+    // up a mid-session toggle change in AccountMenu, which the cached
+    // state wouldn't.
+    let canLock = false;
+    try {
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const isEnrolled = hasHardware && (await LocalAuthentication.isEnrolledAsync());
+      const lockPref = await getBiometricLockEnabled();
+      canLock = hasHardware && isEnrolled && lockPref;
+    } catch (err) {
+      console.error(err);
+      canLock = false;
+    }
+
+    // Per explicit product decision: if the lock band is reached but
+    // there's nothing to lock into (no hardware / nothing enrolled / user
+    // opted out via AccountMenu's toggle), fall back to a full sign-out
+    // instead of a silent no-op, so the timeout policy still means
+    // something on a device without biometrics configured.
+    if (elapsed >= SIGN_OUT_AFTER_BACKGROUND_MS || !canLock) {
+      await AsyncStorage.setItem(SIGNED_OUT_REASON_STORAGE_KEY, 'inactivity');
+      await forceSignOut();
+      return;
+    }
+
+    // Lock band, biometrics genuinely available. Short-circuit Phase 20's
+    // own (not-yet-run, on a cold relaunch) detection with the answer just
+    // computed above, so it doesn't redundantly re-check hardware/
+    // enrollment a moment later and fire a second, stacked prompt.
+    setBiometricAvailable(true);
+    biometricCheckStartedRef.current = true;
+    setBiometricPassed(false);
+    await attemptBiometricAuth();
+  }
+
+  // Warm resume: fires on every 'inactive'/'background' -> 'active'
+  // transition for the life of the app, registered once. Stamps the
+  // timestamp on the way *into* background (not on the way out) so it's
+  // already durably written before the process could be killed while
+  // backgrounded.
+  //
+  // The write is gated on `sessionRef.current` - a real bug found
+  // on-device (2026-08-23): `WebBrowser.openAuthSessionAsync` (the Google
+  // sign-in flow, `sign-in.js`) backgrounds the app from the OS's own
+  // perspective while the browser is up, same as any other app switch.
+  // With no session guard here, a completely ordinary sign-in - which can
+  // easily take over a minute with account selection/2FA - got counted as
+  // "away from the app" and could immediately lock (or worse, sign out) a
+  // session that had never actually been used yet. There's nothing to
+  // protect before a session exists, so there's nothing worth timestamping
+  // yet either.
+  //
+  // Two more real bugs found on-device (2026-08-23), both from the same
+  // root cause - Android can report the app 'active' for a moment that
+  // has nothing to do with the user genuinely returning (screen-lock
+  // cycling, a system dialog stealing and releasing focus, etc.), and the
+  // original code trusted every such blip as a real return:
+  // 1. **The write only skipped stamping when `!wasBackground` was
+  //    false** - but a transient mid-background blip to 'active' flips
+  //    `backgroundTrackingAppStateRef` to 'active', so the *next*
+  //    transition back into background looked like a fresh
+  //    `!wasBackground` edge and overwrote the real, original
+  //    background-start timestamp with a much newer one - silently
+  //    resetting the clock partway through a real, long background
+  //    period. Fixed: only write if nothing is already stored (an
+  //    in-flight `getItem` check first), so the true original start time
+  //    survives any number of blips until it's actually consumed by a
+  //    real decision.
+  // 2. **The check fired immediately on every `active` transition**,
+  //    including a transient blip - reproduced on-device as a real
+  //    cascading failure (backgrounded ~10 minutes, expected a clean
+  //    sign-out, instead got a lock prompt, then a sign-out, then two
+  //    more stacked biometric prompts after signing back in - consistent
+  //    with a blip letting an intermediate, much-smaller elapsed reading
+  //    through before the genuine return). Fixed with a debounce: an
+  //    `active` transition now only schedules a check after a couple
+  //    seconds of staying active, and going back into background before
+  //    that timer fires cancels it outright - a blip that immediately
+  //    reverts can never trigger a real decision on its own.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      const wasBackground = backgroundTrackingAppStateRef.current.match(/inactive|background/);
+      // Ignore both directions while our own biometric prompt is up - see
+      // biometricPromptInFlightRef's own comment for why this transition
+      // isn't a genuine "user left the app" signal.
+      if (!biometricPromptInFlightRef.current) {
+        if (!wasBackground && nextState.match(/inactive|background/)) {
+          // Leaving the foreground again before a pending debounced check
+          // ever confirmed a genuine return - cancel it, this was itself
+          // just a blip.
+          if (pendingResumeCheckRef.current) {
+            clearTimeout(pendingResumeCheckRef.current);
+            pendingResumeCheckRef.current = null;
+          }
+          if (sessionRef.current) {
+            AsyncStorage.getItem(BACKGROUNDED_AT_STORAGE_KEY).then((existing) => {
+              if (!existing) {
+                AsyncStorage.setItem(BACKGROUNDED_AT_STORAGE_KEY, String(Date.now()));
+              }
+            });
+          }
+        } else if (wasBackground && nextState === 'active') {
+          pendingResumeCheckRef.current = setTimeout(() => {
+            pendingResumeCheckRef.current = null;
+            checkBackgroundElapsedAndAct();
+          }, 2000);
+        }
+      }
+      backgroundTrackingAppStateRef.current = nextState;
+    });
+    return () => {
+      subscription.remove();
+      if (pendingResumeCheckRef.current) clearTimeout(pendingResumeCheckRef.current);
+    };
+  }, []);
+
+  // Phase 20 (biometric login) - originally scoped to cold app-open only,
+  // since at the time there was no Phase 18 (inactivity timeout) or
+  // Phase 19 (sign-out on close) to also need it. Both now exist (see the
+  // background-elapsed check above) and reuse this exact function for
+  // their own "relock" outcome rather than duplicating it - this comment
+  // now describes the cold-open trigger specifically; the trigger effect
+  // just below also fires this after a Phase 18/19 relock decision, not
+  // only on the very first cold open. Runs once per signed-in session,
+  // right after the sign-in/goal gate above resolves (`ready && !target`,
+  // i.e. about to render the real (tabs) tree for the first time) and
+  // before <Slot/> ever mounts it.
   //
   // `biometricAvailable`: null = not yet checked, true = hardware present,
   // something's enrolled, AND the user hasn't opted out (via the toggle in
@@ -228,8 +469,23 @@ export default function RootLayout() {
   const [biometricPassed, setBiometricPassed] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(null);
   const biometricCheckStartedRef = useRef(false);
+  // Real bug found on-device (2026-08-23): the native biometric prompt
+  // itself takes focus away from the app - Android reports this as the
+  // same 'active' -> 'inactive'/'background' -> 'active' cycle as any
+  // other app switch, which the Phase 18/19 AppState listener below can't
+  // otherwise tell apart from a genuine "user left the app." Left
+  // unguarded, showing the prompt would write a fresh background
+  // timestamp, and the prompt closing would immediately re-trigger another
+  // elapsed-time decision - if that took over a minute (easy, fumbling
+  // with a fingerprint reader or just reading the prompt), it could
+  // re-lock or even sign out a session that was never actually left,
+  // cascading into exactly the repeated-prompt loop seen on-device. Set
+  // for the full duration of the native call; the AppState listener below
+  // ignores both the write and the elapsed check while this is true.
+  const biometricPromptInFlightRef = useRef(false);
 
   async function attemptBiometricAuth() {
+    biometricPromptInFlightRef.current = true;
     try {
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage: 'Unlock Sorrel',
@@ -244,12 +500,50 @@ export default function RootLayout() {
     } catch (err) {
       console.error(err);
       setBiometricPassed(false);
+    } finally {
+      biometricPromptInFlightRef.current = false;
     }
   }
 
   async function runBiometricCheck() {
     biometricCheckStartedRef.current = true;
     try {
+      // Real bug found on-device (2026-08-24): RootLayout can spuriously
+      // unmount+remount within milliseconds of a sign-out completing (a
+      // pre-existing, not-fully-diagnosed re-init pattern - see the
+      // `requiredRoute`/`goal` comment above from 2026-08-22 describing the
+      // same class of issue). That reset every ref this function guards
+      // itself with, so it re-ran as if this were a genuine fresh sign-in
+      // moments after a real sign-out - reproduced directly via logcat:
+      // `forceSignOut() resolved` -> `RootLayout UNMOUNTING` -> `MOUNTED`
+      // -> a fresh biometric prompt, 3-90ms apart, repeatedly. React's own
+      // `session` state at that instant can't be trusted (it's exactly
+      // what the remount reset) - re-confirm directly against the
+      // Supabase client instead, which is a module-level singleton
+      // untouched by any component remount, before ever showing a prompt.
+      const { data } = await supabase.auth.getSession();
+      if (!data.session) {
+        // Real bug found on-device (2026-08-24), same session: leaving
+        // biometricAvailable at its initial `null` here stuck the whole
+        // app on the Splash screen forever - tabsReady/biometricLocked
+        // BOTH require biometricGateCleared (biometricAvailable === false
+        // || biometricPassed), so neither could ever become true, and
+        // <Slot/> (which is what would actually render the sign-in
+        // screen) never got a chance to mount at all. This is also a
+        // perfectly legitimate case on its own, not just the remount-race
+        // artifact above - `ready && !target` is equally true once
+        // already sitting on /sign-in with no session, so this path was
+        // always reachable. Resolve the gate the same way "no hardware/
+        // not enrolled" below already does - nothing to check against,
+        // so fall through cleanly instead of leaving it unresolved.
+        // biometricCheckStartedRef is reset so a genuine later sign-in
+        // still gets its own real check once a valid session exists.
+        biometricCheckStartedRef.current = false;
+        setBiometricAvailable(false);
+        setBiometricPassed(true);
+        return;
+      }
+
       const hasHardware = await LocalAuthentication.hasHardwareAsync();
       const isEnrolled = hasHardware && (await LocalAuthentication.isEnrolledAsync());
       const lockPref = await getBiometricLockEnabled();
@@ -288,17 +582,32 @@ export default function RootLayout() {
     if (target) router.replace(target);
   }, [target]);
 
-  // Phase 20: trigger the biometric check exactly once, the moment the
-  // sign-in/goal gate is satisfied and there's nothing left to redirect to
-  // (i.e. the app is about to show the real (tabs) tree). Re-arms itself
-  // after a sign-out via the ref reset in the `[session]` effect above, so
-  // a later sign-in gets its own fresh check rather than this effect
-  // silently no-op'ing forever after the first session.
+  // Phase 18/19: cold start / kill-relaunch check. No 'inactive'->'active'
+  // AppState transition ever fires for a genuinely fresh process, so this
+  // runs once per signed-in session, gated the same way Phase 20's own
+  // biometric check is gated just below - and deliberately runs *before*
+  // it (see that effect's own dependency list, updated to wait on
+  // `backgroundElapsedCheckDone`), so a sign-out decision here can't be
+  // preceded by a flash of the biometric prompt.
   useEffect(() => {
-    if (ready && !target && !biometricCheckStartedRef.current) {
-      runBiometricCheck();
+    if (ready && !target && !backgroundElapsedCheckStartedRef.current) {
+      backgroundElapsedCheckStartedRef.current = true;
+      checkBackgroundElapsedAndAct().finally(() => setBackgroundElapsedCheckDone(true));
     }
   }, [ready, target]);
+
+  // Phase 20: trigger the biometric check exactly once, the moment the
+  // sign-in/goal gate is satisfied, there's nothing left to redirect to,
+  // and Phase 18/19's own background-elapsed check has already had its
+  // chance to decide (i.e. the app is about to show the real (tabs) tree).
+  // Re-arms itself after a sign-out via the ref reset in the `[session]`
+  // effect above, so a later sign-in gets its own fresh check rather than
+  // this effect silently no-op'ing forever after the first session.
+  useEffect(() => {
+    if (ready && !target && backgroundElapsedCheckDone && !biometricCheckStartedRef.current) {
+      runBiometricCheck();
+    }
+  }, [ready, target, backgroundElapsedCheckDone]);
 
   // Phase 20 also inserts a real gap between `ready` becoming true and
   // <Slot/> (the (tabs) tree) actually mounting - the Splash-while-
@@ -310,7 +619,8 @@ export default function RootLayout() {
   // that flow doesn't fire router.push against a screen that hasn't
   // mounted yet.
   const biometricGateCleared = biometricAvailable === false || biometricPassed;
-  const tabsReady = ready && !target && biometricGateCleared;
+  const tabsReady =
+    ready && !target && backgroundElapsedCheckDone && biometricGateCleared;
 
   // Phase 4 Step F, ported to router navigation (sub-step 1.8). The
   // listener below is registered once (`useEffect(..., [])`), so its
@@ -394,14 +704,19 @@ export default function RootLayout() {
   // root as this app has - outside the ready/target Splash-vs-real-content
   // branch below, so gestures would work regardless of which renders -
   // rather than duplicating the wrapper in both return paths.
-  // Phase 20: three states past the original sign-in/goal gate, in order -
-  // still checking hardware/enrollment (Splash, same as any other brief
-  // loading state), a real device-enrolled biometric that hasn't been
-  // passed yet this session (BiometricLock, a deliberate stop - never
-  // falls through to Slot on its own), or clear (`tabsReady`, computed
-  // above) to render the real app.
+  // Phase 20 (extended by Phase 18/19): states past the original sign-in/
+  // goal gate, in order - still checking background-elapsed-time/hardware/
+  // enrollment (Splash, same as any other brief loading state), a real
+  // device-enrolled biometric that hasn't been passed yet this session
+  // (BiometricLock, a deliberate stop - never falls through to Slot on its
+  // own, reused verbatim for a Phase 18 inactivity relock), or clear
+  // (`tabsReady`, computed above) to render the real app.
   const biometricLocked =
-    ready && !target && biometricAvailable === true && !biometricPassed;
+    ready &&
+    !target &&
+    backgroundElapsedCheckDone &&
+    biometricAvailable === true &&
+    !biometricPassed;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

@@ -3,19 +3,55 @@ import {
   View,
   Text,
   Button,
+  Pressable,
+  Image,
   ActivityIndicator,
   ScrollView,
   SectionList,
   RefreshControl,
   AppState,
+  StyleSheet,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { createPlaidLinkSession } from 'react-native-plaid-link-sdk';
+import { MaterialIcons } from '@expo/vector-icons';
 import { apiFetch, apiErrorMessage, formatAmount, CATEGORIES } from '../_lib/api';
-import { styles } from '../_lib/styles';
+import { styles, colors } from '../_lib/styles';
 import { useAppData } from '../_lib/appData';
 import { useSessionContext } from '../_lib/session';
+import SorrelWordmark from '../_components/SorrelWordmark';
+import { TimeOfDayScene, SeasonalHills } from '../_components/Illustrations';
+import NetWorthChart from '../_components/NetWorthChart';
+import PrimaryButton from '../_components/PrimaryButton';
+import { iconForAccount } from '../_lib/accountIcons';
+import {
+  computeCategoryStatuses,
+  computeFinancialHealth,
+  computeInsight,
+  computeMonthProgress,
+  computeSpendStats,
+  computePace,
+} from '../_lib/homeSummary';
+import { iconForCategory as iconForTxCategory } from '../_lib/categoryIcons';
+
+const STATUS_ICON = { ok: 'check-circle', warning: 'warning', severe: 'error' };
+const STATUS_COLOR = {
+  ok: colors.positive,
+  warning: colors.warning,
+  severe: colors.error,
+  neutral: colors.muted,
+};
+const HEALTH_PILL_COLOR = { positive: colors.positive, warning: colors.warning, error: colors.error };
+
+function formatGoalType(goalType) {
+  if (!goalType) return 'Goal';
+  return goalType
+    .split('_')
+    .map((w) => w[0].toUpperCase() + w.slice(1))
+    .join(' ');
+}
 
 // Phase 8 Step 4 follow-up: a plain time-of-day greeting, requested
 // directly by the user - goalProgress's own message (already shown right
@@ -115,9 +151,18 @@ function groupByCategory(transactions) {
 // attempt - a combined transaction list always visible on Home - was
 // exactly the "overcrowded home screen" the user pushed back on).
 export default function Home() {
-  const { alerts, goalProgress, subscriptionAudit, accounts, plaidItems, netWorth, bankRelinkSignal } =
-    useAppData();
+  const {
+    alerts,
+    goalProgress,
+    subscriptionAudit,
+    accounts,
+    plaidItems,
+    netWorth,
+    budgetStatus,
+    bankRelinkSignal,
+  } = useAppData();
   const { session } = useSessionContext();
+  const router = useRouter();
 
   // `null` is Home's own default Overview render; a specific plaid_items.id
   // swaps the whole screen to that bank's dedicated view. Deliberately a
@@ -143,6 +188,20 @@ export default function Home() {
   // {current, history} shape), so this is purely a local show/hide flag,
   // no new fetch needed.
   const [showNetWorthHistory, setShowNetWorthHistory] = useState(false);
+
+  // Phase 14 (Home synthesis) - all pure/derived from already-fetched data,
+  // recomputed on every render (cheap arithmetic over small arrays, no
+  // memoization needed at this scale). See _lib/homeSummary.js for the
+  // actual logic/guardrails.
+  const health = computeFinancialHealth(alerts, goalProgress);
+  const categoryTiles = computeCategoryStatuses(budgetStatus, alerts);
+  const monthProgress = budgetStatus
+    ? computeMonthProgress(budgetStatus.period_start, budgetStatus.period_end)
+    : null;
+  const spendStats = computeSpendStats(budgetStatus);
+  const pace = monthProgress ? computePace(spendStats, monthProgress) : null;
+  const insight = computeInsight(alerts, goalProgress);
+  const monthName = new Date().toLocaleDateString('en-US', { month: 'long' });
 
   async function fetchTransactions({ silent = false, suppressErrorBanner = false } = {}) {
     if (!silent) setLoadingTransactions(true);
@@ -348,37 +407,67 @@ export default function Home() {
   // transaction list in this app has always supported). Only rendered
   // inside the dedicated institution screen now that Home itself never
   // shows any transactions.
-  function renderTransactionRow({ item }) {
+  function renderTransactionRow({ item, index, section }) {
+    const isLast = index === section.data.length - 1;
+    const icon = item.isRecurring ? 'autorenew' : iconForTxCategory(section.title);
     return (
-      <View style={styles.row}>
-        <View style={styles.rowMain}>
-          <Text style={styles.rowName}>{item.name}</Text>
-          <Text style={styles.rowAmount}>{formatAmount(item.amount)}</Text>
+      <View style={[homeStyles.txRow, isLast && homeStyles.txRowLast]}>
+        <View style={homeStyles.txTopRow}>
+          <View style={homeStyles.txIconCircle}>
+            <MaterialIcons name={icon} size={18} color={colors.dark} />
+          </View>
+          <View style={homeStyles.txMain}>
+            <View style={styles.rowMain}>
+              <Text style={styles.rowName} numberOfLines={1}>
+                {item.name}
+              </Text>
+              <Text style={styles.rowAmount}>{formatAmount(item.amount)}</Text>
+            </View>
+            {item.isRecurring && (
+              <Text style={styles.recurringTag}>Recurring · {item.recurringInterval}</Text>
+            )}
+          </View>
         </View>
-
-        {item.isRecurring && (
-          <Text style={styles.recurringTag}>Recurring · {item.recurringInterval}</Text>
-        )}
 
         {item.needsReview &&
           (reviewingTransactionId === item.transactionId ? (
             correctingCategory ? (
-              <ActivityIndicator />
+              <ActivityIndicator style={homeStyles.reviewSpacing} />
             ) : (
-              <View style={styles.categoryPicker}>
+              <View style={[homeStyles.categoryChipsRow, homeStyles.reviewSpacing]}>
                 {CATEGORIES.map((c) => (
-                  <Button key={c} title={c} onPress={() => correctCategory(item.transactionId, c)} />
+                  <Pressable
+                    key={c}
+                    style={homeStyles.categoryChip}
+                    onPress={() => correctCategory(item.transactionId, c)}
+                    accessibilityRole="button"
+                    accessibilityLabel={c}
+                  >
+                    <Text style={homeStyles.categoryChipText}>{c}</Text>
+                  </Pressable>
                 ))}
-                <Button title="Cancel" onPress={() => setReviewingTransactionId(null)} />
+                <Pressable
+                  style={homeStyles.cancelChip}
+                  onPress={() => setReviewingTransactionId(null)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel"
+                >
+                  <Text style={homeStyles.cancelChipText}>Cancel</Text>
+                </Pressable>
               </View>
             )
           ) : (
-            <View style={styles.reviewRow}>
-              <Text style={styles.reviewText}>
-                We couldn't confidently categorize this purchase. Help us out by choosing the
-                correct category. We'll use your feedback to improve future matches.
-              </Text>
-              <Button
+            <View style={[styles.reviewRow, homeStyles.reviewSpacing]}>
+              <View style={homeStyles.reviewTextRow}>
+                <View style={homeStyles.reviewIconCircle}>
+                  <MaterialIcons name="help-outline" size={14} color={colors.warning} />
+                </View>
+                <Text style={homeStyles.reviewText}>
+                  We couldn't confidently categorize this purchase. Help us out by choosing the
+                  correct category. We'll use your feedback to improve future matches.
+                </Text>
+              </View>
+              <PrimaryButton
                 title="Choose category"
                 onPress={() => setReviewingTransactionId(item.transactionId)}
               />
@@ -390,9 +479,27 @@ export default function Home() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.goalProgressSection}>
-        <Text style={styles.rowName}>{greeting(session)}</Text>
-      </View>
+      {viewingItemId === null && (
+        <View style={homeStyles.headerBlock}>
+          <View style={homeStyles.headerSceneWrap} pointerEvents="none">
+            <TimeOfDayScene height={168} />
+          </View>
+          <View style={homeStyles.headerContent}>
+            <View style={homeStyles.wordmarkRow}>
+              <SorrelWordmark layout="row" leafSize={30} showTagline={false} />
+              {/* Plain icon, not a Pressable - there's no notification
+                  center built yet (Phase 16, "what changed"), so this is
+                  visual-only for now rather than implying functionality
+                  that doesn't exist. */}
+              <MaterialIcons name="notifications-none" size={26} color={colors.darkest} />
+            </View>
+            <Text style={homeStyles.greeting}>{greeting(session)}</Text>
+            <Text style={homeStyles.greetingSubtitle}>
+              Here's your financial snapshot for {monthName}.
+            </Text>
+          </View>
+        </View>
+      )}
 
       {/* Stays fixed regardless of which branch below is showing - a 409
           from fetchTransactions (bank connection needs re-linking) can
@@ -433,16 +540,42 @@ export default function Home() {
 
           return (
             <>
-              <View style={styles.topBar}>
-                <View>
-                  <Button title="← Back" onPress={() => setViewingItemId(null)} />
-                </View>
-                <View />
+              <View style={homeStyles.bankTopBar}>
+                <Pressable
+                  style={homeStyles.backButton}
+                  onPress={() => setViewingItemId(null)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Back to Home"
+                >
+                  <MaterialIcons name="arrow-back" size={20} color={colors.primary} />
+                </Pressable>
               </View>
 
-              <View style={styles.header}>
-                <Text style={styles.rowName}>{item?.institution_name || 'Linked bank'}</Text>
-                {total != null && <Text style={styles.rowAmount}>${total.toFixed(2)} available</Text>}
+              <View style={homeStyles.bankHeaderRow}>
+                <View style={homeStyles.bankHeaderText}>
+                  <Text style={homeStyles.bankName}>
+                    {(item?.institution_name || 'Linked bank').toUpperCase()}
+                  </Text>
+                  {total != null && (
+                    <>
+                      <Text style={homeStyles.cardEyebrow}>TOTAL AVAILABLE</Text>
+                      <Text style={homeStyles.bankTotal}>
+                        ${total.toFixed(2)}
+                        <Text style={homeStyles.bankTotalSuffix}> available</Text>
+                      </Text>
+                    </>
+                  )}
+                </View>
+                {item?.institution_logo ? (
+                  <Image
+                    source={{ uri: `data:image/png;base64,${item.institution_logo}` }}
+                    style={homeStyles.bankLogo}
+                  />
+                ) : (
+                  <View style={homeStyles.bankLogoFallback}>
+                    <MaterialIcons name="account-balance" size={26} color={colors.background} />
+                  </View>
+                )}
               </View>
 
               <SectionList
@@ -452,26 +585,39 @@ export default function Home() {
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                 ListHeaderComponent={
                   bankAccounts.length > 0 && (
-                    <View style={styles.accountsSection}>
-                      {bankAccounts.map((a) => {
-                        const balance = a.available_balance ?? a.current_balance;
-                        return (
-                          <View key={a.id} style={styles.rowMain}>
-                            <Text style={styles.rowName}>
-                              {a.name}
-                              {a.mask ? ` ···${a.mask}` : ''}
-                            </Text>
-                            <Text style={styles.rowAmount}>
-                              {balance != null ? `$${balance.toFixed(2)}` : '—'}
-                            </Text>
-                          </View>
-                        );
-                      })}
+                    <View style={[styles.card, homeStyles.cardMargin]}>
+                      <Text style={homeStyles.cardEyebrow}>ACCOUNTS</Text>
+                      <View style={homeStyles.accountsList}>
+                        {bankAccounts.map((a) => {
+                          const balance = a.available_balance ?? a.current_balance;
+                          return (
+                            <View key={a.id} style={homeStyles.accountRow}>
+                              <View style={homeStyles.accountIconCircle}>
+                                <MaterialIcons
+                                  name={iconForAccount(a)}
+                                  size={16}
+                                  color={colors.background}
+                                />
+                              </View>
+                              <Text style={homeStyles.accountName} numberOfLines={1}>
+                                {a.name}
+                                {a.mask ? `  ····${a.mask}` : ''}
+                              </Text>
+                              <Text style={homeStyles.accountBalance}>
+                                {balance != null ? `$${balance.toFixed(2)}` : '—'}
+                              </Text>
+                              <MaterialIcons name="chevron-right" size={20} color={colors.dark} />
+                            </View>
+                          );
+                        })}
+                      </View>
                     </View>
                   )
                 }
                 renderSectionHeader={({ section: { title } }) => (
-                  <Text style={styles.sectionHeader}>{title}</Text>
+                  <Text style={[homeStyles.txSectionHeader, homeStyles.cardEyebrow]}>
+                    {title.toUpperCase()}
+                  </Text>
                 )}
                 renderItem={renderTransactionRow}
                 ListEmptyComponent={<Text style={styles.text}>No transactions yet.</Text>}
@@ -486,22 +632,151 @@ export default function Home() {
         // SectionList; there is no long transaction feed on this screen
         // anymore for a nested-VirtualizedList concern to even apply to.
         <ScrollView style={styles.list}>
-          {goalProgress && (
-            <View style={styles.goalProgressSection}>
-              <Text style={styles.smallText}>{goalProgress.message}</Text>
+          {/* Financial Health card - Phase 14/15's synthesized headline,
+              replacing the old raw goalProgress line + unranked alert list
+              (both now folded into this card + the Insight card below, per
+              Phase 14's own "ranked, capped summary instead of an unranked
+              stack" goal). */}
+          <View style={[styles.card, homeStyles.cardMargin]}>
+            <View style={homeStyles.healthHeaderRow}>
+              <Text style={homeStyles.cardEyebrow}>
+                {monthName.toUpperCase()} FINANCIAL HEALTH
+              </Text>
+              <View
+                style={[
+                  homeStyles.healthPill,
+                  { backgroundColor: HEALTH_PILL_COLOR[health.color] },
+                ]}
+              >
+                <Text style={homeStyles.healthPillText}>{health.label.toUpperCase()}</Text>
+              </View>
             </View>
-          )}
 
-          {alerts.length > 0 && (
-            <View style={styles.alertsSection}>
-              {alerts.map((a) => (
-                <View key={a.category} style={styles.alertRow}>
-                  <Text style={styles.alertText}>{a.message}</Text>
-                  {a.suggested_action && <Text style={styles.smallText}>{a.suggested_action}</Text>}
+            <View style={homeStyles.categoryRow}>
+              {categoryTiles.map((tile) => (
+                <View key={tile.category} style={homeStyles.categoryTile}>
+                  <View style={homeStyles.categoryIconCircle}>
+                    <MaterialIcons name={tile.icon} size={20} color={colors.dark} />
+                  </View>
+                  <Text style={homeStyles.categoryLabel} numberOfLines={2}>
+                    {tile.label}
+                  </Text>
+                  {tile.status === 'neutral' ? (
+                    <View style={homeStyles.neutralDot} />
+                  ) : (
+                    <MaterialIcons
+                      name={STATUS_ICON[tile.status]}
+                      size={16}
+                      color={STATUS_COLOR[tile.status]}
+                    />
+                  )}
                 </View>
               ))}
             </View>
-          )}
+
+            {monthProgress && budgetStatus && (
+              <>
+                <View style={homeStyles.divider} />
+                <View style={homeStyles.monthLabelsRow}>
+                  <Text style={homeStyles.smallLabel}>
+                    {monthName.slice(0, 3).toUpperCase()} 1
+                  </Text>
+                  <Text style={homeStyles.smallLabel}>
+                    {monthName.slice(0, 3).toUpperCase()} {monthProgress.daysInMonth}
+                  </Text>
+                </View>
+                <View style={homeStyles.progressTrack}>
+                  <View
+                    style={[
+                      homeStyles.progressFill,
+                      { width: `${monthProgress.percent * 100}%` },
+                    ]}
+                  />
+                </View>
+                <View style={homeStyles.progressCaptionRow}>
+                  <View>
+                    <Text style={homeStyles.progressCaption}>
+                      {monthProgress.daysElapsed} days into {monthName}
+                    </Text>
+                    <Text style={homeStyles.progressCaption}>
+                      {monthProgress.daysRemaining} days remaining
+                    </Text>
+                  </View>
+                  <SeasonalHills width={110} height={70} />
+                </View>
+              </>
+            )}
+          </View>
+
+          {/* Insight card - the single most-material thing worth surfacing
+              right now (see _lib/homeSummary.js's computeInsight), tapping
+              through to Budget for the full detail behind it. */}
+          <Pressable
+            style={[styles.card, homeStyles.cardMargin, homeStyles.insightCard]}
+            onPress={() => router.push('/budget')}
+            accessibilityRole="button"
+            accessibilityLabel="View budget details"
+          >
+            <View style={homeStyles.insightIconCircle}>
+              <MaterialIcons name="auto-awesome" size={18} color={colors.dark} />
+            </View>
+            <View style={homeStyles.insightBody}>
+              <Text style={homeStyles.cardEyebrow}>INSIGHT</Text>
+              <Text style={homeStyles.insightText}>{insight.text}</Text>
+              {insight.hasDetail && (
+                <Text style={homeStyles.insightTapHint}>Tap to see details and recommendations.</Text>
+              )}
+            </View>
+            <MaterialIcons name="chevron-right" size={22} color={colors.dark} />
+          </Pressable>
+
+          {/* Stat tiles - each already backed by data computed above; a
+              restyle/composition over existing numbers, no new math beyond
+              simple sums/ratios (see homeSummary.js). */}
+          <View style={[styles.card, homeStyles.cardMargin, homeStyles.statRow]}>
+            <View style={homeStyles.statTile}>
+              <MaterialIcons name="account-balance-wallet" size={18} color={colors.dark} />
+              <Text style={homeStyles.statLabel}>SPENT SO FAR</Text>
+              <Text style={homeStyles.statValue}>${spendStats.spent.toFixed(0)}</Text>
+              <Text style={homeStyles.statSub}>of ${spendStats.budgeted.toFixed(0)}</Text>
+            </View>
+            <View style={homeStyles.statDivider} />
+            <View style={homeStyles.statTile}>
+              <MaterialIcons name="show-chart" size={18} color={colors.dark} />
+              <Text style={homeStyles.statLabel}>PACE</Text>
+              <Text style={homeStyles.statValue}>
+                {pace ? `$${pace.aheadBy.toFixed(0)}` : '—'}
+              </Text>
+              <Text
+                style={[
+                  homeStyles.statSub,
+                  pace && { color: pace.isAhead ? colors.positive : colors.error },
+                ]}
+              >
+                {pace ? (pace.isAhead ? 'ahead of pace' : 'behind pace') : 'not enough data'}
+              </Text>
+            </View>
+            <View style={homeStyles.statDivider} />
+            <View style={homeStyles.statTile}>
+              <MaterialIcons name="event" size={18} color={colors.dark} />
+              <Text style={homeStyles.statLabel}>DAYS LEFT</Text>
+              <Text style={homeStyles.statValue}>
+                {monthProgress ? monthProgress.daysRemaining : '—'}
+              </Text>
+              <Text style={homeStyles.statSub}>in {monthName}</Text>
+            </View>
+            <View style={homeStyles.statDivider} />
+            <View style={homeStyles.statTile}>
+              <MaterialIcons name="track-changes" size={18} color={colors.dark} />
+              <Text style={homeStyles.statLabel}>GOAL PROGRESS</Text>
+              <Text style={homeStyles.statValue}>
+                {goalProgress?.has_target ? `${Math.round(goalProgress.percent_complete)}%` : '—'}
+              </Text>
+              <Text style={homeStyles.statSub}>
+                {goalProgress ? formatGoalType(goalProgress.goal_type) : 'No goal yet'}
+              </Text>
+            </View>
+          </View>
 
           {/* Upcoming bills - Bills & Utilities specifically (mortgage/
               phone/electricity-style), not Subscriptions (Netflix-style,
@@ -511,10 +786,8 @@ export default function Home() {
               tagged with its bank so two real, distinct bills sharing a
               merchant/amount don't read as a duplicate. */}
           {upcomingBills.length > 0 && (
-            <View style={styles.alertsSection}>
-              <View style={styles.categoryPicker}>
-                <Button title={`Upcoming bills (${upcomingBills.length})`} disabled />
-              </View>
+            <View style={[styles.card, homeStyles.cardMargin]}>
+              <Text style={styles.cardTitle}>Upcoming bills ({upcomingBills.length})</Text>
               {upcomingBills.map((bill) => {
                 const institution = institutionForAccount(bill.account_id);
                 return (
@@ -533,18 +806,30 @@ export default function Home() {
           )}
 
           {plaidItems.length > 0 && (
-            <View style={styles.accountsSection}>
-              <View style={styles.categoryPicker}>
+            <View style={[styles.card, homeStyles.cardMargin]}>
+              <Text style={homeStyles.cardEyebrow}>ACCOUNTS</Text>
+              <View style={homeStyles.accountsList}>
                 {plaidItems.map((i) => {
                   const total = bankTotal(i.id);
                   return (
-                    <Button
+                    <Pressable
                       key={i.id}
-                      title={`${i.institution_name || 'Linked bank'}: ${
-                        total != null ? `$${total.toFixed(2)}` : '—'
-                      }`}
+                      style={homeStyles.accountRow}
                       onPress={() => setViewingItemId(i.id)}
-                    />
+                      accessibilityRole="button"
+                      accessibilityLabel={`View ${i.institution_name || 'linked bank'}`}
+                    >
+                      <View style={homeStyles.accountIconCircle}>
+                        <MaterialIcons name="account-balance" size={18} color={colors.background} />
+                      </View>
+                      <Text style={homeStyles.accountName} numberOfLines={1}>
+                        {(i.institution_name || 'Linked bank').toUpperCase()}
+                      </Text>
+                      <Text style={homeStyles.accountBalance}>
+                        {total != null ? `$${total.toFixed(2)}` : '—'}
+                      </Text>
+                      <MaterialIcons name="chevron-right" size={20} color={colors.dark} />
+                    </Pressable>
                   );
                 })}
               </View>
@@ -552,36 +837,35 @@ export default function Home() {
           )}
 
           {netWorth?.current && (
-            <View style={styles.accountsSection}>
-              <Text style={styles.rowName}>Net worth</Text>
-              <Text style={styles.rowAmount}>${netWorth.current.net_worth.toFixed(2)}</Text>
+            <View style={[styles.card, homeStyles.cardMargin]}>
+              <View style={homeStyles.healthHeaderRow}>
+                <Text style={homeStyles.cardEyebrow}>NET WORTH</Text>
+                {netWorth.history.length > 0 && (
+                  <Pressable
+                    style={homeStyles.historyChip}
+                    onPress={() => setShowNetWorthHistory((v) => !v)}
+                    accessibilityRole="button"
+                    accessibilityLabel={showNetWorthHistory ? 'Hide history' : 'View history'}
+                  >
+                    <Text style={homeStyles.historyChipText}>
+                      {showNetWorthHistory ? 'HIDE HISTORY' : 'VIEW HISTORY'}
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+              <Text style={homeStyles.netWorthValue}>
+                {netWorth.current.net_worth < 0 ? '-' : ''}$
+                {Math.abs(netWorth.current.net_worth).toLocaleString('en-US', {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+              </Text>
               <Text style={styles.smallText}>
                 ${netWorth.current.assets.toFixed(2)} assets — ${netWorth.current.liabilities.toFixed(2)}{' '}
                 liabilities
               </Text>
-              {netWorth.history.length > 0 && (
-                <View style={styles.categoryPicker}>
-                  <Button
-                    title={showNetWorthHistory ? 'Hide history' : 'View history'}
-                    onPress={() => setShowNetWorthHistory((v) => !v)}
-                  />
-                </View>
-              )}
-              {showNetWorthHistory &&
-                netWorth.history
-                  .slice()
-                  .reverse()
-                  .map((snap) => (
-                    <View key={snap.snapshot_date} style={styles.budgetRow}>
-                      <View style={styles.rowMain}>
-                        <Text style={styles.rowName}>{snap.snapshot_date}</Text>
-                        <Text style={styles.rowAmount}>${snap.net_worth.toFixed(2)}</Text>
-                      </View>
-                      <Text style={styles.smallText}>
-                        ${snap.assets.toFixed(2)} assets — ${snap.liabilities.toFixed(2)} liabilities
-                      </Text>
-                    </View>
-                  ))}
+
+              {showNetWorthHistory && <NetWorthChart history={netWorth.history} />}
             </View>
           )}
         </ScrollView>
@@ -590,3 +874,389 @@ export default function Home() {
     </View>
   );
 }
+
+// Phase 14 (Home synthesis) - new card/tile styles specific to the
+// redesigned Overview. General-purpose bits (card/cardTitle/colors) stay
+// in the shared _lib/styles.js; only what's genuinely new for this screen
+// lives here, same split sign-in.js's own local StyleSheet already
+// established.
+const homeStyles = StyleSheet.create({
+  headerBlock: {
+    position: 'relative',
+    paddingBottom: 16,
+    minHeight: 168,
+  },
+  // Unpadded and absolutely filling headerBlock, so the sunrise/sunset/
+  // moonlight scene can bleed to the actual screen edges (matching the
+  // reference mockup) - padding lives on headerContent instead, not here.
+  headerSceneWrap: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  headerContent: {
+    paddingHorizontal: 24,
+    paddingTop: 4,
+    gap: 4,
+  },
+  wordmarkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  greeting: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.darkest,
+    marginTop: 12,
+  },
+  greetingSubtitle: {
+    fontSize: 13,
+    color: colors.dark,
+  },
+  cardMargin: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+  },
+  cardEyebrow: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    color: colors.dark,
+  },
+  healthHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  healthPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+  },
+  healthPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.background,
+  },
+  categoryRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  categoryTile: {
+    alignItems: 'center',
+    width: '16%',
+    minWidth: 52,
+    gap: 4,
+  },
+  categoryIconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  categoryLabel: {
+    fontSize: 10,
+    color: colors.dark,
+    textAlign: 'center',
+  },
+  neutralDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.sage,
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.sage,
+    marginVertical: 8,
+  },
+  monthLabelsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  smallLabel: {
+    fontSize: 11,
+    color: colors.muted,
+  },
+  progressTrack: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.sage,
+    marginTop: 6,
+    marginBottom: 8,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.darkest,
+  },
+  progressCaption: {
+    fontSize: 13,
+    color: colors.darkest,
+    fontWeight: '600',
+  },
+  progressCaptionRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+  },
+  insightCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  insightIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  insightBody: {
+    flex: 1,
+    gap: 4,
+  },
+  insightText: {
+    fontSize: 15,
+    color: colors.darkest,
+  },
+  insightTapHint: {
+    fontSize: 12,
+    color: colors.muted,
+  },
+  statRow: {
+    flexDirection: 'row',
+  },
+  statTile: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 2,
+  },
+  statDivider: {
+    width: StyleSheet.hairlineWidth,
+    backgroundColor: colors.sage,
+    marginHorizontal: 4,
+  },
+  statLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: colors.muted,
+    letterSpacing: 0.3,
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  statValue: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: colors.darkest,
+  },
+  statSub: {
+    fontSize: 10,
+    color: colors.dark,
+    textAlign: 'center',
+  },
+  accountsList: {
+    gap: 8,
+    marginTop: 8,
+  },
+  accountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: colors.background,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  accountIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.darkest,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  accountName: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.darkest,
+  },
+  accountBalance: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.darkest,
+    marginRight: 2,
+  },
+  historyChip: {
+    backgroundColor: colors.background,
+    borderRadius: 8,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+  },
+  historyChipText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  netWorthValue: {
+    fontSize: 26,
+    fontWeight: '700',
+    color: colors.darkest,
+    marginTop: 4,
+  },
+  // Per-institution drill-down screen (redesigned 2026-08-24).
+  bankTopBar: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bankHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
+  },
+  bankHeaderText: {
+    flex: 1,
+    gap: 4,
+  },
+  bankName: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.primary,
+    marginBottom: 6,
+  },
+  bankTotal: {
+    fontSize: 26,
+    fontWeight: '700',
+    color: colors.darkest,
+  },
+  bankTotalSuffix: {
+    fontSize: 15,
+    fontWeight: '400',
+    color: colors.dark,
+  },
+  bankLogo: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.background,
+  },
+  bankLogoFallback: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.darkest,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  txSectionHeader: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    marginHorizontal: 16,
+    marginTop: 12,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 6,
+  },
+  txRow: {
+    backgroundColor: colors.card,
+    marginHorizontal: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  txRowLast: {
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
+    paddingBottom: 14,
+  },
+  txTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  txIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  txMain: {
+    flex: 1,
+  },
+  reviewSpacing: {
+    marginTop: 8,
+  },
+  categoryChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  categoryChip: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.sage,
+    backgroundColor: colors.background,
+    borderRadius: 16,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  categoryChipText: {
+    fontSize: 12,
+    color: colors.darkest,
+  },
+  cancelChip: {
+    backgroundColor: colors.background,
+    borderRadius: 16,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  cancelChipText: {
+    fontSize: 12,
+    color: colors.muted,
+    fontWeight: '600',
+  },
+  reviewTextRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  reviewIconCircle: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+  },
+  reviewText: {
+    flex: 1,
+    fontSize: 13,
+    color: colors.dark,
+    lineHeight: 18,
+  },
+});

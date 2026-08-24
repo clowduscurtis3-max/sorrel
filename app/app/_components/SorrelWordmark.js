@@ -27,16 +27,22 @@ import { LeafAvatar } from './Illustrations';
 // rebuild needed, just a Metro reload; falls back to the system default
 // font for the brief moment before it loads rather than blocking on a
 // spinner, since this is decorative branding, not content.
-export default function SorrelWordmark({ leafSize = 64, showTagline = true }) {
+// `layout`: 'column' (default, unchanged - sign-in/lock screen's vertical
+// stack) or 'row' (Home tab's compact horizontal header, leaf beside the
+// wordmark rather than above it) - added rather than duplicating the font-
+// loading hook in a second component.
+export default function SorrelWordmark({ leafSize = 64, showTagline = true, layout = 'column' }) {
   const [fontsLoaded] = useFonts({ Lora_700Bold });
+  const isRow = layout === 'row';
 
   return (
-    <View style={styles.container}>
+    <View style={isRow ? styles.containerRow : styles.container}>
       <LeafAvatar size={leafSize} />
       <Text
         style={[
           styles.wordmark,
           { fontSize: leafSize * 0.72 },
+          isRow && styles.wordmarkRow,
           fontsLoaded && { fontFamily: 'Lora_700Bold' },
         ]}
       >
@@ -53,9 +59,17 @@ const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
   },
+  containerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   wordmark: {
     color: colors.darkest,
     marginTop: 8,
+  },
+  wordmarkRow: {
+    marginTop: 0,
+    marginLeft: 8,
   },
   tagline: {
     marginTop: 8,

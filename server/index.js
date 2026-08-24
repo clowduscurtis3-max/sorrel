@@ -54,6 +54,12 @@ const {
 const { loadScenarioContext } = require('./scenarioContext');
 const { explainScenario, explainComparison } = require('./scenarioExplain');
 const {
+  getBudgetInsight,
+  explainOverspendCategory,
+  proposeCuts,
+  applyCuts,
+} = require('./budgetInsight');
+const {
   parseAffordabilityQuery,
   sanitizeParsedOutput,
   extractCandidateAmounts,
@@ -298,14 +304,24 @@ app.post('/exchange-token', requireUser, async (req, res) => {
     });
     const institutionId = itemMeta?.data?.item?.institution_id || null;
     let institutionName = null;
+    let institutionLogo = null;
     if (institutionId) {
       const inst = await plaidClient
-        .institutionsGetById({ institution_id: institutionId, country_codes: ['US'] })
+        .institutionsGetById({
+          institution_id: institutionId,
+          country_codes: ['US'],
+          options: { include_optional_metadata: true },
+        })
         .catch((err) => {
           logError('Failed to fetch institution name (non-fatal):', err);
           return null;
         });
       institutionName = inst?.data?.institution?.name || null;
+      // Base64 PNG, only present when Plaid has one on file for this
+      // institution (confirmed live: not every institution has one, even
+      // real ones - e.g. this project's own Houndstooth Bank Sandbox item
+      // doesn't) - null here means "show the generic icon," not an error.
+      institutionLogo = inst?.data?.institution?.logo || null;
     }
 
     // Encrypted before it ever reaches Supabase - see server/crypto.js.
@@ -321,6 +337,7 @@ app.post('/exchange-token', requireUser, async (req, res) => {
           status: 'active',
           institution_id: institutionId,
           institution_name: institutionName,
+          institution_logo: institutionLogo,
         },
         { onConflict: 'user_id,item_id' }
       )
@@ -448,7 +465,7 @@ app.get('/plaid-items', requireUser, async (req, res) => {
   try {
     const { data: items, error } = await supabaseAdmin
       .from('plaid_items')
-      .select('id, institution_id, institution_name, status, created_at')
+      .select('id, institution_id, institution_name, institution_logo, status, created_at')
       .eq('user_id', req.userId)
       .order('created_at', { ascending: true });
     if (error) throw error;
@@ -1963,6 +1980,81 @@ app.post('/budget/edit', requireUser, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message || 'Failed to save budget edit' });
+  }
+});
+
+// Budget Insight pill (2026-08-24, Tier 1 of the investigated brief - see
+// CLAUDE.md's own "Sorrel — Budget Insight Pill Investigation" section).
+// Stateless, computed fresh per request, same convention as
+// /budget/alerts and /subscriptions/audit - the pill's own recompute-on-
+// visit is enough, nothing here needs the notification_events dedup model.
+app.get('/budget/insight', requireUser, async (req, res) => {
+  try {
+    const insight = await getBudgetInsight(req.userId);
+    res.json({ insight });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load budget insight' });
+  }
+});
+
+// "Explain what's driving this" - read-only, narrates already-computed
+// per-merchant facts for one category (see budgetInsight.js). Never
+// mutates anything.
+app.post('/budget/insight/explain', requireUser, async (req, res) => {
+  const { category } = req.body || {};
+  if (typeof category !== 'string') {
+    return res.status(400).json({ error: 'category is required' });
+  }
+  try {
+    const result = await explainOverspendCategory(req.userId, category);
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to explain category' });
+  }
+});
+
+// "Show me where I can cut" - a preview only, same as /budget/rebalance-
+// proposal. Nothing is persisted until /budget/insight/apply-cuts below is
+// called with an explicit accept.
+app.post('/budget/insight/propose-cuts', requireUser, async (req, res) => {
+  const { target_amount } = req.body || {};
+  if (typeof target_amount !== 'number' || !Number.isFinite(target_amount) || target_amount <= 0) {
+    return res.status(400).json({ error: 'target_amount must be a positive number' });
+  }
+  try {
+    const proposal = await proposeCuts(req.userId, target_amount);
+    res.json({ proposal });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to propose cuts' });
+  }
+});
+
+// The only insight endpoint that writes anything - persists whichever
+// adjustments from propose-cuts the user explicitly accepted (as-is or
+// edited first). Same post-write refresh as /budget/edit, for the same
+// reason: this changes the exact numbers alerts/notification events are
+// projected from.
+app.post('/budget/insight/apply-cuts', requireUser, async (req, res) => {
+  const { adjustments } = req.body || {};
+  try {
+    const rows = await applyCuts(req.userId, adjustments || []);
+    try {
+      await recomputeOverspendAlerts(req.userId);
+    } catch (err) {
+      logError('Failed to recompute overspend alerts after applying cuts (non-fatal):', err);
+    }
+    try {
+      await recomputeNotificationEvents(req.userId);
+    } catch (err) {
+      logError('Failed to recompute notification events after applying cuts (non-fatal):', err);
+    }
+    res.json({ updated: rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to apply cuts' });
   }
 });
 

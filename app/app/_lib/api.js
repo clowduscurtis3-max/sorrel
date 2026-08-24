@@ -78,6 +78,9 @@ export async function createSessionFromUrl(url) {
 // yet (a 401 before AppDataProvider has ever mounted - e.g. during the
 // very first /goal check right after sign-in - has no push token to
 // unregister anyway, so the fallback is equivalent, not a workaround).
+// Exported (Phase 18/19) so _layout.js's own background-elapsed-time check
+// can reuse this exact wrapped path for its sign-out outcome, instead of
+// a second copy that could drift or bypass the push-token cleanup.
 let registeredSignOut = null;
 export function registerSignOutHandler(handler) {
   registeredSignOut = handler;
@@ -90,7 +93,7 @@ export function registerSignOutHandler(handler) {
 // completion (its own unregister-device apiFetch throwing SESSION_EXPIRED
 // is already caught inside signOut()'s own try/catch as non-fatal).
 let signOutInProgress = false;
-async function forceSignOut() {
+export async function forceSignOut() {
   if (signOutInProgress) return;
   signOutInProgress = true;
   try {

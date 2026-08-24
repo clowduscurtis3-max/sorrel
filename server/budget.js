@@ -601,6 +601,8 @@ module.exports = {
   proposeRebalance,
   applyBudgetEdit,
   currentMonthRange,
+  summarizeSpending,
+  extractJson,
   NoHistoryError,
   HISTORY_DAYS,
 };
