@@ -47,18 +47,30 @@ export const GOAL_TYPES = [
   { value: 'other', label: 'Something else' },
 ];
 
-export async function createSessionFromUrl(url) {
+// Split from the old single-step createSessionFromUrl (still below, for
+// any future direct caller) so sign-in.js can extract Google's tokens
+// without immediately establishing the session - the root layout
+// (_layout.js) redirects away from /sign-in the instant supabase.auth.
+// getSession() would return a real session, so the one-time biometric-
+// enable prompt (sign-in.js) has to be shown *before* setSessionTokens
+// is called, not after, for every sign-in path (Google, username/
+// password, and fresh signup alike).
+export function extractSessionParamsFromUrl(url) {
   const { params, errorCode } = QueryParams.getQueryParams(url);
   if (errorCode) throw new Error(errorCode);
+  if (!params.access_token) return null;
+  return { access_token: params.access_token, refresh_token: params.refresh_token };
+}
 
-  const { access_token, refresh_token } = params;
-  if (!access_token) return;
-
-  const { error } = await supabase.auth.setSession({
-    access_token,
-    refresh_token,
-  });
+export async function setSessionTokens({ access_token, refresh_token }) {
+  const { error } = await supabase.auth.setSession({ access_token, refresh_token });
   if (error) throw error;
+}
+
+export async function createSessionFromUrl(url) {
+  const params = extractSessionParamsFromUrl(url);
+  if (!params) return;
+  await setSessionTokens(params);
 }
 
 // Wraps a backend call with a plain-language error a screen can show:

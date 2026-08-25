@@ -71,6 +71,16 @@ const {
 const { transcribeAudio } = require('./transcribe');
 const { parseFinanceTermMonths, computeEstimatedPayment, getCurrentAutoLoanRate } = require('./financeRate');
 const { runAffordabilityChatTurn } = require('./affordabilityChat');
+const {
+  signup,
+  signinUsername,
+  EmailNotAllowedError,
+  UsernameTakenError,
+  InvalidUsernameError,
+  InvalidPasswordError,
+  InvalidCredentialsError,
+  AccountAlreadyHasUsernameError,
+} = require('./usernameAuth');
 
 // Where we send the system browser once Gmail linking finishes, so the app
 // (watching for this scheme via WebBrowser.openAuthSessionAsync) resolves.
@@ -131,6 +141,56 @@ async function requireUser(req, res, next) {
 }
 
 app.get('/health', (req, res) => res.json({ ok: true }));
+
+// Username/password sign-in, alongside Google - both unauthenticated
+// (there is no session yet at this point, same reasoning as
+// /auth/google/callback below never using requireUser). Real logic lives
+// in usernameAuth.js; this just maps its typed errors onto HTTP status
+// codes. ALLOWED_EMAILS is passed in rather than re-read there, so it
+// stays parsed in exactly one place (right above, for requireUser).
+//
+// NOTE (deferred, tracked deliberately, not an oversight): these routes
+// only check credentials/the allowlist - they don't rate-limit repeated
+// signup/sign-in attempts at the Express layer. Supabase's own
+// signInWithPassword has built-in rate limiting server-side, which
+// covers brute-force protection on sign-in; /auth/signup has no
+// equivalent yet (e.g. someone hammering it to probe which usernames are
+// taken). Low real risk today (a two-person allowlisted app), worth
+// revisiting if this app's user base ever grows.
+app.post('/auth/signup', async (req, res) => {
+  const { username, password, email } = req.body || {};
+  try {
+    const tokens = await signup({ username, password, email, allowedEmails: ALLOWED_EMAILS });
+    res.json(tokens);
+  } catch (err) {
+    if (err instanceof EmailNotAllowedError) return res.status(403).json({ error: err.message });
+    if (
+      err instanceof UsernameTakenError ||
+      err instanceof InvalidUsernameError ||
+      err instanceof InvalidPasswordError ||
+      err instanceof InvalidCredentialsError ||
+      err instanceof AccountAlreadyHasUsernameError
+    ) {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create account' });
+  }
+});
+
+app.post('/auth/signin-username', async (req, res) => {
+  const { username, password } = req.body || {};
+  try {
+    const tokens = await signinUsername({ username, password });
+    res.json(tokens);
+  } catch (err) {
+    if (err instanceof InvalidCredentialsError) {
+      return res.status(401).json({ error: err.message });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Failed to sign in' });
+  }
+});
 
 // Phase 8 Step 1: `relink_item_id` (optional, a plaid_items.id - this
 // app's own uuid, not Plaid's item_id string) switches this into Plaid's

@@ -25,3 +25,29 @@ export async function setBiometricLockEnabled(enabled) {
     console.error(err);
   }
 }
+
+// Username/password sign-in (2026-08-24): whether the one-time "Enable
+// Face ID/Fingerprint?" prompt (shown right after a device's very first
+// successful sign-in, either path) has already been shown - a plain
+// device-local UX flag, same reasoning as the lock-enabled preference
+// above (not security-relevant, so AsyncStorage is the right tool).
+// Defaults to not-yet-shown, unlike the lock preference's default-on -
+// this one really is a one-time opt-in gate, not an opt-out.
+const PROMPT_SHOWN_KEY = 'sorrel_biometric_prompt_shown';
+
+export async function getBiometricPromptShown() {
+  try {
+    return (await AsyncStorage.getItem(PROMPT_SHOWN_KEY)) === 'true';
+  } catch (err) {
+    console.error(err);
+    return false;
+  }
+}
+
+export async function setBiometricPromptShown() {
+  try {
+    await AsyncStorage.setItem(PROMPT_SHOWN_KEY, 'true');
+  } catch (err) {
+    console.error(err);
+  }
+}

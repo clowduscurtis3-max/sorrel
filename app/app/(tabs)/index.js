@@ -17,12 +17,18 @@ import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { createPlaidLinkSession } from 'react-native-plaid-link-sdk';
 import { MaterialIcons } from '@expo/vector-icons';
+import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
 import { apiFetch, apiErrorMessage, formatAmount, CATEGORIES } from '../_lib/api';
 import { styles, colors } from '../_lib/styles';
 import { useAppData } from '../_lib/appData';
 import { useSessionContext } from '../_lib/session';
 import SorrelWordmark from '../_components/SorrelWordmark';
-import { TimeOfDayScene, SeasonalHills } from '../_components/Illustrations';
+import {
+  AtmosphericHomeBackground,
+  TopFadeMask,
+  ATMOSPHERIC_BACKGROUND_HEIGHT,
+  SeasonalHills,
+} from '../_components/Illustrations';
 import NetWorthChart from '../_components/NetWorthChart';
 import PrimaryButton from '../_components/PrimaryButton';
 import { iconForAccount } from '../_lib/accountIcons';
@@ -174,6 +180,18 @@ export default function Home() {
   // inside AppDataProvider's tree, sidesteps that entire bug class - there's
   // no new route for the root gate or a cold app-launch to ever resolve to.
   const [viewingItemId, setViewingItemId] = useState(null);
+
+  // Home background rework (2026-08-24): drives the atmospheric
+  // background's parallax/fade and the top fade mask, both defined in
+  // Illustrations.js. Only the Overview branch's Animated.ScrollView
+  // (below) ever updates this - the drill-down SectionList and the
+  // loading/not-linked states don't scroll the background, so they leave
+  // it at its resting (0) value, which is exactly the "full atmosphere
+  // visible" pose those states should show anyway.
+  const scrollY = useSharedValue(0);
+  const onScroll = useAnimatedScrollHandler((event) => {
+    scrollY.value = event.contentOffset.y;
+  });
 
   const [transactions, setTransactions] = useState([]);
   const [loadingTransactions, setLoadingTransactions] = useState(false);
@@ -479,25 +497,30 @@ export default function Home() {
 
   return (
     <View style={styles.container}>
+      {/* Home background rework (2026-08-24): the sunrise/hills/birds
+          scene is now a persistent absolutely-positioned background layer
+          behind everything below (error banner, loading/not-linked
+          states, and the Overview Animated.ScrollView all render on top
+          of it, transparent-background where relevant) instead of a
+          fixed, non-scrolling header - see Illustrations.js's own
+          AtmosphericHomeBackground comment for the full reasoning. Only
+          the Overview branch's ScrollView ever drives `scrollY`; every
+          other branch leaves it at its resting 0 value, which is exactly
+          the "full atmosphere visible" pose those states should show. */}
       {viewingItemId === null && (
-        <View style={homeStyles.headerBlock}>
-          <View style={homeStyles.headerSceneWrap} pointerEvents="none">
-            <TimeOfDayScene height={168} />
-          </View>
-          <View style={homeStyles.headerContent}>
-            <View style={homeStyles.wordmarkRow}>
-              <SorrelWordmark layout="row" leafSize={30} showTagline={false} />
-              {/* Plain icon, not a Pressable - there's no notification
-                  center built yet (Phase 16, "what changed"), so this is
-                  visual-only for now rather than implying functionality
-                  that doesn't exist. */}
-              <MaterialIcons name="notifications-none" size={26} color={colors.darkest} />
-            </View>
-            <Text style={homeStyles.greeting}>{greeting(session)}</Text>
-            <Text style={homeStyles.greetingSubtitle}>
-              Here's your financial snapshot for {monthName}.
-            </Text>
-          </View>
+        <View style={homeStyles.backgroundLayer} pointerEvents="none">
+          <AtmosphericHomeBackground scrollY={scrollY} />
+        </View>
+      )}
+
+      {viewingItemId === null && (
+        <View style={homeStyles.wordmarkStrip}>
+          <SorrelWordmark layout="row" leafSize={30} showTagline={false} />
+          {/* Plain icon, not a Pressable - there's no notification
+              center built yet (Phase 16, "what changed"), so this is
+              visual-only for now rather than implying functionality
+              that doesn't exist. */}
+          <MaterialIcons name="notifications-none" size={26} color={colors.darkest} />
         </View>
       )}
 
@@ -631,7 +654,32 @@ export default function Home() {
         // per bank + net worth) - a plain ScrollView is correct here, not a
         // SectionList; there is no long transaction feed on this screen
         // anymore for a nested-VirtualizedList concern to even apply to.
-        <ScrollView style={styles.list}>
+        // Animated.ScrollView (react-native-reanimated), transparent
+        // background so AtmosphericHomeBackground shows through behind it
+        // - the first scroll-driven reanimated wiring in this codebase
+        // (NumberScrollWheel.js's own reanimated usage is gesture-driven,
+        // not scroll-driven), see this rework's own plan notes for why
+        // that's a real (if low, given the same library's already proven
+        // stable here) first-of-its-kind risk worth tap-testing carefully.
+        <Animated.ScrollView
+          style={[styles.list, homeStyles.transparentScroll]}
+          onScroll={onScroll}
+          scrollEventThrottle={16}
+        >
+          {/* Greeting moved off the old fixed header block and into the
+              scroll content itself, per the background rework - it now
+              scrolls away naturally with everything else instead of
+              sitting pinned above a hard boundary. Padding-top pushes it
+              down into the calmer part of the scene (below the sun/glow,
+              toward the hills) rather than sitting directly over the
+              busiest part of the artwork. */}
+          <View style={homeStyles.greetingBlock}>
+            <Text style={homeStyles.greeting}>{greeting(session)}</Text>
+            <Text style={homeStyles.greetingSubtitle}>
+              Here's your financial snapshot for {monthName}.
+            </Text>
+          </View>
+
           {/* Financial Health card - Phase 14/15's synthesized headline,
               replacing the old raw goalProgress line + unranked alert list
               (both now folded into this card + the Insight card below, per
@@ -868,8 +916,16 @@ export default function Home() {
               {showNetWorthHistory && <NetWorthChart history={netWorth.history} />}
             </View>
           )}
-        </ScrollView>
+        </Animated.ScrollView>
       )}
+
+      {/* Painted last so it overlays everything above (background,
+          loading/not-linked states, and the scroll content alike) -
+          invisible at rest (scrollY 0), fades in once scrolling begins.
+          See Illustrations.js's own TopFadeMask comment for why this has
+          to be scroll-driven rather than a static overlay. */}
+      {viewingItemId === null && <TopFadeMask scrollY={scrollY} />}
+
       <StatusBar style="auto" />
     </View>
   );
@@ -881,36 +937,55 @@ export default function Home() {
 // lives here, same split sign-in.js's own local StyleSheet already
 // established.
 const homeStyles = StyleSheet.create({
-  headerBlock: {
-    position: 'relative',
-    paddingBottom: 16,
-    minHeight: 168,
-  },
-  // Unpadded and absolutely filling headerBlock, so the sunrise/sunset/
-  // moonlight scene can bleed to the actual screen edges (matching the
-  // reference mockup) - padding lives on headerContent instead, not here.
-  headerSceneWrap: {
+  // Home background rework (2026-08-24): the artwork is now an
+  // absolutely-positioned layer behind everything (doesn't take up flow
+  // space - top/left/right only, no bottom/height, so it shrinks to its
+  // own content's height and simply overlaps whatever flows below it),
+  // instead of the old headerBlock/headerSceneWrap pairing that reserved
+  // real layout space above the ScrollView. See AtmosphericHomeBackground
+  // (Illustrations.js) for the actual scene/parallax/fade logic.
+  backgroundLayer: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    bottom: 0,
   },
-  headerContent: {
-    paddingHorizontal: 24,
-    paddingTop: 4,
-    gap: 4,
-  },
-  wordmarkRow: {
+  // A small, always-visible, non-scrolling strip (transparent background,
+  // so the artwork shows through behind it) - kept minimal (just the
+  // wordmark + notification bell) so branding stays consistent across
+  // every Home state (loading/not-linked/loaded), while the greeting
+  // itself moves into the scroll content below (greetingBlock) rather
+  // than staying pinned here.
+  wordmarkStrip: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingTop: 8,
+    paddingBottom: 8,
+  },
+  // Transparent so Animated.ScrollView doesn't paint over
+  // AtmosphericHomeBackground with its own opaque default background.
+  transparentScroll: {
+    backgroundColor: 'transparent',
+  },
+  // First child of the Overview ScrollView - the greeting now scrolls
+  // away with everything else instead of sitting in a fixed header.
+  // paddingTop is deliberately generous: it pushes the text down past
+  // the sun/glow's busiest area into the calmer part of the scene
+  // (toward the hills), per the "environment should frame the greeting,
+  // not compete with it" brief - a real judgment call, first candidate
+  // to tune after seeing it on-device.
+  greetingBlock: {
+    paddingHorizontal: 24,
+    paddingTop: 100,
+    paddingBottom: 24,
+    gap: 4,
   },
   greeting: {
     fontSize: 20,
     fontWeight: '700',
     color: colors.darkest,
-    marginTop: 12,
   },
   greetingSubtitle: {
     fontSize: 13,
