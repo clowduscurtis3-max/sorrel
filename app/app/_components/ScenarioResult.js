@@ -35,7 +35,13 @@ export function ScenarioResult({ label, result }) {
           user feedback, on-device - showing both read as redundant). The
           bullets are the fallback for when `explanation` is null (the
           call failed), not a permanent second copy of the same facts. */}
-      {result.explanation ? (
+      {/* result.explanation is a plain string wherever this component is
+          actually reached today (compare-buy-now-vs-wait's per-side results
+          and findMaxComfortableAmount's boundary_result never attach one at
+          all) - guarded against the newer three-section object shape
+          (server/scenarioExplain.js) anyway so a future call site can't
+          crash React by handing this an object to render directly. */}
+      {typeof result.explanation === 'string' && result.explanation ? (
         <Text style={styles.text}>{result.explanation}</Text>
       ) : (
         <>

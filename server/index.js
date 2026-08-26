@@ -40,6 +40,7 @@ const { generateNetWorthSnapshot, getNetWorthSummary } = require('./netWorth');
 const { recomputeNotificationEvents } = require('./notificationEvents');
 const { recomputeSubscriptionAuditEvents } = require('./subscriptionAuditEvents');
 const { getEssentialExpenseEstimate } = require('./emergencyFund');
+const { getRoundUpEstimate } = require('./roundUps');
 const { deliverPendingEventsForUser, runNotificationDelivery } = require('./pushDelivery');
 const { registerDevice, unregisterDevice } = require('./notifications');
 const { logError } = require('./safeLog');
@@ -49,6 +50,8 @@ const {
   normalizeScenario,
   findMaxComfortableAmount,
   projectAffordableDate,
+  calculateGoalPace,
+  computeGoalMilestones,
   ScenarioValidationError,
 } = require('./scenario');
 const { loadScenarioContext } = require('./scenarioContext');
@@ -73,8 +76,11 @@ const { parseFinanceTermMonths, computeEstimatedPayment, getCurrentAutoLoanRate 
 const { runAffordabilityChatTurn } = require('./affordabilityChat');
 const {
   signup,
+  linkUsernamePassword,
+  getUsernameStatus,
   signinUsername,
   EmailNotAllowedError,
+  EmailAlreadyRegisteredError,
   UsernameTakenError,
   InvalidUsernameError,
   InvalidPasswordError,
@@ -164,17 +170,56 @@ app.post('/auth/signup', async (req, res) => {
     res.json(tokens);
   } catch (err) {
     if (err instanceof EmailNotAllowedError) return res.status(403).json({ error: err.message });
+    // An account already exists for this email (created via Google Sign-In).
+    // Deliberately NOT auto-linking here anymore - see usernameAuth.js's
+    // signup() comment for the account-takeover this used to allow.
+    if (err instanceof EmailAlreadyRegisteredError) return res.status(409).json({ error: err.message });
     if (
       err instanceof UsernameTakenError ||
       err instanceof InvalidUsernameError ||
       err instanceof InvalidPasswordError ||
-      err instanceof InvalidCredentialsError ||
-      err instanceof AccountAlreadyHasUsernameError
+      err instanceof InvalidCredentialsError
     ) {
       return res.status(400).json({ error: err.message });
     }
     console.error(err);
     res.status(500).json({ error: 'Failed to create account' });
+  }
+});
+
+// Attaches username/password sign-in to the CALLER's own already-
+// authenticated account (req.userId comes from requireUser's verified
+// session token, never from the request body) - the safe replacement for
+// the linking behavior removed from /auth/signup above.
+app.post('/auth/link-username', requireUser, async (req, res) => {
+  const { username, password } = req.body || {};
+  try {
+    await linkUsernamePassword({ userId: req.userId, username, password });
+    res.json({ success: true });
+  } catch (err) {
+    if (
+      err instanceof UsernameTakenError ||
+      err instanceof InvalidUsernameError ||
+      err instanceof InvalidPasswordError ||
+      err instanceof AccountAlreadyHasUsernameError
+    ) {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Failed to set up username and password' });
+  }
+});
+
+// Account tab's own "is username/password already set up" check - same
+// on-focus-fetch pattern as GET /gmail/status, which the same screen
+// already calls.
+app.get('/auth/username-status', requireUser, async (req, res) => {
+  try {
+    const status = await getUsernameStatus(req.userId);
+    res.json(status);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load username status' });
   }
 });
 
@@ -632,6 +677,61 @@ app.get('/goal/progress', requireUser, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load goal progress' });
+  }
+});
+
+// Phase 27 (Goal Calculator, 2026-08-25): "what date would this hypothetical
+// monthly amount reach my goal" - stateless read (a simulation, same
+// read-only discipline as scenarioContext.js's own header), reuses
+// calculateGoalPace (server/scenario.js) rather than a client-side copy of
+// projectFinishDate's formula, so this can never quietly disagree with the
+// Goal Projections card's own deadline-driven math.
+app.post('/goal/calculator', requireUser, async (req, res) => {
+  const { hypothetical_monthly_amount } = req.body || {};
+  if (
+    typeof hypothetical_monthly_amount !== 'number' ||
+    !Number.isFinite(hypothetical_monthly_amount) ||
+    hypothetical_monthly_amount <= 0
+  ) {
+    return res.status(400).json({ error: 'hypothetical_monthly_amount must be a finite number greater than zero' });
+  }
+  try {
+    const context = await loadScenarioContext(req.userId);
+    const result = calculateGoalPace({ context, hypotheticalMonthlyAmount: hypothetical_monthly_amount });
+    res.json({ result });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to calculate' });
+  }
+});
+
+// Phase 28 (Savings Planner v1, 2026-08-25): computed checkpoints (25/50/
+// 75/100% of the real target), each projected via the same realized-pace
+// math projectAffordableDate already uses - stateless read, no new schema
+// (see the phase brief's own resolved open question on persisted custom
+// milestones, deferred).
+app.get('/goal/milestones', requireUser, async (req, res) => {
+  try {
+    const context = await loadScenarioContext(req.userId);
+    const result = computeGoalMilestones({ context });
+    res.json({ result });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load milestones' });
+  }
+});
+
+// Phase 31 (Round-Ups v1, 2026-08-25): simulation/tracking only - see
+// roundUps.js's own header for why (no real money-movement capability
+// exists in this app today). Stateless read, real transaction data, this
+// period only.
+app.get('/goal/round-ups', requireUser, async (req, res) => {
+  try {
+    const result = await getRoundUpEstimate(req.userId);
+    res.json({ result });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load round-up estimate' });
   }
 });
 

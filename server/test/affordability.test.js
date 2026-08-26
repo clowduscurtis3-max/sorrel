@@ -7,6 +7,8 @@ const {
   evaluateScenario,
   findMaxComfortableAmount,
   projectAffordableDate,
+  calculateGoalPace,
+  computeGoalMilestones,
   ScenarioValidationError,
 } = require('../scenario');
 const { computeBudgetStatus } = require('../budget');
@@ -419,4 +421,161 @@ test('projectAffordableDate: an astronomically distant target has no realistic p
   const result = projectAffordableDate({ context, targetAmount: 1e9 });
   assert.equal(result.available, false);
   assert.equal(result.reason, 'no_projectable_date');
+});
+
+// ---------------------------------------------------------------------------
+// calculateGoalPace (Phase 27, Goal Calculator - 2026-08-25)
+//
+// The complementary direction to projectAffordableDate above: that projects
+// from the REALIZED pace toward a hypothetical target; this projects from a
+// HYPOTHETICAL pace toward the real, already-set target. No "not enough
+// history" guard applies here (see the function's own comment) since a
+// pace the user just typed in has no history to distrust in the first
+// place - these tests exist to pin that difference down explicitly, not
+// just re-run projectAffordableDate's own cases.
+// ---------------------------------------------------------------------------
+
+test('calculateGoalPace: rejects a non-positive or non-numeric hypothetical amount', () => {
+  const context = goalContext();
+  for (const bad of [0, -50, NaN, Infinity, '100', null, undefined]) {
+    assert.throws(
+      () => calculateGoalPace({ context, hypotheticalMonthlyAmount: bad }),
+      ScenarioValidationError
+    );
+  }
+});
+
+test('calculateGoalPace: no goal (or no target_amount) set is unavailable, not a guessed target', () => {
+  for (const goal of [null, { goal_type: 'general', target_amount: null }]) {
+    const context = goalContext({ goal, netSavedSinceGoal: 1200 });
+    const result = calculateGoalPace({ context, hypotheticalMonthlyAmount: 200 });
+    assert.equal(result.available, false);
+    assert.equal(result.reason, 'no_target');
+  }
+});
+
+test('calculateGoalPace: target already met by what has been saved, regardless of the hypothetical pace', () => {
+  const context = goalContext({ netSavedSinceGoal: 10000 }); // goalContext's own target_amount is 10000
+  const result = calculateGoalPace({ context, hypotheticalMonthlyAmount: 1 });
+  assert.equal(result.available, true);
+  assert.equal(result.status, 'already_reached');
+});
+
+test('calculateGoalPace: projects a real date from the hypothetical pace, matching projectFinishDate exactly, not the realized pace', () => {
+  // goalContext's target_amount is 10000. $1,200 saved, a hypothetical
+  // $500/month -> (10000-1200)/500 = 17.6 months of runway from now -
+  // deliberately a different number than the realized pace elsewhere in
+  // this file would produce, to confirm this is really using the
+  // hypothetical, not silently falling back to history.
+  const context = goalContext({ netSavedSinceGoal: 1200 });
+  const result = calculateGoalPace({ context, hypotheticalMonthlyAmount: 500 });
+  assert.equal(result.available, true);
+  assert.equal(result.status, 'projected');
+  assert.equal(result.hypothetical_monthly_amount, 500);
+  assert.match(result.projected_date, /^\d{4}-\d{2}-\d{2}$/);
+  assert.ok(result.days_from_now > 0);
+
+  const { projectFinishDate } = require('../goalProgress');
+  const expected = projectFinishDate({ saved: 1200, target: 10000, monthlyPace: 500, now: NOW });
+  assert.equal(result.projected_date, expected.toISOString().slice(0, 10));
+});
+
+test('calculateGoalPace: does NOT require any elapsed history, unlike projectAffordableDate - a hypothetical pace typed in today is still projectable today', () => {
+  const context = goalContext({
+    goalCreatedAt: NOW, // goal set today - projectAffordableDate would refuse this
+    netSavedSinceGoal: 0,
+  });
+  const result = calculateGoalPace({ context, hypotheticalMonthlyAmount: 300 });
+  assert.equal(result.available, true);
+  assert.equal(result.status, 'projected');
+});
+
+test('calculateGoalPace: an absurdly tiny hypothetical pace against a huge target has no realistic projected date', () => {
+  const context = goalContext({ goal: { goal_type: 'savings', target_amount: 1e9 }, netSavedSinceGoal: 0 });
+  const result = calculateGoalPace({ context, hypotheticalMonthlyAmount: 0.001 });
+  assert.equal(result.available, false);
+  assert.equal(result.reason, 'no_projectable_date');
+});
+
+// ---------------------------------------------------------------------------
+// computeGoalMilestones (Phase 28, Savings Planner v1 - 2026-08-25)
+//
+// Every checkpoint is exactly projectAffordableDate called at a fraction of
+// the real target - these tests confirm that composition holds exactly
+// (not just "produces something"), and pin down the one genuinely new edge
+// case this adds: a fractional checkpoint rounding to zero for a tiny
+// target, which projectAffordableDate's own ScenarioValidationError guard
+// would otherwise throw on.
+// ---------------------------------------------------------------------------
+
+test('computeGoalMilestones: no goal (or no target_amount) set is unavailable, not a guessed checkpoint list', () => {
+  for (const goal of [null, { goal_type: 'general', target_amount: null }]) {
+    const context = goalContext({ goal, netSavedSinceGoal: 1200 });
+    const result = computeGoalMilestones({ context });
+    assert.equal(result.available, false);
+    assert.equal(result.reason, 'no_target');
+  }
+});
+
+test('computeGoalMilestones: four checkpoints at exactly 25/50/75/100% of the real target', () => {
+  const context = goalContext({ netSavedSinceGoal: 1200 }); // target_amount 10000
+  const result = computeGoalMilestones({ context });
+  assert.equal(result.available, true);
+  assert.equal(result.target_amount, 10000);
+  assert.deepEqual(
+    result.milestones.map((m) => m.percent),
+    [25, 50, 75, 100]
+  );
+  assert.deepEqual(
+    result.milestones.map((m) => m.amount),
+    [2500, 5000, 7500, 10000]
+  );
+});
+
+test('computeGoalMilestones: each checkpoint matches a direct projectAffordableDate call at that same fractional amount', () => {
+  const context = goalContext({ netSavedSinceGoal: 1200 });
+  const result = computeGoalMilestones({ context });
+  for (const milestone of result.milestones) {
+    const direct = projectAffordableDate({ context, targetAmount: milestone.amount });
+    assert.deepEqual(
+      { available: milestone.available, status: milestone.status, projected_date: milestone.projected_date },
+      { available: direct.available, status: direct.status, projected_date: direct.projected_date }
+    );
+  }
+});
+
+test('computeGoalMilestones: the 100% checkpoint is identical in shape to projecting the real target directly', () => {
+  const context = goalContext({ netSavedSinceGoal: 1200 });
+  const result = computeGoalMilestones({ context });
+  const fullTarget = result.milestones.find((m) => m.percent === 100);
+  const direct = projectAffordableDate({ context, targetAmount: 10000 });
+  assert.equal(fullTarget.amount, 10000);
+  assert.equal(fullTarget.available, direct.available);
+  assert.equal(fullTarget.projected_date, direct.projected_date);
+});
+
+test('computeGoalMilestones: checkpoints already covered by what has been saved report already_affordable individually', () => {
+  // target 10000, saved 6000 -> 25% ($2,500) and 50% ($5,000) are already
+  // met; 75% ($7,500) and 100% ($10,000) are not.
+  const context = goalContext({ netSavedSinceGoal: 6000 });
+  const result = computeGoalMilestones({ context });
+  const byPercent = Object.fromEntries(result.milestones.map((m) => [m.percent, m]));
+  assert.equal(byPercent[25].status, 'already_affordable');
+  assert.equal(byPercent[50].status, 'already_affordable');
+  assert.notEqual(byPercent[75].status, 'already_affordable');
+  assert.notEqual(byPercent[100].status, 'already_affordable');
+});
+
+test('computeGoalMilestones: a fractional checkpoint rounding to zero for a tiny target is reported explicitly, never thrown', () => {
+  const context = goalContext({
+    goal: { goal_type: 'savings', target_amount: 0.01 },
+    netSavedSinceGoal: 0,
+  });
+  assert.doesNotThrow(() => computeGoalMilestones({ context }));
+  const result = computeGoalMilestones({ context });
+  assert.equal(result.available, true);
+  const tiny = result.milestones.find((m) => m.percent === 25);
+  assert.equal(tiny.amount, 0);
+  assert.equal(tiny.available, false);
+  assert.equal(tiny.reason, 'target_too_small');
 });

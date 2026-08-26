@@ -32,6 +32,35 @@ function projectFinishDate({ saved, target, monthlyPace, now }) {
   return new Date(now.getTime() + monthsRemaining * AVG_DAYS_PER_MONTH * 86400000);
 }
 
+// Pure: the deadline-driven "what pace do I actually need" figure - a
+// different question from projectFinishDate above (which extrapolates the
+// *realized* pace forward). Only meaningful when the user picked a
+// target_timeframe_months (GoalForm.js's own optional field) - with no
+// deadline there's no honest "per month" figure to give, so this returns
+// null rather than inventing one. Deliberately independent of
+// daysElapsed/MIN_DAYS_FOR_PROJECTION - unlike the realized-pace
+// projection, a deadline-driven target is knowable from day one (a brand
+// new goal with $0 saved still has a real "$X/month needed" answer).
+function computeGoalProjections({ saved, target, targetTimeframeMonths, goalCreatedAt, now }) {
+  if (!targetTimeframeMonths) return null;
+  const deadline = new Date(
+    goalCreatedAt.getTime() + targetTimeframeMonths * AVG_DAYS_PER_MONTH * 86400000
+  );
+  const monthsRemaining = Math.max(0, monthsBetween(now, deadline));
+  const remaining = Math.max(0, round2(target - saved));
+  const deadlinePassed = monthsRemaining <= 0 && remaining > 0;
+  return {
+    target_date: deadline.toISOString().slice(0, 10),
+    months_remaining: monthsRemaining,
+    // Undivided remaining amount once the deadline itself has passed (or
+    // is this month) - a "per month" figure stops meaning anything at
+    // that point, same reasoning projectFinishDate's own null-when-no-
+    // pace return already applies to a different edge case.
+    monthly_savings_needed: deadlinePassed || monthsRemaining < 1 ? remaining : round2(remaining / monthsRemaining),
+    deadline_passed: deadlinePassed,
+  };
+}
+
 // Pure, no I/O - takes the goal row and the net amount saved (income minus
 // spend) since the goal was set, returns a progress summary. Isolated/
 // testable per the same discipline as computeOverspendAlerts in alerts.js.
@@ -72,6 +101,13 @@ function computeGoalProgress({ goal, netSaved, goalCreatedAt, now = new Date() }
     saved_amount: saved,
     target_amount: target,
     percent_complete: percent,
+    projections: computeGoalProjections({
+      saved,
+      target,
+      targetTimeframeMonths: goal.target_timeframe_months,
+      goalCreatedAt,
+      now,
+    }),
   };
 
   if (saved >= target) {
@@ -176,6 +212,7 @@ async function getGoalProgress(userId) {
 
 module.exports = {
   computeGoalProgress,
+  computeGoalProjections,
   getGoalProgress,
   computeNetSaved,
   projectFinishDate,

@@ -18,6 +18,7 @@ const supabaseAdmin = require('./supabaseAdmin');
 const supabaseAnon = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
 class EmailNotAllowedError extends Error {}
+class EmailAlreadyRegisteredError extends Error {}
 class UsernameTakenError extends Error {}
 class InvalidUsernameError extends Error {}
 class InvalidPasswordError extends Error {}
@@ -34,6 +35,25 @@ function normalizeUsername(username) {
 
 function normalizeEmail(email) {
   return (email || '').trim().toLowerCase();
+}
+
+// Shared by signup (brand-new account) and linkUsernamePassword (attaching
+// to an already-authenticated user's own account) - one place enforcing
+// the username/password rules so the two paths can't quietly drift apart.
+function validateNewUsername(username) {
+  const normalized = normalizeUsername(username);
+  if (!USERNAME_PATTERN.test(normalized)) {
+    throw new InvalidUsernameError(
+      'Username must be 3-20 characters, using only letters, numbers, and underscores.'
+    );
+  }
+  return normalized;
+}
+
+function validateNewPassword(password) {
+  if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
+    throw new InvalidPasswordError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+  }
 }
 
 // USERNAME_PATTERN explicitly allows underscores, but ilike treats both
@@ -66,18 +86,18 @@ async function findProfileById(userId) {
   return data;
 }
 
-// The admin API's listUsers has no email filter (confirmed against the
-// installed @supabase/auth-js source - only page/perPage pagination
-// exists), so finding an existing user by email means listing and
-// searching. Fine at this app's real scale (ALLOWED_EMAILS has 2 entries
-// today) - perPage comfortably covers the whole user base in one page.
-// Revisit with real pagination if ALLOWED_EMAILS ever grows enough for
-// that assumption to stop holding.
-async function findAuthUserByEmail(email) {
-  const { data, error } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
+// For the Account tab's own display - a separate query from
+// findProfileById (which only ever needs an existence check) so that
+// function's minimal select stays exactly what its security-sensitive
+// callers above rely on, untouched by this display-only need.
+async function getUsernameStatus(userId) {
+  const { data, error } = await supabaseAdmin
+    .from('profiles')
+    .select('username')
+    .eq('id', userId)
+    .maybeSingle();
   if (error) throw error;
-  const lower = email.toLowerCase();
-  return data.users.find((u) => (u.email || '').toLowerCase() === lower) || null;
+  return { has_username: !!data, username: data?.username ?? null };
 }
 
 // The one call that actually turns a validated (email, password) pair
@@ -98,6 +118,21 @@ async function signInWithEmail(email, password) {
 // allowedEmails: the same fail-closed ALLOWED_EMAILS Set server/index.js
 // already builds at startup for requireUser - passed in rather than
 // re-read here, so there is exactly one place that env var is parsed.
+//
+// SECURITY FIX (2026-08-25, found by /code-review): this function used to
+// also handle "email already has a Google-created auth user" by attaching
+// the request's typed password to that *existing* account and signing the
+// caller in - with no proof whatsoever that the caller actually controls
+// that email/Google account. Since this whole route is unauthenticated
+// (there's no session yet at signup) and ALLOWED_EMAILS is a small, knowable
+// set, anyone who simply knew an allowlisted address could take over that
+// person's real account and financial data. This function now ONLY ever
+// creates a brand-new auth user - if the email already has an account,
+// createUser's own 'email_exists' response is surfaced as a clear,
+// actionable error (EmailAlreadyRegisteredError) instead of silently
+// linking. Attaching username/password to an *already-authenticated* user's
+// own account is now linkUsernamePassword below, which trusts req.userId
+// from a verified session (requireUser) - never a client-supplied email.
 async function signup({ username, password, email, allowedEmails }) {
   const normalizedEmail = normalizeEmail(email);
   if (!EMAIL_PATTERN.test(normalizedEmail)) {
@@ -107,16 +142,8 @@ async function signup({ username, password, email, allowedEmails }) {
     throw new EmailNotAllowedError('This email is not authorized to use this app.');
   }
 
-  const normalizedUsername = normalizeUsername(username);
-  if (!USERNAME_PATTERN.test(normalizedUsername)) {
-    throw new InvalidUsernameError(
-      'Username must be 3-20 characters, using only letters, numbers, and underscores.'
-    );
-  }
-
-  if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
-    throw new InvalidPasswordError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
-  }
+  const normalizedUsername = validateNewUsername(username);
+  validateNewPassword(password);
 
   const existingProfile = await findProfileByUsername(normalizedUsername);
   if (existingProfile) throw new UsernameTakenError('That username is already taken.');
@@ -125,67 +152,35 @@ async function signup({ username, password, email, allowedEmails }) {
   // - this app has no email-sending capability today (Gmail integration
   // only reads receipts), and the ALLOWED_EMAILS check just above is
   // already the real gate on who gets an account at all.
-  let userId;
-  let justCreatedNewAuthUser = false;
   const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
     email: normalizedEmail,
     password,
     email_confirm: true,
   });
 
-  if (!createError) {
-    userId = created.user.id;
-    justCreatedNewAuthUser = true;
-  } else if (createError.code === 'email_exists') {
-    // The real, expected case for this app: the user already has an
-    // account created via Google Sign-In under this email, and is now
-    // adding username/password as a *second* way into that same
-    // account - not creating a competing one. Attach a password to the
-    // existing auth user instead of failing outright. This is the one
-    // branch of this function that must NEVER reach the orphaned-user
-    // cleanup below (see the flag) - that user's account, and all its
-    // real financial data, already existed before this request.
-    const existingUser = await findAuthUserByEmail(normalizedEmail);
-    if (!existingUser) throw createError; // genuinely unexpected - surface the original error
-
-    // Real bug caught during verification, worth the comment: this check
-    // must run BEFORE updateUserById below, not after. An earlier version
-    // updated the password first and only checked for an existing profile
-    // afterward - so a mistaken "create account" attempt on an account
-    // that already has a username silently overwrote the real password
-    // with whatever was just typed, even though the request was then
-    // rejected as an error. The user would have no idea their real
-    // password had just changed.
-    const existingProfileForUser = await findProfileById(existingUser.id);
-    if (existingProfileForUser) {
-      throw new AccountAlreadyHasUsernameError('This account already has a username set up.');
+  if (createError) {
+    if (createError.code === 'email_exists') {
+      throw new EmailAlreadyRegisteredError(
+        'An account already exists for this email. Sign in with Google, then add a username and password from Account settings.'
+      );
     }
-
-    const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(existingUser.id, {
-      password,
-    });
-    if (updateError) throw updateError;
-    userId = existingUser.id;
-  } else {
     throw createError;
   }
+
+  const userId = created.user.id;
 
   const { error: profileError } = await supabaseAdmin
     .from('profiles')
     .insert({ id: userId, username: normalizedUsername });
   if (profileError) {
-    // Only ever clean up an auth user THIS request just created - never
-    // the existing-account-linking branch above. Deleting an existing
-    // user here (e.g. on a uniqueness race) would destroy a real
-    // account and all its financial data, not just undo this request.
-    if (justCreatedNewAuthUser) {
-      await supabaseAdmin.auth.admin.deleteUser(userId).catch((cleanupErr) => {
-        console.error(
-          'Failed to clean up orphaned auth user after a failed profile insert:',
-          cleanupErr
-        );
-      });
-    }
+    // This request just created this auth user, so cleaning it up on a
+    // failed profile insert can never touch a pre-existing account.
+    await supabaseAdmin.auth.admin.deleteUser(userId).catch((cleanupErr) => {
+      console.error(
+        'Failed to clean up orphaned auth user after a failed profile insert:',
+        cleanupErr
+      );
+    });
     if (profileError.code === '23505') {
       throw new UsernameTakenError('That username is already taken.');
     }
@@ -193,6 +188,46 @@ async function signup({ username, password, email, allowedEmails }) {
   }
 
   return signInWithEmail(normalizedEmail, password);
+}
+
+// Attaches username/password sign-in to the CALLER's own account - the
+// authenticated replacement for the linking behavior removed from signup()
+// above. userId comes from requireUser (a verified Supabase session token),
+// never from client-supplied input, so there is no way to target any
+// account other than the one the caller already proved they control.
+async function linkUsernamePassword({ userId, username, password }) {
+  const normalizedUsername = validateNewUsername(username);
+  validateNewPassword(password);
+
+  const existingUsernameProfile = await findProfileByUsername(normalizedUsername);
+  if (existingUsernameProfile) throw new UsernameTakenError('That username is already taken.');
+
+  // Must run before updateUserById below, not after - same reasoning the
+  // old signup() linking branch already documented: changing the password
+  // first and only then discovering a username already exists would leave
+  // the real password silently changed even though the request errors out.
+  const existingProfileForUser = await findProfileById(userId);
+  if (existingProfileForUser) {
+    throw new AccountAlreadyHasUsernameError('This account already has a username set up.');
+  }
+
+  const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(userId, { password });
+  if (updateError) throw updateError;
+
+  const { error: profileError } = await supabaseAdmin
+    .from('profiles')
+    .insert({ id: userId, username: normalizedUsername });
+  if (profileError) {
+    // Unlike signup()'s cleanup, this userId is a pre-existing account
+    // (the caller's own, already authenticated) - never delete it. The
+    // password change above already happened and can't be cleanly rolled
+    // back through this API; surfacing the error is the honest option
+    // available, not a silent account deletion.
+    if (profileError.code === '23505') {
+      throw new UsernameTakenError('That username is already taken.');
+    }
+    throw profileError;
+  }
 }
 
 async function signinUsername({ username, password }) {
@@ -219,8 +254,11 @@ async function signinUsername({ username, password }) {
 
 module.exports = {
   signup,
+  linkUsernamePassword,
+  getUsernameStatus,
   signinUsername,
   EmailNotAllowedError,
+  EmailAlreadyRegisteredError,
   UsernameTakenError,
   InvalidUsernameError,
   InvalidPasswordError,

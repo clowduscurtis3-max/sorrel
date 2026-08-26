@@ -257,6 +257,16 @@ export default function SignIn() {
         </View>
       )}
 
+      {signedOutReason === 'mfa_check_failed' && (
+        <View style={styles.reassurance}>
+          <MaterialIcons name="verified-user" size={16} color={colors.dark} />
+          <Text style={styles.reassuranceText}>
+            Couldn't confirm your two-factor status, so you were signed out as a precaution. Sign
+            in again to retry.
+          </Text>
+        </View>
+      )}
+
       <StatusBar style="auto" />
     </View>
   );

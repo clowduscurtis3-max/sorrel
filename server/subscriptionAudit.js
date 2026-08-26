@@ -6,6 +6,7 @@ const { INTERVALS, AMOUNT_TOLERANCE_RATIO } = require('./recurring');
 // /code-review: two independent copies of the same "days per month" value
 // risk drifting apart if either is ever tuned without remembering the other.
 const { AVG_DAYS_PER_MONTH } = require('./goalProgress');
+const { getRecurringMonthComparison } = require('./recurringMonthComparison');
 
 const MS_PER_DAY = 86_400_000;
 
@@ -282,6 +283,69 @@ function computeSubscriptionAudit({ series = [], transactionsBySeriesId = new Ma
     gradual_increases,
     price_jumps,
     total_monthly_equivalent: round2(totalMonthlyEquivalent),
+    // Recurring tab "This month at a glance" row (2026-08-25) - computed
+    // from data already gathered above, no new I/O. Additive field, doesn't
+    // change any existing key's meaning.
+    glance: computeRecurringGlance({
+      activeEntries: subscriptions.concat(recurring_bills, other_recurring),
+      gradual_increases,
+      price_jumps,
+      now,
+    }),
+  };
+}
+
+const DUE_SOON_DAYS = 7;
+
+// Real bug-shaped trap avoided on purpose: "potential savings" never claims
+// a subscription is unused (this app has no usage-detection signal at all)
+// - it's the sum of already-detected, already-real price-creep/price-jump
+// amounts (the exact same signal the Home/Goal-tab Advisor Tips reuse),
+// framed honestly as "detected price increases," not a fabricated "you
+// might not need this" claim. Zero findings -> $0/0, not a guessed number.
+function computeRecurringGlance({ activeEntries, gradual_increases, price_jumps, now }) {
+  const nowMs = utcDateOnlyMs(now);
+  const dueSoonCutoffMs = nowMs + DUE_SOON_DAYS * MS_PER_DAY;
+  const monthEndMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0);
+
+  let upcomingCount = 0;
+  let dueSoonTotal = 0;
+  for (const e of activeEntries) {
+    const dueMs = utcDateOnlyMs(e.next_expected_date);
+    if (dueMs < nowMs) continue; // already past due this cycle - not "upcoming"
+    if (dueMs <= monthEndMs) upcomingCount++;
+    if (dueMs <= dueSoonCutoffMs) dueSoonTotal = round2(dueSoonTotal + e.typical_amount);
+  }
+
+  // Real bug found by /code-review (2026-08-25): gradual_increases/
+  // price_jumps carry increase_amount as the raw PER-OCCURRENCE delta
+  // (this file's own detectIntraSeriesCreep comment already warns about
+  // this - "not monthly-normalized... a consumer needs this to avoid
+  // wrongly captioning a quarterly/annual charge's real amount as if it
+  // were 'a month'"), but the UI presents this total as an explicit
+  // monthly figure ("$X per month"). A quarterly $15 increase summed in
+  // raw would overstate real monthly savings by ~3x. Converted the same
+  // way every other monthly-equivalent figure in this file already is,
+  // reusing intervalFor/AVG_DAYS_PER_MONTH rather than a second formula.
+  // An entry whose interval somehow doesn't resolve is skipped rather
+  // than guessed at - matches this file's existing "shouldn't happen, but
+  // never silently miscount" discipline for the identical case elsewhere
+  // in this function.
+  const findings = [...gradual_increases, ...price_jumps];
+  const potentialSavingsTotal = round2(
+    findings.reduce((sum, f) => {
+      const interval = intervalFor(f.interval);
+      if (!interval) return sum;
+      return sum + f.increase_amount * (AVG_DAYS_PER_MONTH / interval.days);
+    }, 0)
+  );
+
+  return {
+    upcoming_count: upcomingCount,
+    due_soon_total: dueSoonTotal,
+    due_soon_days: DUE_SOON_DAYS,
+    potential_savings_total: potentialSavingsTotal,
+    potential_savings_count: findings.length,
   };
 }
 
@@ -328,11 +392,30 @@ async function getSubscriptionAudit(userId, { now } = {}) {
     }
   }
 
-  return computeSubscriptionAudit({
+  const resolvedNow = now || new Date();
+  const audit = computeSubscriptionAudit({
     series: series || [],
     transactionsBySeriesId,
-    now: now || new Date(),
+    now: resolvedNow,
   });
+
+  // Real, separate query (needs its own date-range lookup the audit above
+  // never does) - best-effort/non-fatal, same pattern as every other
+  // secondary post-sync computation in this app: a failure here shouldn't
+  // take down the whole audit response over one extra stat.
+  try {
+    audit.month_comparison = await getRecurringMonthComparison(userId, { now: resolvedNow });
+  } catch (err) {
+    console.error(err);
+    audit.month_comparison = { available: false, reason: 'error' };
+  }
+
+  return audit;
 }
 
-module.exports = { computeSubscriptionAudit, getSubscriptionAudit, PRICE_CREEP_MIN_RATIO };
+module.exports = {
+  computeSubscriptionAudit,
+  getSubscriptionAudit,
+  computeRecurringGlance,
+  PRICE_CREEP_MIN_RATIO,
+};

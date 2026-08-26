@@ -9,7 +9,9 @@ import { supabase } from '../lib/supabase';
 import { apiFetch, forceSignOut } from './_lib/api';
 import { SessionContext } from './_lib/session';
 import BiometricLock from './_components/BiometricLock';
+import MfaChallenge from './_components/MfaChallenge';
 import { getBiometricLockEnabled } from './_lib/biometricPreference';
+import { getAuthenticatorAssuranceLevel } from './_lib/mfa';
 import {
   LOCK_AFTER_BACKGROUND_MS,
   SIGN_OUT_AFTER_BACKGROUND_MS,
@@ -36,6 +38,14 @@ function navigateForNotification(router, data) {
     )
   ) {
     router.push('/recurring');
+  }
+  // Phase 32 (Auto-Save reminder/nudge, 2026-08-25): the reminder itself is
+  // a manual nudge, not an automatic transfer (see notificationEvents.js's
+  // own header) - tapping it takes the user to the Goal tab, where the
+  // Goal Projections card already shows the same figure the notification
+  // body quoted, so there's nothing further to navigate to beyond that.
+  if (data.event_type === 'savings_reminder') {
+    router.push('/goal');
   }
 }
 
@@ -220,6 +230,15 @@ export default function RootLayout() {
       // the previous session's user already resolved.
       backgroundElapsedCheckStartedRef.current = false;
       setBackgroundElapsedCheckDone(false);
+      // Phase 21 (2FA): same reasoning again - aal2, once reached, persists
+      // on the underlying Supabase session/JWT until sign-out, so this
+      // check only ever needs to run once per fresh session, not on every
+      // biometric relock. A later sign-in gets its own fresh determination
+      // rather than silently trusting whatever the previous session's user
+      // resolved.
+      mfaCheckStartedRef.current = false;
+      setMfaRequired(null);
+      setMfaPassed(false);
     }
   }, [session]);
 
@@ -313,6 +332,22 @@ export default function RootLayout() {
     // reset independently of whether a session is actually valid.
     const { data } = await supabase.auth.getSession();
     if (!data.session) return;
+    // Real race found by /code-review (2026-08-25): this function's own
+    // "genuine return" trigger (the warm-resume AppState listener's
+    // debounced call, below) isn't gated by React effects the way the
+    // dedicated biometric-trigger effect is - it fires directly off
+    // AppState changes any time `sessionRef.current` is truthy, which is
+    // true at aal1 too. Without this check, backgrounding the app while
+    // still sitting on MfaChallenge (2FA not yet passed this session) and
+    // returning could pop a native biometric prompt - or even sign out -
+    // on top of/instead of the still-outstanding MFA challenge, the exact
+    // "stacked native prompt" bug class this file has already fought and
+    // fixed twice before for other reasons. There is no completed
+    // authentication yet to apply a re-lock policy to in this state, so
+    // this backgrounding event is a no-op: the stored timestamp is still
+    // consumed above (never leaks into a later, unrelated check), MFA's
+    // own screen is simply left exactly as it was.
+    if (!mfaGateCleared) return;
     const backgroundedAt = parseInt(stored, 10);
     if (!Number.isFinite(backgroundedAt)) return;
     const elapsed = Date.now() - backgroundedAt;
@@ -563,6 +598,64 @@ export default function RootLayout() {
     }
   }
 
+  // Phase 21 (Two-factor authentication, 2026-08-25). Runs once per fresh
+  // session, right after Phase 18/19's own background-elapsed check has
+  // had its chance to decide (same ordering reasoning as biometric below -
+  // a sign-out decision there shouldn't be preceded by a flash of this
+  // screen) and deliberately BEFORE the biometric check, not after: full
+  // account authentication (a second factor, if enrolled) should complete
+  // before a purely local device-unlock convenience gate is even relevant.
+  // Unlike biometric, this does NOT re-run on every foreground/relock -
+  // aal2, once reached, persists on the underlying Supabase session/JWT
+  // until sign-out (Supabase's own refresh-token rotation preserves the
+  // aal claim), so re-checking here on every biometric cycle would either
+  // be redundant or force a genuinely annoying repeated-TOTP-entry UX this
+  // app's biometric gate exists specifically to avoid.
+  //
+  // `mfaRequired`: null = not yet checked, true = this account has a
+  // verified TOTP factor and the CURRENT session hasn't completed that
+  // challenge yet, false = either no factor enrolled or already aal2.
+  // Fails CLOSED on any detection error (matches
+  // checkBackgroundElapsedAndAct's own established pattern in this exact
+  // file) - an undetermined MFA requirement must never silently resolve to
+  // "not required," unlike biometric's own fail-open-to-existing-flow
+  // default, since biometric guards an already-fully-authenticated
+  // session while this gate is what makes that session fully authenticated
+  // in the first place.
+  const [mfaRequired, setMfaRequired] = useState(null);
+  const [mfaPassed, setMfaPassed] = useState(false);
+  const mfaCheckStartedRef = useRef(false);
+
+  async function checkMfaRequirement() {
+    mfaCheckStartedRef.current = true;
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (!data.session) {
+        // Nothing to check against - same fallback shape as
+        // runBiometricCheck's own no-session branch.
+        setMfaRequired(false);
+        setMfaPassed(true);
+        return;
+      }
+      const { currentLevel, nextLevel } = await getAuthenticatorAssuranceLevel();
+      if (currentLevel !== nextLevel) {
+        setMfaRequired(true);
+        setMfaPassed(false);
+      } else {
+        setMfaRequired(false);
+        setMfaPassed(true);
+      }
+    } catch (err) {
+      console.error(err);
+      try {
+        await AsyncStorage.setItem(SIGNED_OUT_REASON_STORAGE_KEY, 'mfa_check_failed');
+      } catch (storageErr) {
+        console.error(storageErr);
+      }
+      await forceSignOut().catch((signOutErr) => console.error(signOutErr));
+    }
+  }
+
   // Phase 4 Step G's push-token unregistration isn't wired here - no
   // route registers a push token yet (that lands with sub-step 1.3's
   // AppDataProvider), so there's nothing to unregister until then.
@@ -596,31 +689,48 @@ export default function RootLayout() {
     }
   }, [ready, target]);
 
-  // Phase 20: trigger the biometric check exactly once, the moment the
-  // sign-in/goal gate is satisfied, there's nothing left to redirect to,
-  // and Phase 18/19's own background-elapsed check has already had its
-  // chance to decide (i.e. the app is about to show the real (tabs) tree).
-  // Re-arms itself after a sign-out via the ref reset in the `[session]`
-  // effect above, so a later sign-in gets its own fresh check rather than
-  // this effect silently no-op'ing forever after the first session.
+  // Phase 21 (2FA): trigger the MFA requirement check exactly once, right
+  // after Phase 18/19's own background-elapsed check has had its chance to
+  // decide - same "don't let a later decision flash in front of an
+  // earlier one" reasoning as every other stage in this chain. Runs BEFORE
+  // biometric's own trigger effect below (see that effect's updated
+  // dependency list). Re-arms itself after a sign-out via the ref reset in
+  // the `[session]` effect above.
   useEffect(() => {
-    if (ready && !target && backgroundElapsedCheckDone && !biometricCheckStartedRef.current) {
-      runBiometricCheck();
+    if (ready && !target && backgroundElapsedCheckDone && !mfaCheckStartedRef.current) {
+      checkMfaRequirement();
     }
   }, [ready, target, backgroundElapsedCheckDone]);
 
-  // Phase 20 also inserts a real gap between `ready` becoming true and
+  const mfaGateCleared = mfaRequired === false || mfaPassed;
+
+  // Phase 20: trigger the biometric check exactly once, the moment the
+  // sign-in/goal gate is satisfied, there's nothing left to redirect to,
+  // Phase 18/19's own background-elapsed check has already had its chance
+  // to decide, AND (Phase 21) any required MFA challenge has already been
+  // passed - a purely local device-unlock convenience gate has no business
+  // running ahead of full account authentication. Re-arms itself after a
+  // sign-out via the ref reset in the `[session]` effect above, so a later
+  // sign-in gets its own fresh check rather than this effect silently
+  // no-op'ing forever after the first session.
+  useEffect(() => {
+    if (ready && !target && backgroundElapsedCheckDone && mfaGateCleared && !biometricCheckStartedRef.current) {
+      runBiometricCheck();
+    }
+  }, [ready, target, backgroundElapsedCheckDone, mfaGateCleared]);
+
+  // Phase 20/21 both insert a real gap between `ready` becoming true and
   // <Slot/> (the (tabs) tree) actually mounting - the Splash-while-
-  // checking-hardware state, and the BiometricLock screen itself, both sit
-  // in between. `tabsReady` is the corrected "is (tabs) actually about to
-  // render" signal - `ready` alone stopped meaning that the moment this
-  // gate was added. Used below in place of `ready` for anything that
-  // assumes the tabs navigator exists (the notification-tap flush), so
-  // that flow doesn't fire router.push against a screen that hasn't
-  // mounted yet.
+  // checking state, the MfaChallenge screen, and the BiometricLock screen
+  // all sit in between, in that order. `tabsReady` is the corrected "is
+  // (tabs) actually about to render" signal - `ready` alone stopped
+  // meaning that the moment the first of these gates was added. Used below
+  // in place of `ready` for anything that assumes the tabs navigator
+  // exists (the notification-tap flush), so that flow doesn't fire
+  // router.push against a screen that hasn't mounted yet.
   const biometricGateCleared = biometricAvailable === false || biometricPassed;
   const tabsReady =
-    ready && !target && backgroundElapsedCheckDone && biometricGateCleared;
+    ready && !target && backgroundElapsedCheckDone && mfaGateCleared && biometricGateCleared;
 
   // Phase 4 Step F, ported to router navigation (sub-step 1.8). The
   // listener below is registered once (`useEffect(..., [])`), so its
@@ -704,24 +814,36 @@ export default function RootLayout() {
   // root as this app has - outside the ready/target Splash-vs-real-content
   // branch below, so gestures would work regardless of which renders -
   // rather than duplicating the wrapper in both return paths.
-  // Phase 20 (extended by Phase 18/19): states past the original sign-in/
-  // goal gate, in order - still checking background-elapsed-time/hardware/
-  // enrollment (Splash, same as any other brief loading state), a real
+  // Phase 20/21 (extended by Phase 18/19): states past the original
+  // sign-in/goal gate, in order - still checking background-elapsed-time/
+  // MFA-requirement/hardware/enrollment (Splash, same as any other brief
+  // loading state), an unverified-this-session TOTP factor (MfaChallenge,
+  // a deliberate stop - never falls through to Slot on its own), a real
   // device-enrolled biometric that hasn't been passed yet this session
-  // (BiometricLock, a deliberate stop - never falls through to Slot on its
-  // own, reused verbatim for a Phase 18 inactivity relock), or clear
-  // (`tabsReady`, computed above) to render the real app.
+  // (BiometricLock, reused verbatim for a Phase 18 inactivity relock), or
+  // clear (`tabsReady`, computed above) to render the real app.
+  const mfaLocked =
+    ready && !target && backgroundElapsedCheckDone && mfaRequired === true && !mfaPassed;
   const biometricLocked =
     ready &&
     !target &&
     backgroundElapsedCheckDone &&
+    mfaGateCleared &&
     biometricAvailable === true &&
     !biometricPassed;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      {!tabsReady && !biometricLocked ? (
+      {!tabsReady && !mfaLocked && !biometricLocked ? (
         <Splash />
+      ) : mfaLocked ? (
+        // forceSignOut, not the local `signOut` above - this screen renders
+        // outside AppDataProvider's tree (before <Slot/> ever mounts), so
+        // the push-token-unregistering wrapped sign-out that context would
+        // normally expose isn't reachable here either way. forceSignOut is
+        // the same single choke point Phase 18/19's own sign-out path
+        // already routes through, for the same reason.
+        <MfaChallenge onVerified={() => setMfaPassed(true)} onSignOut={forceSignOut} />
       ) : biometricLocked ? (
         <BiometricLock onRetry={attemptBiometricAuth} />
       ) : (

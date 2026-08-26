@@ -122,7 +122,10 @@ export function describeProjection(p) {
 // fields (delay_days/stalls_goal/projected_date_after), same discipline as
 // describeComparisonDifference below. Never invents a number that isn't
 // already on goalImpact.
-function describeGoalCallout(goalImpact) {
+// Exported for AffordabilityChat.js's own fallback opening-sections builder
+// (used only when explainScenario failed/returned the old shape - see that
+// file's buildOpeningSections).
+export function describeGoalCallout(goalImpact) {
   if (!goalImpact?.available) return null;
   if (goalImpact.stalls_goal) {
     return "This would stop your goal from advancing at its current pace.";
@@ -147,10 +150,31 @@ function describeGoalCallout(goalImpact) {
 // to this. The full explanation paragraph isn't dropped, just relocated:
 // it becomes the chat's own opening message (see AffordabilityChat.js),
 // not shown twice.
+// Concrete "here's where the money could come from" line, straight off
+// server/scenario.js's buildSuggestions (real unspent budget in other
+// categories this period - never invented here). Added per direct user
+// request (2026-08-25): the old bullet set explained why a purchase was
+// tight but never guided toward what to actually do about it.
+// Exported for AffordabilityChat.js's own fallback opening-sections builder.
+export function describeSuggestion(suggestions) {
+  const s = suggestions?.[0];
+  if (!s) return null;
+  const names = s.categories.map((c) => c.category);
+  const list =
+    names.length === 1
+      ? names[0]
+      : names.length === 2
+      ? `${names[0]} and ${names[1]}`
+      : `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+  return `There's real room in ${list} this period (about $${s.combined_available.toFixed(0)} combined) that could help cover this.`;
+}
+
 function shortResultSummary(result) {
   const bullets = [];
   const topTradeoff = result.tradeoffs?.[0];
   if (topTradeoff) bullets.push(topTradeoff.text);
+  const suggestionLine = describeSuggestion(result.suggestions);
+  if (suggestionLine) bullets.push(suggestionLine);
   const goalLine = describeGoalCallout(result.goal_impact);
   if (goalLine) bullets.push(goalLine);
   const topLimitation = result.limitations?.[0];

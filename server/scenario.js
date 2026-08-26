@@ -1,4 +1,4 @@
-const { SPEND_CATEGORIES } = require('./categorize');
+const { SPEND_CATEGORIES, ESSENTIAL_CATEGORIES } = require('./categorize');
 const { computeOverspendAlerts } = require('./alerts');
 const {
   computeGoalProgress,
@@ -761,6 +761,67 @@ function buildTradeoffs({ normalized, cash, budgetImpact, goalImpact }) {
   return tradeoffs.sort((a, b) => order[a.severity] - order[b.severity]);
 }
 
+// Concrete, real "where could this money come from" guidance - added per
+// direct user request (2026-08-25): tradeoffs above explain WHY a purchase
+// is tight, but never said what to actually do about it. Every category
+// named here comes straight from context.budgetStatus (the same rows
+// GET /budget/status shows) - real unspent budget in OTHER categories this
+// period, not an invented recommendation. Only produced when there's an
+// actual shortfall to close; a purchase that already fits comfortably gets
+// no suggestions, since "here's where you have room" is noise when nothing
+// needs to be freed up.
+function buildSuggestions({ context, normalized, budgetImpact }) {
+  if (!budgetImpact.available) return [];
+
+  const shortfall = budgetImpact.pushes_category_over
+    ? round2(-budgetImpact.category_remaining_after)
+    : budgetImpact.total_remaining_after < 0
+    ? round2(-budgetImpact.total_remaining_after)
+    : 0;
+  if (shortfall <= 0) return [];
+
+  const status = context.budgetStatus || [];
+  // Necessities are never suggested as "room to cut" - a category with
+  // unspent budget left this period (e.g. Groceries) still has to cover
+  // real remaining needs for the rest of the period; being under budget so
+  // far isn't the same as having nothing left to spend it on. Added per
+  // direct user request (2026-08-25): the AI narration layer was framing
+  // essential-category headroom as money available to redirect, which
+  // reads as "stop buying groceries" - never a sensible suggestion.
+  const candidates = status
+    .filter(
+      (s) =>
+        s.category !== normalized.category &&
+        !ESSENTIAL_CATEGORIES.includes(s.category) &&
+        typeof s.remaining === 'number' &&
+        s.remaining > 0
+    )
+    .sort((a, b) => b.remaining - a.remaining);
+
+  // Cap at 3 named categories - "cut back in x, y, and z" is actionable
+  // guidance; naming every category with any leftover budget would read as
+  // a data dump, the exact thing this is meant to replace.
+  const MAX_SUGGESTED_CATEGORIES = 3;
+  const picked = [];
+  let coveredSoFar = 0;
+  for (const c of candidates) {
+    if (picked.length >= MAX_SUGGESTED_CATEGORIES) break;
+    picked.push({ category: c.category, available: c.remaining });
+    coveredSoFar = round2(coveredSoFar + c.remaining);
+  }
+
+  if (picked.length === 0) return [];
+
+  return [
+    {
+      shortfall_amount: shortfall,
+      categories: picked,
+      covers_shortfall: coveredSoFar >= shortfall,
+      combined_available: coveredSoFar,
+    },
+  ];
+}
+
 // What the engine could NOT see. Surfaced rather than swallowed: the Phase 5
 // brief is explicit that missing information gets stated, never papered over
 // with invented certainty.
@@ -818,6 +879,7 @@ function evaluateScenario({ context, scenario }) {
     goal_impact: goalImpact,
     tradeoffs: buildTradeoffs({ normalized, cash, budgetImpact, goalImpact }),
     limitations: buildLimitations({ cash, budgetImpact, goalImpact }),
+    suggestions: buildSuggestions({ context, normalized, budgetImpact }),
   };
 }
 
@@ -1093,6 +1155,128 @@ function projectAffordableDate({ context, targetAmount }) {
   };
 }
 
+// Phase 27 (Goal Calculator, 2026-08-25): the complementary direction to
+// server/goalProgress.js's computeGoalProjections. That answers "what pace
+// do I need to hit my target date" (deadline-driven); this answers "what
+// date would this hypothetical pace reach" (pace-driven) - scoped narrowly
+// to that one direction per the phase brief's own resolved open question,
+// so this doesn't become a second, redundant way to ask the Goal
+// Projections card's own question. Reuses projectFinishDate/
+// toDateOnlyOrNull verbatim (same overflow/expanded-year guards
+// projectAffordableDate above already needs) rather than a third copy of
+// this formula - the hypothetical hasn't been observed, so there is no
+// analogous "not enough history yet" guard here (unlike
+// projectAffordableDate's daysElapsed/MIN_DAYS_FOR_PROJECTION check, which
+// exists to distrust a REALIZED pace built from too little data - a
+// hypothetical the user just typed in has no history to distrust).
+function calculateGoalPace({ context, hypotheticalMonthlyAmount }) {
+  if (
+    typeof hypotheticalMonthlyAmount !== 'number' ||
+    !Number.isFinite(hypotheticalMonthlyAmount) ||
+    hypotheticalMonthlyAmount <= 0
+  ) {
+    throw new ScenarioValidationError('hypotheticalMonthlyAmount must be a finite number greater than zero');
+  }
+  const { goal, netSavedSinceGoal, now } = context;
+
+  if (!goal || typeof goal.target_amount !== 'number' || goal.target_amount <= 0) {
+    return {
+      available: false,
+      reason: 'no_target',
+      detail: 'No target amount is set for the goal, so there is nothing to project toward.',
+    };
+  }
+
+  const target = round2(goal.target_amount);
+  const saved = round2(netSavedSinceGoal);
+
+  if (saved >= target) {
+    return {
+      available: true,
+      status: 'already_reached',
+      target_amount: target,
+      saved_amount: saved,
+      detail: 'This target has already been reached.',
+    };
+  }
+
+  const projectedDate = projectFinishDate({ saved, target, monthlyPace: hypotheticalMonthlyAmount, now });
+  const projectedDateStr = toDateOnlyOrNull(projectedDate);
+
+  if (!projectedDateStr) {
+    return {
+      available: false,
+      reason: 'no_projectable_date',
+      detail: 'This hypothetical amount does not support a realistic projected date.',
+    };
+  }
+
+  return {
+    available: true,
+    status: 'projected',
+    target_amount: target,
+    saved_amount: saved,
+    hypothetical_monthly_amount: round2(hypotheticalMonthlyAmount),
+    projected_date: projectedDateStr,
+    days_from_now: daysBetween(toDateOnly(now), projectedDateStr),
+  };
+}
+
+const MILESTONE_FRACTIONS = [0.25, 0.5, 0.75, 1];
+
+// Phase 28 (Savings Planner v1, 2026-08-25): computed checkpoints, not
+// persisted custom milestones - per the phase brief's own resolved open
+// question, no milestones table (or equivalent) exists anywhere in this
+// schema, and a computed version needs none. Each checkpoint is exactly
+// projectAffordableDate called at a fraction of the real target amount -
+// same realized-pace projection and the exact same guards (insufficient
+// history, no goal, already reached, unprojectable date) as the single-
+// target case above, run four times rather than a second formula. The
+// 100% checkpoint is deliberately identical in shape to what
+// projectAffordableDate({ targetAmount: goal.target_amount }) would return
+// on its own - no special-casing "the last milestone is really the goal
+// itself."
+//
+// Each milestone carries its OWN `available` (did this specific
+// checkpoint's projection succeed) - separate in meaning from this
+// function's own top-level `available` (was there a goal/target at all to
+// compute checkpoints against). A caller reading milestones[i].available
+// is asking a different question than reading the wrapper's.
+function computeGoalMilestones({ context }) {
+  const { goal } = context;
+  if (!goal || typeof goal.target_amount !== 'number' || goal.target_amount <= 0) {
+    return {
+      available: false,
+      reason: 'no_target',
+      detail: 'No target amount is set for the goal, so there are no checkpoints to compute.',
+    };
+  }
+
+  const target = round2(goal.target_amount);
+  const milestones = MILESTONE_FRACTIONS.map((fraction) => {
+    const amount = round2(target * fraction);
+    const percent = Math.round(fraction * 100);
+    // A fractional checkpoint of a very small target can round to zero
+    // (e.g. 25% of a $0.02 target) - projectAffordableDate's own
+    // ScenarioValidationError guard would throw on a non-positive
+    // targetAmount, which is correct for a caller-supplied target but
+    // wrong here (this is an internal computation, not bad user input) -
+    // handled explicitly rather than letting it throw through .map().
+    if (amount <= 0) {
+      return {
+        percent,
+        amount,
+        available: false,
+        reason: 'target_too_small',
+        detail: 'This checkpoint rounds to zero for a target this small.',
+      };
+    }
+    return { percent, amount, ...projectAffordableDate({ context, targetAmount: amount }) };
+  });
+
+  return { available: true, target_amount: target, milestones };
+}
+
 module.exports = {
   evaluateScenario,
   compareScenarios,
@@ -1101,6 +1285,9 @@ module.exports = {
   monthlyEquivalent,
   findMaxComfortableAmount,
   projectAffordableDate,
+  calculateGoalPace,
+  computeGoalMilestones,
+  buildSuggestions,
   ScenarioValidationError,
   MATERIAL_BUDGET_SHARE,
   MATERIAL_GOAL_DELAY_DAYS,

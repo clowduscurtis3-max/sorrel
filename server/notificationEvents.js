@@ -102,6 +102,66 @@ function reconcileGoalMilestoneEvents({ existingEvents, progress, targetSignatur
   return { toInsert };
 }
 
+// Phase 32 (Auto-Save reminder/nudge, 2026-08-25): NOT persisted money
+// movement - this app has no Payment Initiation/Transfer capability today
+// (same real constraint server/roundUps.js's own header documents for
+// Round-Ups). A genuine Auto-Save needs that; this is the smaller,
+// buildable-now alternative that phase's brief names instead - a periodic
+// reminder nudging the user to move real money manually, using the exact
+// real figure the Goal Projections card already shows
+// (goalProgress.projections.monthly_savings_needed - deadline-driven, not
+// guessed here). One reminder per real-world period (like overspend_pace,
+// keyed by period_start), not a one-time milestone (like goal_milestone) -
+// the underlying "money still needs to move this period" condition
+// recurs every period, unlike a percent-complete threshold that's only
+// ever crossed once.
+//
+// Deliberately structured as a real notification_events row (title/body/
+// data), same shape as every other event type here - the `data` payload
+// carries the real suggested_amount specifically so that WHEN this app
+// eventually gains real transfer capability, a future delivery path could
+// act on that same structured data (actually move the money) instead of
+// only notifying about it, without redesigning this reconcile/schedule
+// logic. That's the whole extensibility seam this phase's brief asked
+// for - not a speculative abstraction layer, just a real data field
+// already shaped for the future consumer to read.
+function reconcileSavingsReminderEvents({ existingEvents, goalProgress, targetSignature, periodStart }) {
+  if (!goalProgress?.has_target || !goalProgress.projections) return { toInsert: [] };
+  // Already reached - nothing left to nudge toward this period.
+  if (goalProgress.saved_amount >= goalProgress.target_amount) return { toInsert: [] };
+
+  const amount = goalProgress.projections.monthly_savings_needed;
+  // Non-positive (the deadline has already passed - computeGoalProjections
+  // returns the undivided remainder in that case, still a real number, but
+  // "move $X this period to stay on pace" stops being an honest framing
+  // once there's no "this period" pace left to stay on) or missing
+  // entirely - never queue a reminder built on a number that doesn't mean
+  // what the copy below claims it means.
+  if (!(amount > 0) || goalProgress.projections.deadline_passed) return { toInsert: [] };
+
+  const dedupKey = `savings_reminder:${targetSignature}:${periodStart}`;
+  if (existingEvents.some((e) => e.dedup_key === dedupKey)) return { toInsert: [] };
+
+  return {
+    toInsert: [
+      {
+        event_type: 'savings_reminder',
+        dedup_key: dedupKey,
+        category: null,
+        period_start: periodStart,
+        status: 'pending',
+        title: 'Time to move money toward your goal',
+        body: `Moving about $${amount.toFixed(2)} toward your goal this period would keep it on pace for its target date.`,
+        data: {
+          suggested_amount: amount,
+          target_amount: goalProgress.target_amount,
+          saved_amount: goalProgress.saved_amount,
+        },
+      },
+    ],
+  };
+}
+
 // Reads current alert/goal state, reconciles it against notification_events,
 // and persists the result. Best-effort by design at every call site (same
 // treatment as recomputeBudgetActuals/recomputeOverspendAlerts) - this is
@@ -185,6 +245,36 @@ async function recomputeNotificationEvents(userId) {
       .insert(milestoneInserts.map((e) => ({ user_id: userId, ...e })));
     if (error) throw error;
   }
+
+  // Savings reminder (Phase 32) - reuses the exact same progress/
+  // targetSignature/period_start already fetched above for milestones, no
+  // second DB read for goal state.
+  const { data: existingReminders, error: reminderError } = await supabaseAdmin
+    .from('notification_events')
+    .select('dedup_key')
+    .eq('user_id', userId)
+    .eq('event_type', 'savings_reminder')
+    .eq('period_start', period_start);
+  if (reminderError) throw reminderError;
+
+  const { toInsert: reminderInserts } = reconcileSavingsReminderEvents({
+    existingEvents: existingReminders || [],
+    goalProgress: progress,
+    targetSignature,
+    periodStart: period_start,
+  });
+
+  if (reminderInserts.length > 0) {
+    const { error } = await supabaseAdmin
+      .from('notification_events')
+      .insert(reminderInserts.map((e) => ({ user_id: userId, ...e })));
+    if (error) throw error;
+  }
 }
 
-module.exports = { reconcileOverspendEvents, reconcileGoalMilestoneEvents, recomputeNotificationEvents };
+module.exports = {
+  reconcileOverspendEvents,
+  reconcileGoalMilestoneEvents,
+  reconcileSavingsReminderEvents,
+  recomputeNotificationEvents,
+};

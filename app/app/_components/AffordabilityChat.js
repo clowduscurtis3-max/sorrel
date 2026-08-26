@@ -10,11 +10,12 @@ import {
   KeyboardAvoidingView,
   Keyboard,
   Platform,
+  StyleSheet,
 } from 'react-native';
 import { apiFetch, apiErrorMessage } from '../_lib/api';
 import { styles, colors } from '../_lib/styles';
 import { ScenarioResult } from './ScenarioResult';
-import { describeProjection } from './AffordabilityQuery';
+import { describeProjection, describeSuggestion, describeGoalCallout } from './AffordabilityQuery';
 import PrimaryButton from './PrimaryButton';
 
 // Real bug found by adversarial review (2026-08-22): the five chat tools
@@ -114,30 +115,72 @@ function renderToolResult({ tool, result }) {
 // that has no business being independently resolvable by a cold app
 // launch/deep link.
 //
-// The opening message reuses `anchorResult.explanation` verbatim (the
-// already-generated, already-paid-for Claude paragraph from
-// /affordability/query or /scenarios/compare-buy-now-vs-wait) rather than
-// a fresh call - zero new cost for the first line of this thread.
-// Real gap found by /code-review (2026-08-22): if the original
-// explainScenario call failed (a Claude outage/timeout - a real,
-// already-handled case elsewhere, see ScenarioResult.js's own tradeoffs/
-// limitations fallback for when `explanation` is null), the chat opened
-// completely empty instead of showing the deterministic facts that are
-// always present regardless of that call's outcome - a silent gap this
-// project's own standing rule ("never goes fully silent on a Claude
-// outage") explicitly doesn't allow elsewhere.
-function openingMessage(anchorResult) {
-  if (anchorResult?.explanation) return anchorResult.explanation;
-  const fallback = [anchorResult?.tradeoffs?.[0]?.text, anchorResult?.limitations?.[0]]
+// The opening reuses `anchorResult.explanation` (the already-generated,
+// already-paid-for Claude call from /affordability/query) rather than a
+// fresh call - zero new cost for the first thing this chat shows. Direct
+// user request (2026-08-25): the old single paragraph read as a wall of
+// text once several tradeoffs/caveats stacked up - restructured
+// server-side (see scenarioExplain.js) into three short, separately
+// labeled sections instead: why (reasoning), where money could come from
+// (possible_room), and what Sorrel would actually do (recommended_actions).
+// Real gap found by /code-review (2026-08-22), still true under the new
+// shape: if the original explainScenario call failed (a Claude outage/
+// timeout), the chat must not open completely empty - it falls back to
+// the same deterministic facts (tradeoffs/suggestions/goal_impact/
+// limitations) that are always present in `anchorResult` regardless of
+// that call's outcome, reusing the exact same describeSuggestion/
+// describeGoalCallout helpers the main result card already uses so the
+// fallback phrasing matches what the user already saw there.
+function buildOpeningSections(anchorResult) {
+  const explanation = anchorResult?.explanation;
+  // New shape: { reasoning, possible_room, recommended_actions }, all
+  // non-empty strings (scenarioExplain.js's parseSections never returns a
+  // partial object).
+  if (explanation && typeof explanation === 'object' && explanation.reasoning) {
+    return explanation;
+  }
+
+  const reasoning =
+    // Old plain-string shape (a stale/legacy result) still reads fine as
+    // the "why" section on its own.
+    (typeof explanation === 'string' && explanation) ||
+    anchorResult?.tradeoffs?.[0]?.text ||
+    anchorResult?.limitations?.[0] ||
+    null;
+
+  const possibleRoom =
+    describeSuggestion(anchorResult?.suggestions) ||
+    "There's no obvious room in the budget to free up right now, based on what's already known.";
+
+  const recommendedActions =
+    describeGoalCallout(anchorResult?.goal_impact) ||
+    'Review the numbers above before deciding whether to move ahead.';
+
+  if (!reasoning) return null;
+  return { reasoning, possible_room: possibleRoom, recommended_actions: recommendedActions };
+}
+
+// Plain-text version of the sections, sent as the conversation's first
+// assistant turn so a follow-up like "what did you mean by that" still has
+// real context - anchor_result is already given to the model separately
+// (see server/affordabilityChat.js's systemPrompt), this is purely for
+// natural conversational continuity, not the model's only source of facts.
+function sectionsToPlainText(sections) {
+  if (!sections) return null;
+  return [
+    sections.reasoning,
+    `Possible room: ${sections.possible_room}`,
+    `What Sorrel would do: ${sections.recommended_actions}`,
+  ]
     .filter(Boolean)
-    .join(' ');
-  return fallback || null;
+    .join('\n\n');
 }
 
 export default function AffordabilityChat({ visible, onClose, anchorResult }) {
   const [messages, setMessages] = useState(() => {
-    const opening = openingMessage(anchorResult);
-    return opening ? [{ role: 'assistant', text: opening }] : [];
+    const sections = buildOpeningSections(anchorResult);
+    const text = sectionsToPlainText(sections);
+    return text ? [{ role: 'assistant', text, sections }] : [];
   });
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -201,8 +244,9 @@ export default function AffordabilityChat({ visible, onClose, anchorResult }) {
   }
 
   function startNewConversation() {
-    const opening = openingMessage(anchorResult);
-    setMessages(opening ? [{ role: 'assistant', text: opening }] : []);
+    const sections = buildOpeningSections(anchorResult);
+    const text = sectionsToPlainText(sections);
+    setMessages(text ? [{ role: 'assistant', text, sections }] : []);
     setInput('');
     setError(null);
     setLatestResult(null);
@@ -253,17 +297,43 @@ export default function AffordabilityChat({ visible, onClose, anchorResult }) {
             contentContainerStyle={{ gap: 12, paddingBottom: 16 }}
             onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
           >
-            {messages.map((m, i) =>
-              m.role === 'user' ? (
-                <View key={i} style={styles.chatBubbleUser}>
-                  <Text style={styles.chatBubbleUserText}>{m.text}</Text>
-                </View>
-              ) : (
+            {messages.map((m, i) => {
+              if (m.role === 'user') {
+                return (
+                  <View key={i} style={styles.chatBubbleUser}>
+                    <Text style={styles.chatBubbleUserText}>{m.text}</Text>
+                  </View>
+                );
+              }
+              // The opening message (the only one that ever carries
+              // `sections`) renders as three short, separately-labeled
+              // blocks instead of one paragraph - every later assistant
+              // reply is a real conversational turn and stays a plain
+              // bubble.
+              if (m.sections) {
+                return (
+                  <View key={i} style={[styles.card, chatStyles.sectionsCard]}>
+                    <View style={chatStyles.sectionBlock}>
+                      <Text style={chatStyles.sectionLabel}>WHY</Text>
+                      <Text style={styles.text}>{m.sections.reasoning}</Text>
+                    </View>
+                    <View style={chatStyles.sectionBlock}>
+                      <Text style={chatStyles.sectionLabel}>POSSIBLE ROOM</Text>
+                      <Text style={styles.text}>{m.sections.possible_room}</Text>
+                    </View>
+                    <View style={chatStyles.sectionBlock}>
+                      <Text style={chatStyles.sectionLabel}>SORREL'S RECOMMENDED ACTIONS</Text>
+                      <Text style={styles.text}>{m.sections.recommended_actions}</Text>
+                    </View>
+                  </View>
+                );
+              }
+              return (
                 <View key={i} style={styles.chatBubbleAssistant}>
                   <Text style={styles.chatBubbleAssistantText}>{m.text}</Text>
                 </View>
-              )
-            )}
+              );
+            })}
 
             {/* A tool-triggered what-if surfaces its own real, freshly-computed
                 result inline - renderToolResult (this file's own dispatcher,
@@ -326,3 +396,18 @@ export default function AffordabilityChat({ visible, onClose, anchorResult }) {
     </Modal>
   );
 }
+
+const chatStyles = StyleSheet.create({
+  sectionsCard: {
+    gap: 14,
+  },
+  sectionBlock: {
+    gap: 4,
+  },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    color: colors.dark,
+  },
+});

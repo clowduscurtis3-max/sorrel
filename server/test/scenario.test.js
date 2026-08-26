@@ -9,6 +9,7 @@ const {
   compareBuyNowVsWait,
   normalizeScenario,
   monthlyEquivalent,
+  buildSuggestions,
 } = require('../scenario');
 
 // ---------------------------------------------------------------------------
@@ -480,4 +481,148 @@ test('no user-facing string ever speaks in the first person', () => {
       assert.ok(!/approved|denied|rejected/i.test(s), `verdict-style wording in: ${s}`);
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// Suggestions (2026-08-25) - concrete "where could this money come from"
+// guidance, added per direct user request. Every category named must come
+// straight from context.budgetStatus's real remaining figures - these tests
+// pin the fixture's own numbers (Dining $150 remaining, Groceries $300,
+// Shopping $150 before this scenario's own charge) so a future change to
+// the underlying math can't silently drift without a test noticing.
+// ---------------------------------------------------------------------------
+
+test('suggestions: a purchase that overspends its own category names other categories with real slack, ranked by how much', () => {
+  const context = baseContext();
+  const result = evaluateScenario({ context, scenario: { amount: 2000, category: 'Shopping' } });
+
+  assert.equal(result.budget_impact.pushes_category_over, true);
+  assert.equal(result.suggestions.length, 1);
+  const suggestion = result.suggestions[0];
+
+  // shortfall = charge (2000) - Shopping's own remaining before (150)
+  assert.equal(suggestion.shortfall_amount, 1850);
+  // Never suggests cutting back in the same category as the purchase itself.
+  assert.ok(!suggestion.categories.some((c) => c.category === 'Shopping'));
+  // Never suggests cutting back in a necessity - Groceries has $300 real
+  // slack in this fixture but must never be named, even though it's the
+  // single largest candidate.
+  assert.ok(!suggestion.categories.some((c) => c.category === 'Groceries'));
+  assert.deepEqual(
+    suggestion.categories.map((c) => c.category),
+    ['Dining']
+  );
+  assert.equal(suggestion.categories[0].available, 150);
+  assert.equal(suggestion.combined_available, 150);
+  // $150 of real slack elsewhere doesn't cover an $1,850 shortfall.
+  assert.equal(suggestion.covers_shortfall, false);
+});
+
+test('suggestions: essential categories are never named, even when they have the most real slack', () => {
+  const context = baseContext({
+    budgets: [
+      { category: 'Dining', budgeted_amount: 300, reasoning: null },
+      { category: 'Bills & Utilities', budgeted_amount: 500, reasoning: null },
+      { category: 'Transportation', budgeted_amount: 400, reasoning: null },
+      { category: 'Health & Personal Care', budgeted_amount: 300, reasoning: null },
+      { category: 'Shopping', budgeted_amount: 200, reasoning: null },
+    ],
+    actuals: [
+      { category: 'Dining', actual_amount: 250 },
+      { category: 'Bills & Utilities', actual_amount: 100 },
+      { category: 'Transportation', actual_amount: 50 },
+      { category: 'Health & Personal Care', actual_amount: 20 },
+      { category: 'Shopping', actual_amount: 50 },
+    ],
+  });
+  const result = evaluateScenario({ context, scenario: { amount: 2000, category: 'Shopping' } });
+
+  // Every essential category in this fixture has far more real slack than
+  // Dining ($50), but a purchase can never be "fixed" by suggesting less
+  // Groceries/Bills & Utilities/Transportation/Health & Personal Care.
+  assert.deepEqual(
+    result.suggestions[0].categories.map((c) => c.category),
+    ['Dining']
+  );
+});
+
+test('suggestions: a purchase that already fits comfortably gets no suggestions - nothing to guide toward', () => {
+  const context = baseContext();
+  const result = evaluateScenario({ context, scenario: { amount: 50, category: 'Dining' } });
+
+  assert.equal(result.budget_impact.pushes_category_over, false);
+  assert.deepEqual(result.suggestions, []);
+});
+
+test('suggestions: no budget generated yet produces no suggestions rather than guessing', () => {
+  const context = baseContext({ budgets: [], actuals: [] });
+  const result = evaluateScenario({ context, scenario: { amount: 2000, category: 'Shopping' } });
+
+  assert.equal(result.budget_impact.available, false);
+  assert.deepEqual(result.suggestions, []);
+});
+
+test('suggestions: no other category has real slack produces an empty suggestion list, not a fabricated one', () => {
+  const context = baseContext({
+    budgets: [
+      { category: 'Dining', budgeted_amount: 150, reasoning: null },
+      { category: 'Shopping', budgeted_amount: 200, reasoning: null },
+    ],
+    actuals: [
+      { category: 'Dining', actual_amount: 150 }, // exactly at budget, $0 remaining
+      { category: 'Shopping', actual_amount: 50 },
+    ],
+  });
+  const result = evaluateScenario({ context, scenario: { amount: 2000, category: 'Shopping' } });
+
+  assert.equal(result.budget_impact.pushes_category_over, true);
+  assert.deepEqual(result.suggestions, []);
+});
+
+test('suggestions: caps at 3 named categories even when more have real slack', () => {
+  // Four genuinely non-essential categories with real slack (Groceries is
+  // deliberately excluded from this fixture - it would otherwise pad the
+  // count via a category that can never legally be suggested, masking
+  // whether the cap itself still works once necessities are filtered
+  // out). "Personal Care" (no "Health &" prefix) isn't a real category at
+  // all - computeBudgetStatus silently drops rows that don't match
+  // SPEND_CATEGORIES, so that name never actually produced a candidate;
+  // replaced with a real category so this fixture means what it says.
+  const context = baseContext({
+    budgets: [
+      { category: 'Dining', budgeted_amount: 300, reasoning: null },
+      { category: 'Entertainment', budgeted_amount: 200, reasoning: null },
+      { category: 'Subscriptions', budgeted_amount: 100, reasoning: null },
+      { category: 'Travel', budgeted_amount: 400, reasoning: null },
+      { category: 'Shopping', budgeted_amount: 200, reasoning: null },
+    ],
+    actuals: [
+      { category: 'Dining', actual_amount: 150 },
+      { category: 'Entertainment', actual_amount: 50 },
+      { category: 'Subscriptions', actual_amount: 20 },
+      { category: 'Travel', actual_amount: 100 },
+      { category: 'Shopping', actual_amount: 50 },
+    ],
+  });
+  const result = evaluateScenario({ context, scenario: { amount: 2000, category: 'Shopping' } });
+
+  assert.equal(result.suggestions[0].categories.length, 3);
+  // Ranked by real remaining, descending - Travel (300) and Dining (150)
+  // tie-break aside, the smallest (Subscriptions, 80) is the one left out.
+  assert.ok(!result.suggestions[0].categories.some((c) => c.category === 'Subscriptions'));
+});
+
+test('buildSuggestions is directly exported for isolated use, same shape as via evaluateScenario', () => {
+  const context = baseContext();
+  const budgetImpact = evaluateScenario({
+    context,
+    scenario: { amount: 2000, category: 'Shopping' },
+  }).budget_impact;
+  const suggestions = buildSuggestions({
+    context,
+    normalized: { category: 'Shopping' },
+    budgetImpact,
+  });
+  assert.equal(suggestions.length, 1);
+  assert.equal(suggestions[0].shortfall_amount, 1850);
 });
