@@ -10,7 +10,8 @@ import { LeafAvatar } from './Illustrations';
 // see below for why), and the prompt hasn't yet been passed for this app
 // session (see _layout.js's own Phase 20 comment for the full gating
 // logic). Rebuilt to match the user's own final reference mockup
-// (2026-08-22): wordmark up top, a soft circular biometric badge,
+// (2026-08-22, design-references/biometric-lock-mockup-2026-08-22.png):
+// wordmark up top, a soft circular biometric badge,
 // "Welcome back." + a plain-language subtitle, a prominent "Continue
 // with Fingerprint/Face ID" pill (re-triggers the OS prompt - the prompt
 // itself already auto-fires on load via _layout.js's runBiometricCheck,
