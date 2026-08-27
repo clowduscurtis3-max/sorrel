@@ -33,6 +33,7 @@ const {
   NoHistoryError,
 } = require('./budget');
 const { getBudgetHistory } = require('./budgetHistory');
+const { getHomeChanges } = require('./homeChanges');
 const { detectRecurringTransactions } = require('./recurring');
 const { recomputeOverspendAlerts } = require('./alerts');
 const { getGoalProgress } = require('./goalProgress');
@@ -1360,6 +1361,22 @@ app.get('/budget/history', requireUser, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load budget history' });
+  }
+});
+
+// Phase 16 ("What changed?" since last open): diffs notification_events
+// and net_worth_snapshots against this user's own last-checked-in
+// timestamp, then advances that timestamp to now (see getHomeChanges's own
+// comment for why advancing on every call is correct here - this is only
+// ever hit from AppDataProvider's cold-launch/foreground-resume fetches,
+// never a tight poll).
+app.get('/home/changes', requireUser, async (req, res) => {
+  try {
+    const changes = await getHomeChanges(req.userId);
+    res.json(changes);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load home changes' });
   }
 });
 

@@ -160,6 +160,7 @@ export default function Home() {
     plaidItems,
     netWorth,
     budgetStatus,
+    homeChanges,
     bankRelinkSignal,
   } = useAppData();
   const { session } = useSessionContext();
@@ -785,6 +786,70 @@ export default function Home() {
             <MaterialIcons name="chevron-right" size={22} color={colors.dark} />
           </Pressable>
 
+          {/* "What changed?" card (Phase 16) - only rendered when there's
+              something real to report: has_baseline is false on the very
+              first-ever open (nothing to diff against yet, so nothing is
+              shown rather than dumping the account's whole history), and an
+              empty items/net_worth pair on a later open just means nothing
+              actually changed since last time, which also isn't worth a
+              card. Reuses the same STATUS_ICON/STATUS_COLOR 'warning'/'ok'
+              pairing the category tiles above already use - 'new' items
+              (an issue surfaced) get the warning treatment, 'resolved' gets
+              the positive check, no third icon set invented for this.
+              Shows each item's `title` (short, one line by design - these
+              are the same strings used as push notification titles),
+              `numberOfLines={1}` as a hard backstop. A real duplicate-
+              looking pair was found live (2026-08-27): editing the goal's
+              target/timeframe re-triggers `savings_reminder` under a new
+              dedup signature without retiring the old one, so both a stale
+              and current reminder could show at once, sharing this exact
+              generic title. Fixed at the source, not here -
+              `buildChangeItems` (server/homeChanges.js) now dedupes by
+              (event_type, category), keeping only the most recent of each,
+              so this list can never show the same underlying thing twice
+              regardless of which field is displayed. */}
+          {homeChanges?.has_baseline &&
+            (homeChanges.items.length > 0 || homeChanges.net_worth) && (
+              <View style={[styles.card, homeStyles.cardMargin]}>
+                <Text style={homeStyles.cardEyebrow}>WHAT CHANGED</Text>
+                {homeChanges.net_worth && (
+                  <View style={homeStyles.changeRow}>
+                    <MaterialIcons
+                      name={homeChanges.net_worth.delta >= 0 ? 'trending-up' : 'trending-down'}
+                      size={18}
+                      color={homeChanges.net_worth.delta >= 0 ? colors.positive : colors.error}
+                    />
+                    <Text style={homeStyles.changeText}>
+                      Net worth {homeChanges.net_worth.delta >= 0 ? 'up' : 'down'} $
+                      {Math.abs(homeChanges.net_worth.delta).toLocaleString('en-US', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}{' '}
+                      since your last visit.
+                    </Text>
+                  </View>
+                )}
+                {homeChanges.items.slice(0, 6).map((item, i) => (
+                  <View key={`${item.event_type}-${item.at}-${i}`} style={homeStyles.changeRow}>
+                    <MaterialIcons
+                      name={STATUS_ICON[item.kind === 'resolved' ? 'ok' : 'warning']}
+                      size={18}
+                      color={STATUS_COLOR[item.kind === 'resolved' ? 'ok' : 'warning']}
+                    />
+                    <Text style={homeStyles.changeText} numberOfLines={1}>
+                      {item.kind === 'resolved' ? 'Resolved: ' : ''}
+                      {item.title}
+                    </Text>
+                  </View>
+                ))}
+                {homeChanges.items.length > 6 && (
+                  <Text style={homeStyles.changeMore}>
+                    and {homeChanges.items.length - 6} more
+                  </Text>
+                )}
+              </View>
+            )}
+
           {/* Stat tiles - each already backed by data computed above; a
               restyle/composition over existing numbers, no new math beyond
               simple sums/ratios (see homeSummary.js). */}
@@ -1023,6 +1088,24 @@ const homeStyles = StyleSheet.create({
     fontSize: 13,
     color: colors.muted,
     marginTop: 6,
+  },
+  changeRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 10,
+  },
+  changeText: {
+    flex: 1,
+    fontSize: 13,
+    color: colors.dark,
+    lineHeight: 18,
+  },
+  changeMore: {
+    fontSize: 12,
+    color: colors.muted,
+    marginTop: 8,
+    marginLeft: 26,
   },
   categoryRow: {
     flexDirection: 'row',

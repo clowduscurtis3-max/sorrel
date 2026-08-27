@@ -84,6 +84,15 @@ export function AppDataProvider({ children }) {
   // - current is null until the daily snapshot job has run at least once for
   // this user, never fabricated as $0 in the meantime (see netWorth.js).
   const [netWorth, setNetWorth] = useState(null);
+  // Phase 16 ("What changed?" since last open) - GET /home/changes's own
+  // shape verbatim ({has_baseline, since, items, net_worth}). Advances the
+  // user's own last-checked-in timestamp server-side as a side effect of
+  // this very fetch (see getHomeChanges's own comment in
+  // server/homeChanges.js) - correct here specifically because this fetch
+  // only ever runs from the two effects below (cold launch, foreground
+  // resume), never a tight poll, so every call already represents a real
+  // "user just checked in" moment.
+  const [homeChanges, setHomeChanges] = useState(null);
 
   // Real bug found by adversarial review, 2026-08-13: re-linking a bank
   // account via AccountMenu (a plain sibling <Modal>, not a router route -
@@ -191,6 +200,16 @@ export function AppDataProvider({ children }) {
     }
   }
 
+  async function fetchHomeChanges() {
+    try {
+      const res = await apiFetch('/home/changes');
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      setHomeChanges(await res.json());
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   useEffect(() => {
     if (!session) return;
     fetchAlerts();
@@ -200,6 +219,7 @@ export function AppDataProvider({ children }) {
     fetchPlaidItems();
     fetchNetWorth();
     fetchBudgetStatus();
+    fetchHomeChanges();
     registerDeviceForPushNotifications().then((token) => {
       pushTokenRef.current = token;
     });
@@ -222,6 +242,7 @@ export function AppDataProvider({ children }) {
           fetchPlaidItems();
           fetchNetWorth();
           fetchBudgetStatus();
+          fetchHomeChanges();
         }, 1500);
       }
       appState.current = nextState;
@@ -275,6 +296,7 @@ export function AppDataProvider({ children }) {
         plaidItems,
         netWorth,
         budgetStatus,
+        homeChanges,
         refetchAlerts: fetchAlerts,
         refetchGoalProgress: fetchGoalProgress,
         refetchSubscriptionAudit: fetchSubscriptionAudit,
@@ -282,6 +304,7 @@ export function AppDataProvider({ children }) {
         refetchPlaidItems: fetchPlaidItems,
         refetchNetWorth: fetchNetWorth,
         refetchBudgetStatus: fetchBudgetStatus,
+        refetchHomeChanges: fetchHomeChanges,
         bankRelinkSignal,
         notifyBankRelinked,
         signOut,
