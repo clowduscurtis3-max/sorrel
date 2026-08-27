@@ -209,7 +209,7 @@ export default function Home() {
   // recomputed on every render (cheap arithmetic over small arrays, no
   // memoization needed at this scale). See _lib/homeSummary.js for the
   // actual logic/guardrails.
-  const health = computeFinancialHealth(alerts, goalProgress);
+  const health = computeFinancialHealth(alerts, goalProgress, netWorth?.history);
   const categoryTiles = computeCategoryStatuses(budgetStatus, alerts);
   const monthProgress = budgetStatus
     ? computeMonthProgress(budgetStatus.period_start, budgetStatus.period_end)
@@ -705,6 +705,8 @@ export default function Home() {
               </View>
             </View>
 
+            <Text style={homeStyles.healthReason}>{health.reason}</Text>
+
             <View style={homeStyles.categoryRow}>
               {categoryTiles.map((tile) => (
                 <View key={tile.category} style={homeStyles.categoryTile}>
@@ -1016,6 +1018,11 @@ const homeStyles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: colors.background,
+  },
+  healthReason: {
+    fontSize: 13,
+    color: colors.muted,
+    marginTop: 6,
   },
   categoryRow: {
     flexDirection: 'row',

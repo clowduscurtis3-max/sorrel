@@ -92,21 +92,83 @@ const HEALTH_BUCKETS = {
   under_pressure: { label: 'Under pressure', color: 'error' },
 };
 
+// How far back to look for a net-worth comparison point (Phase 15). 30
+// days reads as "since about a month ago," matching this card's own
+// monthly framing. Uses the closest snapshot at or before that date
+// rather than requiring an exact match, since snapshots are only taken
+// once per calendar day and won't land on a fixed 30-day cadence.
+const NET_WORTH_TREND_LOOKBACK_DAYS = 30;
+
+// Direction only ('rising'/'declining'/'flat'), never a magnitude - there's
+// no established "how much of a drop matters" threshold anywhere else in
+// this app to borrow, and inventing one would be exactly the fabricated
+// precision this project's guardrails forbid. Returns null when there
+// isn't a real comparison point yet (new account, gap in snapshot
+// history) rather than guessing a direction from insufficient data.
+function netWorthTrend(netWorthHistory) {
+  const history = netWorthHistory || [];
+  if (history.length < 2) return null;
+  const current = history[history.length - 1];
+  const cutoff = new Date(`${current.snapshot_date}T00:00:00Z`);
+  cutoff.setUTCDate(cutoff.getUTCDate() - NET_WORTH_TREND_LOOKBACK_DAYS);
+
+  let baseline = null;
+  for (const snap of history) {
+    if (new Date(`${snap.snapshot_date}T00:00:00Z`) <= cutoff) baseline = snap;
+  }
+  if (!baseline || baseline.snapshot_date === current.snapshot_date) return null;
+
+  if (current.net_worth > baseline.net_worth) return 'rising';
+  if (current.net_worth < baseline.net_worth) return 'declining';
+  return 'flat';
+}
+
+// One plain-language sentence explaining the bucket above - mirrors the
+// same signal priority the bucket decision itself uses, so the reason
+// never cites a signal that wasn't actually why this bucket was chosen.
+// Reuses goalProgress.message verbatim for the off-pace case (existing
+// template string, per this phase's "no new AI-generated phrasing"
+// guardrail); the net-worth sentence is new because no existing string
+// anywhere in the app describes this signal yet.
+function healthReason(bucket, { severeCount, warnCount, offPace, trend, goalProgress }) {
+  if (bucket === 'under_pressure') {
+    if (severeCount >= 1) {
+      return severeCount === 1
+        ? 'One category is significantly over its budgeted pace this month.'
+        : `${severeCount} categories are significantly over their budgeted pace this month.`;
+    }
+    return `${warnCount} categories are trending over budget this month.`;
+  }
+  if (bucket === 'needs_attention') {
+    if (warnCount >= 1) {
+      return warnCount === 1
+        ? 'One category is trending over its budget this month.'
+        : `${warnCount} categories are trending over budget this month.`;
+    }
+    if (offPace) return goalProgress.message;
+    if (trend === 'declining') return 'Your net worth has dipped over the past month.';
+  }
+  return 'Spending, goal pace, and net worth are all in good shape this month.';
+}
+
 // Qualitative bucket only, per Phase 15's own non-negotiable guardrail -
 // never a numeric score. There is no natural 0-100 anywhere in this app's
 // real data; inventing one would be exactly the fabricated precision this
 // project's "never guess a financial fact" rule forbids elsewhere.
-export function computeFinancialHealth(alerts, goalProgress) {
+export function computeFinancialHealth(alerts, goalProgress, netWorthHistory) {
   const severeCount = (alerts || []).filter((a) => alertSeverity(a) === 'severe').length;
   const warnCount = (alerts || []).length;
   const offPace = goalProgress?.has_target && goalProgress.on_pace === false;
+  const trend = netWorthTrend(netWorthHistory);
+  const decliningNetWorth = trend === 'declining';
 
   let bucket;
   if (severeCount >= 1 || warnCount >= 3) bucket = 'under_pressure';
-  else if (warnCount >= 1 || offPace) bucket = 'needs_attention';
+  else if (warnCount >= 1 || offPace || decliningNetWorth) bucket = 'needs_attention';
   else bucket = 'on_track';
 
-  return { bucket, ...HEALTH_BUCKETS[bucket] };
+  const reason = healthReason(bucket, { severeCount, warnCount, offPace, trend, goalProgress });
+  return { bucket, ...HEALTH_BUCKETS[bucket], reason };
 }
 
 // The 1-2 things worth surfacing right now, per Phase 14's own selector
