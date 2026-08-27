@@ -20,6 +20,28 @@ import {
   SIGNED_OUT_REASON_STORAGE_KEY,
 } from './_lib/sessionTimeouts';
 
+// Real gap found and fixed 2026-08-27, while live-verifying Phase 32's own
+// savings-reminder push end-to-end: with no handler registered at all,
+// expo-notifications' documented default silently drops any notification
+// that arrives while the app is foregrounded - confirmed live by sending
+// the identical push twice, once with the app open (nothing appeared) and
+// once backgrounded (arrived normally via the OS tray, which was never
+// affected either way). Every notification type this app sends (overspend,
+// goal milestones, subscription findings, savings reminders) hit this same
+// gap, so this is an app-wide fix, not scoped to Auto-Save specifically.
+// Shows the normal system banner/list entry even in the foreground -
+// already-live screen data (Home/Budget/Recurring/Goal) refreshes on its
+// own via AppDataProvider's existing foreground-resume fetch, so no
+// separate in-app banner UI is needed on top of this.
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
+
 // Phase 4 Step F's event-type -> screen mapping, ported to router.push
 // targets. `(tabs)` is a route group (parens don't appear in the URL), so
 // the actual paths are `/budget`/`/recurring`, not `/(tabs)/budget` -
