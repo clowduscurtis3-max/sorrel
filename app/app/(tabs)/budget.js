@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { View, Text, Button, Pressable, ActivityIndicator, TextInput, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, Button, Pressable, ActivityIndicator, TextInput, StyleSheet } from 'react-native';
 // Reverted from react-native-gesture-handler's ScrollView back to plain
 // React Native (2026-08-19). It was switched to RNGH's version in Phase 13
 // because this tab then nested a Gesture.Pan() (the old NumberScrollWheel)
@@ -20,6 +20,7 @@ import { View, Text, Button, Pressable, ActivityIndicator, TextInput, ScrollView
 import { StatusBar } from 'expo-status-bar';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
+import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
 import { apiFetch, apiErrorMessage } from '../_lib/api';
 import { styles, colors } from '../_lib/styles';
 import { useAppData } from '../_lib/appData';
@@ -28,7 +29,7 @@ import { statusForCategory, computeSpendStats, computePace, computeMonthProgress
 import AffordabilityQuery from '../_components/AffordabilityQuery';
 import PrimaryButton from '../_components/PrimaryButton';
 import BudgetInsightModal from '../_components/BudgetInsightModal';
-import { LeafAvatar } from '../_components/Illustrations';
+import { LeafAvatar, AppBackdrop, TopEdgeFade, isNightBackdrop } from '../_components/Illustrations';
 
 const STATUS_COLOR = {
   ok: colors.positive,
@@ -63,6 +64,14 @@ export default function Budget() {
   const [error, setError] = useState(null);
 
   const scrollRef = useRef(null);
+
+  // Drives AppBackdrop's scroll-linked parallax/wiggle - Budget was the
+  // one tab with a plain (non-Animated) ScrollView, since it predates the
+  // background rework this reuses.
+  const scrollY = useSharedValue(0);
+  const onScroll = useAnimatedScrollHandler((event) => {
+    scrollY.value = event.contentOffset.y;
+  });
 
   // Budget Insight pill (2026-08-24) - stateless, recomputed fresh on every
   // fetch, same convention as budgetStatus/alerts. Fetched independently
@@ -255,8 +264,24 @@ export default function Budget() {
   const spentPercent = spendStats.budgeted > 0 ? Math.round((spendStats.spent / spendStats.budgeted) * 100) : null;
   const hasAnyBudget = rows.some((s) => s.budgeted != null);
 
+  // Text/icons rendered directly on top of AppBackdrop (not inside an
+  // opaque card) need to switch to a light color during the night
+  // backdrop - colors.darkest/colors.primary read fine on the light
+  // morning/afternoon/evening tints but are unreadable on night's dark
+  // tint.
+  const night = isNightBackdrop();
+  const onBackdropTextColor = night ? colors.background : undefined;
+  const onBackdropAccentColor = night ? '#9FD9B4' : undefined;
+
   return (
     <View style={styles.container}>
+      {/* Same shared full-page AppBackdrop every other tab uses
+          (Illustrations.js) - Budget was the one tab that never had it,
+          since it predates the Home background rework this reuses. */}
+      <View style={budgetLocalStyles.backgroundLayer} pointerEvents="none">
+        <AppBackdrop scrollY={scrollY} />
+      </View>
+
       {error && (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>{error}</Text>
@@ -269,11 +294,23 @@ export default function Budget() {
           <ActivityIndicator />
         </View>
       ) : (
-        <ScrollView ref={scrollRef} style={budgetLocalStyles.screen}>
+        <TopEdgeFade height={90}>
+        <Animated.ScrollView
+          ref={scrollRef}
+          style={budgetLocalStyles.screen}
+          contentContainerStyle={{ paddingBottom: 110 }}
+          onScroll={onScroll}
+          scrollEventThrottle={16}
+        >
           <View style={budgetLocalStyles.headerRow}>
-            <Text style={budgetLocalStyles.title}>Budget</Text>
+            <Text style={[budgetLocalStyles.title, onBackdropTextColor && { color: onBackdropTextColor }]}>
+              Budget
+            </Text>
             <Pressable
-              style={budgetLocalStyles.insightsPill}
+              style={[
+                budgetLocalStyles.insightsPill,
+                onBackdropAccentColor && { borderColor: onBackdropAccentColor },
+              ]}
               onPress={() => (insight ? setInsightModalVisible(true) : scrollRef.current?.scrollTo({ y: 0, animated: true }))}
               accessibilityRole="button"
               // Visible label always stays "INSIGHTS" (found on-device: the
@@ -283,8 +320,15 @@ export default function Budget() {
               // than needing to fit in a fixed-width pill.
               accessibilityLabel={insight ? insight.pill_text : 'Jump to Can I afford this?'}
             >
-              <MaterialIcons name="auto-awesome" size={14} color={colors.primary} />
-              <Text style={budgetLocalStyles.insightsPillText}>INSIGHTS</Text>
+              <MaterialIcons name="auto-awesome" size={14} color={onBackdropAccentColor || colors.primary} />
+              <Text
+                style={[
+                  budgetLocalStyles.insightsPillText,
+                  onBackdropAccentColor && { color: onBackdropAccentColor },
+                ]}
+              >
+                INSIGHTS
+              </Text>
             </Pressable>
           </View>
 
@@ -511,7 +555,8 @@ export default function Budget() {
               </View>
             );
           })}
-        </ScrollView>
+        </Animated.ScrollView>
+        </TopEdgeFade>
       )}
       <BudgetInsightModal
         visible={insightModalVisible}
@@ -529,10 +574,21 @@ function monthName() {
 }
 
 const budgetLocalStyles = StyleSheet.create({
+  backgroundLayer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
   screen: {
     flex: 1,
     paddingHorizontal: 16,
-    paddingTop: 16,
+    // Pushed down past TopEdgeFade's 90px fade zone (Illustrations.js) -
+    // otherwise the "Budget" title/INSIGHTS pill sat inside that zone
+    // even at rest (scroll position 0), reading as "already faded before
+    // scrolling" instead of only fading once actually scrolled up into it.
+    paddingTop: 110,
   },
   headerRow: {
     flexDirection: 'row',

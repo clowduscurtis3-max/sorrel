@@ -31,7 +31,21 @@ import { LeafAvatar } from './Illustrations';
 // stack) or 'row' (Home tab's compact horizontal header, leaf beside the
 // wordmark rather than above it) - added rather than duplicating the font-
 // loading hook in a second component.
-export default function SorrelWordmark({ leafSize = 64, showTagline = true, layout = 'column' }) {
+// `textColor`/`taglineColor`: optional overrides, both default to
+// `undefined` (falls through to this file's own colors.darkest/
+// colors.primary below) - added so the tab screens that render this
+// directly on top of AppBackdrop (Home/Goal/Recurring's wordmarkStrip)
+// can switch to a light color during the night backdrop, without
+// changing the default used by every other caller (sign-in, the
+// biometric/MFA lock screens, CreateAccountForm) which sit on their own
+// plain, non-time-of-day backgrounds and must keep the original colors.
+export default function SorrelWordmark({
+  leafSize = 64,
+  showTagline = true,
+  layout = 'column',
+  textColor,
+  taglineColor,
+}) {
   const [fontsLoaded] = useFonts({ Lora_700Bold });
   const isRow = layout === 'row';
 
@@ -44,12 +58,15 @@ export default function SorrelWordmark({ leafSize = 64, showTagline = true, layo
           { fontSize: leafSize * 0.72 },
           isRow && styles.wordmarkRow,
           fontsLoaded && { fontFamily: 'Lora_700Bold' },
+          textColor && { color: textColor },
         ]}
       >
         sorrel
       </Text>
       {showTagline ? (
-        <Text style={styles.tagline}>Your money. Your goals.{'\n'}We'll guide the way.</Text>
+        <Text style={[styles.tagline, taglineColor && { color: taglineColor }]}>
+          Your money. Your goals.{'\n'}We'll guide the way.
+        </Text>
       ) : null}
     </View>
   );

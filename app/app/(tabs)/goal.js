@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { View, Text, Button, Pressable, TextInput, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, Pressable, TextInput, ActivityIndicator, Alert, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { MaterialIcons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
 import {
   useAudioRecorder,
@@ -10,14 +11,46 @@ import {
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
 } from 'expo-audio';
-import { apiFetch, apiErrorMessage } from '../_lib/api';
+import { apiFetch, apiErrorMessage, GOAL_TYPES } from '../_lib/api';
 import { styles, colors } from '../_lib/styles';
 import { useSessionContext } from '../_lib/session';
 import { useAppData } from '../_lib/appData';
-import { useGoalForm, GoalFormFields } from '../_components/GoalForm';
-import { AtmosphericHomeBackground, TopFadeMask } from '../_components/Illustrations';
+import { useGoalForm, computeTargetDateFromTimeframe } from '../_components/GoalForm';
+import { formatAmountLabel } from '../_lib/amountPicker';
+import NumberScrollWheel from '../_components/NumberScrollWheel';
+import { AppBackdrop, TopEdgeFade, isNightBackdrop } from '../_components/Illustrations';
 import SorrelWordmark from '../_components/SorrelWordmark';
 import PrimaryButton from '../_components/PrimaryButton';
+
+// Edit Goal redesign (2026-08-27) - per-goal-type icon (reusing the same
+// icon-circle visual language already established by targetIconCircle/
+// insightIconCircle below) and a short descriptive tagline. The tagline is
+// plain product-voice UI copy (same category as "Turn your goals into
+// progress." just below it in the existing Primary Goal card) - never a
+// financial figure, so it's fine as static per-type text rather than
+// something that needs to come from goal data.
+const GOAL_TYPE_ICON = {
+  house: 'home',
+  debt: 'money-off',
+  emergency_fund: 'shield',
+  general: 'track-changes',
+  other: 'flag',
+};
+const GOAL_TYPE_TAGLINE = {
+  house: 'A home of your own, on your terms.',
+  debt: 'One step closer to being debt-free.',
+  emergency_fund: 'A cushion for whatever comes next.',
+  general: 'Building smarter money habits.',
+};
+
+// The goal's own display name - GOAL_TYPES' label for every type except
+// 'other', where the user's own typed description (goal.notes) is the real
+// name (matches how goal-intake.js/GoalFormFields already treat notes for
+// this type) rather than the generic "Something else" menu-item label.
+function goalDisplayName(goalType, notes) {
+  if (goalType === 'other' && notes) return notes;
+  return GOAL_TYPES.find((g) => g.value === goalType)?.label || 'Your goal';
+}
 
 // Status badge for the Primary Goal card - derived entirely from
 // goalProgress's own already-computed fields (saved_amount/target_amount/
@@ -201,6 +234,53 @@ export default function Goal() {
     },
     onGoalProgressChanged: refetchGoalProgress,
   });
+
+  // Edit Goal redesign (2026-08-27): which settings row (if any) currently
+  // has its editor expanded inline below it - 'amount' | 'date' | 'type' |
+  // null. Only one at a time, same "focused interaction, not inline
+  // clutter" reasoning as the mockup's own tap-to-reveal rows, replacing
+  // the old always-visible type-button wall + wheel + date picker all
+  // shown at once regardless of what the user actually came here to
+  // change.
+  const [activeEditor, setActiveEditor] = useState(null);
+  // "See how I calculated this" - a plain expand/collapse over numbers
+  // already in goalProgress/goalProgress.projections, not a second
+  // calculation or a fetch of its own.
+  const [showCalculationDetail, setShowCalculationDetail] = useState(false);
+
+  // Own scroll tracking for the editing screen's ScrollView (separate from
+  // the read-only Overview's own scrollY below) - same AppBackdrop
+  // parallax + TopEdgeFade pattern every other screen in this app already
+  // uses, so this redesigned screen doesn't look or behave like a one-off.
+  const editScrollY = useSharedValue(0);
+  const onEditScroll = useAnimatedScrollHandler((event) => {
+    editScrollY.value = event.contentOffset.y;
+  });
+
+  function closeEditorAnd(fn) {
+    setActiveEditor(null);
+    fn();
+  }
+
+  // Real note on scope: this app's goal model is one goal per user
+  // (upsert-only; no DELETE /goal route exists, and the root layout's own
+  // gate requires a goal to exist before (tabs) is even reachable - see
+  // this file's own header note and _layout.js). "Delete Goal" therefore
+  // can't mean removing the row outright without breaking that invariant
+  // - it reuses the exact same reset-to-general path goal-intake.js's own
+  // "Skip" already exercises (useGoalForm's skip()), which is the smallest
+  // correct interpretation of "delete this specific goal" this schema
+  // actually supports, not a new backend route.
+  function confirmDeleteGoal() {
+    Alert.alert(
+      'Delete this goal?',
+      'This removes your specific goal and target, and returns to a general "smarter spending" focus - it does not affect your linked accounts or transaction history.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete Goal', style: 'destructive', onPress: form.skip },
+      ]
+    );
+  }
 
   // Phase 29 (Emergency Fund surfacing, 2026-08-25): "set target" writes
   // through the same POST /goal every other save already uses (an upsert
@@ -429,13 +509,21 @@ export default function Goal() {
     if (!roundUpsResult) fetchRoundUps();
   }
 
-  // Same shared-background scroll wiring as Home/Account (Illustrations.js's
-  // AtmosphericHomeBackground/TopFadeMask) - only the Overview branch's
-  // ScrollView drives it; the editing branch is a plain non-scrolling View.
+  // Kept for the Overview branch's Animated.ScrollView onScroll handler -
+  // no longer drives the backdrop itself (AppBackdrop is a static
+  // full-screen layer, not scroll-parallaxed), but still needed to
+  // satisfy Animated.ScrollView's own onScroll wiring below.
   const scrollY = useSharedValue(0);
   const onScroll = useAnimatedScrollHandler((event) => {
     scrollY.value = event.contentOffset.y;
   });
+
+  // Text/icons rendered directly on top of AppBackdrop (not inside an
+  // opaque card) need to switch to a light color during the night
+  // backdrop - colors.darkest reads fine on the light morning/afternoon/
+  // evening tints but is unreadable on night's dark tint.
+  const night = isNightBackdrop();
+  const onBackdropTextColor = night ? colors.background : undefined;
 
   // Real bug found by adversarial review, 2026-08-13: Cancel used to only
   // toggle `editing` back to false, leaving any discarded edits sitting in
@@ -444,52 +532,409 @@ export default function Goal() {
   // the full failure scenario).
   function cancelEditing() {
     form.reset();
+    setActiveEditor(null);
+    setShowCalculationDetail(false);
     setEditing(false);
   }
+
+  // Derived, display-only values for the redesigned editing screen -
+  // pending/uncommitted (`form.*`) vs. persisted (`goalProgress`) is kept
+  // deliberately distinct throughout this render: the Goal Summary/Settings
+  // rows reflect what the user is *currently editing* (form state, same as
+  // today's GoalFormFields already does), while Progress/Sorrel's Take
+  // reflect the *saved* goal (goalProgress, server-computed) - showing
+  // pending, unsaved numbers there would be fabricating a projection
+  // against a goal that was never actually persisted.
+  const editGoalIcon = GOAL_TYPE_ICON[form.goalType] || 'flag';
+  const editGoalName = goalDisplayName(form.goalType, form.goalNotes);
+  const editGoalTagline = GOAL_TYPE_TAGLINE[form.goalType] || 'Your own goal, your own pace.';
+  const editTargetDate = computeTargetDateFromTimeframe(form.goalTimeframe);
+  const editTargetDateLabel = editTargetDate
+    ? editTargetDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    : 'No target date set';
+  const editAmountLabel = form.goalAmount ? formatAmountLabel(form.goalAmount) : 'No target amount set';
+  const editGoalTypeLabel = GOAL_TYPES.find((g) => g.value === form.goalType)?.label || 'Something else';
+  const tomorrow = new Date(Date.now() + 86400000);
 
   return (
     <View style={styles.container}>
       {editing ? (
-        // Reuses goal-intake.js's exact bottom-pinning treatment
-        // (`goalScreen`'s flex:1 spacer + baked-in 72px clearance from the
-        // phone's gesture bar) rather than the plain stacked buttons a
-        // ScrollView would give - per direct user feedback, 2026-08-12:
-        // Cancel (and Save goal, paired with it) belongs down at the true
-        // bottom of the screen here too, not wherever it happens to fall
-        // after the form fields. A plain View instead of the ScrollView
-        // used below, since the flex-spacer trick needs a fixed-height
-        // flex container to push against, not a content-sized one.
-        <View style={styles.goalScreen}>
-          <GoalFormFields form={form} />
-          <View style={{ flex: 1 }} />
-          {form.saving ? (
-            <ActivityIndicator />
-          ) : (
-            <>
-              <Button title="Save goal" onPress={form.save} />
-              <Button title="Cancel" onPress={cancelEditing} />
-            </>
-          )}
-        </View>
+        // Edit Goal redesign (2026-08-27, design-references - see the user's
+        // own mockup for this exact screen). Replaces the old always-
+        // visible button wall (GoalFormFields rendered directly) with a
+        // scrolling, card-based screen matching the rest of this app's
+        // Sorrel visual language - reuses useGoalForm's state/save/skip
+        // logic completely unchanged, only the presentation around it is
+        // new. GoalFormFields itself is untouched and still used as-is by
+        // goal-intake.js's first-run flow - this screen builds its own
+        // tap-to-reveal rows directly against the same `form` object
+        // instead, since the two screens' layouts diverged too far for one
+        // shared middle-section component to serve both well (documented
+        // in that file's own header comment).
+        <>
+          <View style={goalStyles.backgroundLayer} pointerEvents="none">
+            <AppBackdrop scrollY={editScrollY} />
+          </View>
+
+          <View style={goalStyles.editHeaderRow}>
+            <Pressable
+              style={goalStyles.backButton}
+              onPress={cancelEditing}
+              accessibilityRole="button"
+              accessibilityLabel="Back, discard unsaved changes"
+            >
+              <MaterialIcons
+                name="arrow-back"
+                size={20}
+                color={night ? colors.background : colors.primary}
+              />
+            </Pressable>
+            <View style={goalStyles.editHeaderTextCol}>
+              <Text style={[goalStyles.editHeaderTitle, night && { color: colors.background }]}>
+                Edit Goal
+              </Text>
+              <Text
+                style={[goalStyles.editHeaderSubtitle, night && { color: 'rgba(244, 246, 242, 0.75)' }]}
+              >
+                Make changes to your goal.
+              </Text>
+            </View>
+            <View style={{ width: 40 }} />
+          </View>
+
+          <TopEdgeFade height={90}>
+          <Animated.ScrollView
+            style={goalStyles.transparentScroll}
+            contentContainerStyle={{ paddingBottom: 110 }}
+            onScroll={onEditScroll}
+            scrollEventThrottle={16}
+          >
+            {/* Goal Summary - informational only, no button here (the old
+                screen's giant "SAVE FOR A HOUSE"-style buttons lived in the
+                type picker below instead, also since replaced). */}
+            <View style={[styles.card, goalStyles.cardMargin]}>
+              <View style={goalStyles.summaryRow}>
+                <View style={goalStyles.summaryIconCircle}>
+                  <MaterialIcons name={editGoalIcon} size={28} color={colors.dark} />
+                </View>
+                <View style={goalStyles.summaryTextCol}>
+                  <Text style={goalStyles.cardEyebrow}>YOUR GOAL</Text>
+                  <Text style={goalStyles.summaryName}>{editGoalName}</Text>
+                  <Text style={goalStyles.summaryTagline}>{editGoalTagline}</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Goal Settings - one unified card, three tap-to-reveal rows
+                instead of the old permanently-visible type-button wall +
+                wheel + date picker + two "CLEAR" buttons all shown at once. */}
+            <View style={[styles.card, goalStyles.cardMargin, goalStyles.settingsCard]}>
+              <Pressable
+                style={goalStyles.settingsRow}
+                onPress={() => setActiveEditor(activeEditor === 'amount' ? null : 'amount')}
+                accessibilityRole="button"
+                accessibilityLabel={`Target amount: ${editAmountLabel}`}
+              >
+                <View style={goalStyles.settingsIconCircle}>
+                  <MaterialIcons name="attach-money" size={18} color={colors.dark} />
+                </View>
+                <View style={goalStyles.settingsRowText}>
+                  <Text style={goalStyles.settingsRowLabel}>Target amount</Text>
+                  <Text style={goalStyles.settingsRowValue}>{editAmountLabel}</Text>
+                </View>
+                <MaterialIcons
+                  name={activeEditor === 'amount' ? 'expand-less' : 'chevron-right'}
+                  size={22}
+                  color={colors.muted}
+                />
+              </Pressable>
+              {activeEditor === 'amount' && (
+                <View style={goalStyles.inlineEditor}>
+                  <NumberScrollWheel
+                    value={form.goalAmount ? Number(form.goalAmount) : 0}
+                    onValueChange={(v) => form.setGoalAmount(String(v))}
+                    min={0}
+                    max={1000000}
+                    step={50}
+                    formatLabel={formatAmountLabel}
+                  />
+                  <View style={goalStyles.inlineEditorActions}>
+                    {!!form.goalAmount && (
+                      <Pressable
+                        onPress={() => form.setGoalAmount('')}
+                        accessibilityRole="button"
+                        accessibilityLabel="Clear target amount"
+                      >
+                        <Text style={goalStyles.inlineEditorLink}>Clear amount</Text>
+                      </Pressable>
+                    )}
+                    <Pressable onPress={() => setActiveEditor(null)} accessibilityRole="button">
+                      <Text style={goalStyles.inlineEditorLinkDone}>Done</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+
+              <View style={goalStyles.settingsDivider} />
+
+              <Pressable
+                style={goalStyles.settingsRow}
+                onPress={() => setActiveEditor(activeEditor === 'date' ? null : 'date')}
+                accessibilityRole="button"
+                accessibilityLabel={`Target date: ${editTargetDateLabel}`}
+              >
+                <View style={[goalStyles.settingsIconCircle, goalStyles.settingsIconCircleWarm]}>
+                  <MaterialIcons name="event" size={18} color={colors.warningText} />
+                </View>
+                <View style={goalStyles.settingsRowText}>
+                  <Text style={goalStyles.settingsRowLabel}>Target date</Text>
+                  <Text style={goalStyles.settingsRowValue}>{editTargetDateLabel}</Text>
+                </View>
+                <MaterialIcons
+                  name={activeEditor === 'date' ? 'expand-less' : 'chevron-right'}
+                  size={22}
+                  color={colors.muted}
+                />
+              </Pressable>
+              {activeEditor === 'date' && (
+                <View style={goalStyles.inlineEditor}>
+                  <DateTimePicker
+                    value={editTargetDate ?? tomorrow}
+                    mode="date"
+                    minimumDate={tomorrow}
+                    onChange={(event, selectedDate) => {
+                      if (event.type === 'dismissed' || !selectedDate) return;
+                      const months = Math.max(
+                        1,
+                        Math.round((selectedDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24 * 30.44))
+                      );
+                      form.setGoalTimeframe(String(months));
+                    }}
+                  />
+                  <View style={goalStyles.inlineEditorActions}>
+                    {!!editTargetDate && (
+                      <Pressable
+                        onPress={() => form.setGoalTimeframe('')}
+                        accessibilityRole="button"
+                        accessibilityLabel="Remove target date"
+                      >
+                        <Text style={goalStyles.inlineEditorLink}>Remove date</Text>
+                      </Pressable>
+                    )}
+                    <Pressable onPress={() => setActiveEditor(null)} accessibilityRole="button">
+                      <Text style={goalStyles.inlineEditorLinkDone}>Done</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+
+              <View style={goalStyles.settingsDivider} />
+
+              <Pressable
+                style={goalStyles.settingsRow}
+                onPress={() => setActiveEditor(activeEditor === 'type' ? null : 'type')}
+                accessibilityRole="button"
+                accessibilityLabel={`Goal type: ${editGoalTypeLabel}`}
+              >
+                <View style={goalStyles.settingsIconCircle}>
+                  <MaterialIcons name="track-changes" size={18} color={colors.dark} />
+                </View>
+                <View style={goalStyles.settingsRowText}>
+                  <Text style={goalStyles.settingsRowLabel}>Goal type</Text>
+                  <Text style={goalStyles.settingsRowValue}>{editGoalTypeLabel}</Text>
+                </View>
+                <MaterialIcons
+                  name={activeEditor === 'type' ? 'expand-less' : 'chevron-right'}
+                  size={22}
+                  color={colors.muted}
+                />
+              </Pressable>
+              {activeEditor === 'type' && (
+                <View style={goalStyles.inlineEditor}>
+                  {GOAL_TYPES.filter((g) => g.value !== 'general').map((g) => (
+                    <Pressable
+                      key={g.value}
+                      style={goalStyles.typeOptionRow}
+                      onPress={() => form.setGoalType(g.value)}
+                      accessibilityRole="button"
+                      accessibilityLabel={g.label}
+                    >
+                      <MaterialIcons
+                        name={form.goalType === g.value ? 'radio-button-checked' : 'radio-button-unchecked'}
+                        size={18}
+                        color={form.goalType === g.value ? colors.primary : colors.muted}
+                      />
+                      <Text style={goalStyles.typeOptionText}>{g.label}</Text>
+                    </Pressable>
+                  ))}
+                  {form.goalType === 'other' && (
+                    <TextInput
+                      style={[styles.input, goalStyles.notesInput]}
+                      placeholder="Describe your goal"
+                      value={form.goalNotes}
+                      onChangeText={form.setGoalNotes}
+                    />
+                  )}
+                  <View style={goalStyles.inlineEditorActions}>
+                    <Pressable onPress={() => setActiveEditor(null)} accessibilityRole="button">
+                      <Text style={goalStyles.inlineEditorLinkDone}>Done</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+            </View>
+
+            {/* Progress - the *saved* goal's real progress (goalProgress,
+                same canonical server calculation the read-only Overview
+                below already uses), not the pending form edits above -
+                gracefully adapts rather than fabricating a number when
+                there's no target on the saved goal yet. */}
+            <View style={[styles.card, goalStyles.cardMargin]}>
+              <View style={goalStyles.progressHeaderRow}>
+                <Text style={goalStyles.cardEyebrow}>YOUR PROGRESS</Text>
+                <MaterialIcons name="auto-awesome" size={16} color={colors.dark} />
+              </View>
+              {!goalProgress ? (
+                <Text style={styles.smallText}>Loading…</Text>
+              ) : !goalProgress.has_target ? (
+                <Text style={styles.smallText}>
+                  Set a target amount to start tracking progress toward this goal.
+                </Text>
+              ) : (
+                (() => {
+                  const percent = Math.min(100, Math.max(0, goalProgress.percent_complete));
+                  const remaining = Math.max(0, goalProgress.target_amount - goalProgress.saved_amount);
+                  return (
+                    <>
+                      <View style={goalStyles.progressValuesRow}>
+                        <View>
+                          <Text style={goalStyles.progressBigValue}>
+                            ${goalProgress.saved_amount.toFixed(2)}
+                          </Text>
+                          <Text style={styles.smallText}>saved so far</Text>
+                        </View>
+                        <View style={{ alignItems: 'flex-end' }}>
+                          <Text style={[goalStyles.progressBigValue, { color: colors.primary }]}>
+                            {Math.round(percent)}%
+                          </Text>
+                          <Text style={styles.smallText}>of your goal</Text>
+                        </View>
+                      </View>
+                      <View style={goalStyles.progressTrack}>
+                        <View style={[goalStyles.progressFill, { width: `${percent}%` }]} />
+                      </View>
+                      <Text style={[styles.smallText, { marginTop: 8 }]}>
+                        ${remaining.toFixed(2)} to go
+                      </Text>
+                    </>
+                  );
+                })()
+              )}
+            </View>
+
+            {/* Sorrel's Take - reuses goalProgress.projections verbatim
+                (server/goalProgress.js's computeGoalProjections, already
+                built and already shown on the read-only Overview) - no new
+                calculation. "See how I calculated this" is a plain expand
+                over numbers already in hand, not a second fetch/estimate. */}
+            {goalProgress?.projections && (
+              <View style={[styles.card, goalStyles.cardMargin, goalStyles.insightCard]}>
+                <View style={goalStyles.insightIconCircle}>
+                  <MaterialIcons name="auto-awesome" size={18} color={colors.dark} />
+                </View>
+                <View style={goalStyles.insightBody}>
+                  <Text style={goalStyles.cardEyebrow}>SORREL'S TAKE</Text>
+                  <Text style={goalStyles.insightText}>
+                    {goalProgress.projections.deadline_passed
+                      ? `Your target date of ${formatTargetDate(goalProgress.projections.target_date)} has passed - you'd still need about $${goalProgress.projections.monthly_savings_needed.toFixed(0)} per month to reach this goal.`
+                      : `To reach your goal by ${formatTargetDate(goalProgress.projections.target_date)}, you'll need to save about $${goalProgress.projections.monthly_savings_needed.toFixed(0)} per month.`}
+                  </Text>
+                  <Pressable
+                    onPress={() => setShowCalculationDetail((s) => !s)}
+                    accessibilityRole="button"
+                  >
+                    <Text style={goalStyles.inlineEditorLink}>
+                      {showCalculationDetail ? 'Hide calculation' : 'See how I calculated this'}
+                      {'  '}
+                      <MaterialIcons
+                        name={showCalculationDetail ? 'expand-less' : 'chevron-right'}
+                        size={14}
+                      />
+                    </Text>
+                  </Pressable>
+                  {showCalculationDetail && (
+                    <View style={goalStyles.calculationDetail}>
+                      <Text style={styles.smallText}>
+                        Target amount: ${goalProgress.target_amount.toFixed(2)}
+                      </Text>
+                      <Text style={styles.smallText}>
+                        Saved so far: ${goalProgress.saved_amount.toFixed(2)}
+                      </Text>
+                      <Text style={styles.smallText}>
+                        Remaining: $
+                        {Math.max(0, goalProgress.target_amount - goalProgress.saved_amount).toFixed(2)}
+                      </Text>
+                      <Text style={styles.smallText}>
+                        Time remaining: {formatTimeRemaining(goalProgress.projections.months_remaining)}
+                      </Text>
+                      <Text style={styles.smallText}>
+                        Remaining ÷ time remaining = about $
+                        {goalProgress.projections.monthly_savings_needed.toFixed(0)}/month
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            )}
+
+            {form.error && (
+              <Text style={[styles.errorText, goalStyles.cardMargin]}>{form.error}</Text>
+            )}
+
+            <View style={goalStyles.cardMargin}>
+              <PrimaryButton title="Save Changes" onPress={form.save} loading={form.saving} />
+            </View>
+
+            <Pressable
+              style={[goalStyles.deleteGoalButton, goalStyles.cardMargin]}
+              onPress={confirmDeleteGoal}
+              disabled={form.saving}
+              accessibilityRole="button"
+              accessibilityLabel="Delete goal"
+            >
+              <MaterialIcons name="delete-outline" size={18} color={colors.error} />
+              <Text style={goalStyles.deleteGoalButtonText}>Delete Goal</Text>
+            </Pressable>
+          </Animated.ScrollView>
+          </TopEdgeFade>
+        </>
       ) : (
         <>
           <View style={goalStyles.backgroundLayer} pointerEvents="none">
-            <AtmosphericHomeBackground scrollY={scrollY} />
+            <AppBackdrop scrollY={scrollY} />
           </View>
 
           <View style={goalStyles.wordmarkStrip}>
-            <SorrelWordmark layout="row" leafSize={30} showTagline={false} />
-            <MaterialIcons name="notifications-none" size={26} color={colors.darkest} />
+            <SorrelWordmark layout="row" leafSize={30} showTagline={false} textColor={onBackdropTextColor} />
+            <MaterialIcons name="notifications-none" size={26} color={onBackdropTextColor || colors.darkest} />
           </View>
 
+          <TopEdgeFade height={90}>
           <Animated.ScrollView
             style={[styles.list, goalStyles.transparentScroll]}
+            contentContainerStyle={{ paddingBottom: 110 }}
             onScroll={onScroll}
             scrollEventThrottle={16}
           >
             <View style={goalStyles.titleBlock}>
-              <Text style={goalStyles.title}>Your Goals</Text>
-              <Text style={goalStyles.subtitle}>Build the future you want.</Text>
+              <Text style={[goalStyles.title, onBackdropTextColor && { color: onBackdropTextColor }]}>
+                Your Goals
+              </Text>
+              <Text
+                style={[goalStyles.subtitle, night && { color: 'rgba(244, 246, 242, 0.75)' }]}
+              >
+                Build the future you want.
+              </Text>
             </View>
 
             {!goalProgress ? (
@@ -871,8 +1316,7 @@ export default function Goal() {
               </View>
             ))}
           </Animated.ScrollView>
-
-          <TopFadeMask scrollY={scrollY} />
+          </TopEdgeFade>
         </>
       )}
       <StatusBar style="auto" />
@@ -886,6 +1330,7 @@ const goalStyles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
+    bottom: 0,
   },
   wordmarkStrip: {
     flexDirection: 'row',
@@ -898,9 +1343,180 @@ const goalStyles = StyleSheet.create({
   transparentScroll: {
     backgroundColor: 'transparent',
   },
+  // --- Edit Goal redesign (2026-08-27) ---
+  editHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 56,
+    paddingBottom: 12,
+    gap: 12,
+  },
+  // Same 40x40 rounded-square card-colored back button as Home's bank
+  // drill-down screen (homeStyles.backButton in (tabs)/index.js) - one
+  // established "how this app does a back button" pattern, not a second
+  // one invented for this screen.
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editHeaderTextCol: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  editHeaderTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.darkest,
+  },
+  editHeaderSubtitle: {
+    fontSize: 13,
+    color: colors.dark,
+    marginTop: 2,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  summaryIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: colors.sage,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  summaryTextCol: {
+    flex: 1,
+    gap: 2,
+  },
+  summaryName: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.darkest,
+  },
+  summaryTagline: {
+    fontSize: 13,
+    color: colors.dark,
+  },
+  settingsCard: {
+    paddingVertical: 4,
+  },
+  settingsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+  },
+  settingsIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settingsIconCircleWarm: {
+    backgroundColor: '#F3D9B8',
+  },
+  settingsRowText: {
+    flex: 1,
+    gap: 2,
+  },
+  settingsRowLabel: {
+    fontSize: 12,
+    color: colors.dark,
+  },
+  settingsRowValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.darkest,
+  },
+  settingsDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.sage,
+  },
+  inlineEditor: {
+    paddingBottom: 12,
+    gap: 8,
+  },
+  inlineEditorActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 20,
+    paddingTop: 4,
+  },
+  inlineEditorLink: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.error,
+    textDecorationLine: 'underline',
+  },
+  inlineEditorLinkDone: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  typeOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+  },
+  typeOptionText: {
+    fontSize: 15,
+    color: colors.darkest,
+  },
+  notesInput: {
+    marginTop: 4,
+  },
+  progressHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  progressValuesRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+  },
+  progressBigValue: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: colors.darkest,
+  },
+  calculationDetail: {
+    marginTop: 8,
+    gap: 2,
+  },
+  deleteGoalButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.error,
+    borderRadius: 22,
+    paddingVertical: 12,
+  },
+  deleteGoalButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.error,
+  },
   titleBlock: {
     paddingHorizontal: 24,
-    paddingTop: 24,
+    // Pushed down past TopEdgeFade's 90px fade zone (Illustrations.js) -
+    // otherwise the title sat inside that zone even at rest (scroll
+    // position 0), reading as "already faded before scrolling" instead of
+    // only fading once actually scrolled up into it.
+    paddingTop: 110,
     paddingBottom: 24,
     gap: 4,
   },

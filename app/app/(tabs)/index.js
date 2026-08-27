@@ -23,12 +23,7 @@ import { styles, colors } from '../_lib/styles';
 import { useAppData } from '../_lib/appData';
 import { useSessionContext } from '../_lib/session';
 import SorrelWordmark from '../_components/SorrelWordmark';
-import {
-  AtmosphericHomeBackground,
-  TopFadeMask,
-  ATMOSPHERIC_BACKGROUND_HEIGHT,
-  SeasonalHills,
-} from '../_components/Illustrations';
+import { AppBackdrop, TopEdgeFade, SeasonalHills, isNightBackdrop } from '../_components/Illustrations';
 import NetWorthChart from '../_components/NetWorthChart';
 import PrimaryButton from '../_components/PrimaryButton';
 import { iconForAccount } from '../_lib/accountIcons';
@@ -181,17 +176,20 @@ export default function Home() {
   // no new route for the root gate or a cold app-launch to ever resolve to.
   const [viewingItemId, setViewingItemId] = useState(null);
 
-  // Home background rework (2026-08-24): drives the atmospheric
-  // background's parallax/fade and the top fade mask, both defined in
-  // Illustrations.js. Only the Overview branch's Animated.ScrollView
-  // (below) ever updates this - the drill-down SectionList and the
-  // loading/not-linked states don't scroll the background, so they leave
-  // it at its resting (0) value, which is exactly the "full atmosphere
-  // visible" pose those states should show anyway.
+  // Kept for the Overview branch's Animated.ScrollView onScroll wiring
+  // below - no longer drives the backdrop itself (AppBackdrop is a
+  // static full-screen layer, not scroll-parallaxed).
   const scrollY = useSharedValue(0);
   const onScroll = useAnimatedScrollHandler((event) => {
     scrollY.value = event.contentOffset.y;
   });
+
+  // Text/icons rendered directly on top of AppBackdrop (not inside an
+  // opaque card) need to switch to a light color during the night
+  // backdrop - colors.darkest reads fine on the light morning/afternoon/
+  // evening tints but is unreadable on night's dark tint.
+  const night = isNightBackdrop();
+  const onBackdropTextColor = night ? colors.background : undefined;
 
   const [transactions, setTransactions] = useState([]);
   const [loadingTransactions, setLoadingTransactions] = useState(false);
@@ -497,30 +495,28 @@ export default function Home() {
 
   return (
     <View style={styles.container}>
-      {/* Home background rework (2026-08-24): the sunrise/hills/birds
-          scene is now a persistent absolutely-positioned background layer
-          behind everything below (error banner, loading/not-linked
-          states, and the Overview Animated.ScrollView all render on top
-          of it, transparent-background where relevant) instead of a
-          fixed, non-scrolling header - see Illustrations.js's own
-          AtmosphericHomeBackground comment for the full reasoning. Only
-          the Overview branch's ScrollView ever drives `scrollY`; every
-          other branch leaves it at its resting 0 value, which is exactly
-          the "full atmosphere visible" pose those states should show. */}
+      {/* Full-page time-of-day backdrop (2026-08-26) - a persistent,
+          absolutely-positioned, full-screen background layer behind
+          everything below (error banner, loading/not-linked states, and
+          the Overview Animated.ScrollView all render on top of it,
+          transparent-background where relevant), matching the same
+          shared AppBackdrop every other tab now uses - see
+          Illustrations.js's own AppBackdrop comment for the full
+          reasoning. */}
       {viewingItemId === null && (
         <View style={homeStyles.backgroundLayer} pointerEvents="none">
-          <AtmosphericHomeBackground scrollY={scrollY} />
+          <AppBackdrop scrollY={scrollY} />
         </View>
       )}
 
       {viewingItemId === null && (
         <View style={homeStyles.wordmarkStrip}>
-          <SorrelWordmark layout="row" leafSize={30} showTagline={false} />
+          <SorrelWordmark layout="row" leafSize={30} showTagline={false} textColor={onBackdropTextColor} />
           {/* Plain icon, not a Pressable - there's no notification
               center built yet (Phase 16, "what changed"), so this is
               visual-only for now rather than implying functionality
               that doesn't exist. */}
-          <MaterialIcons name="notifications-none" size={26} color={colors.darkest} />
+          <MaterialIcons name="notifications-none" size={26} color={onBackdropTextColor || colors.darkest} />
         </View>
       )}
 
@@ -655,14 +651,16 @@ export default function Home() {
         // SectionList; there is no long transaction feed on this screen
         // anymore for a nested-VirtualizedList concern to even apply to.
         // Animated.ScrollView (react-native-reanimated), transparent
-        // background so AtmosphericHomeBackground shows through behind it
+        // background so AppBackdrop shows through behind it
         // - the first scroll-driven reanimated wiring in this codebase
         // (NumberScrollWheel.js's own reanimated usage is gesture-driven,
         // not scroll-driven), see this rework's own plan notes for why
         // that's a real (if low, given the same library's already proven
         // stable here) first-of-its-kind risk worth tap-testing carefully.
+        <TopEdgeFade height={90}>
         <Animated.ScrollView
           style={[styles.list, homeStyles.transparentScroll]}
+          contentContainerStyle={{ paddingBottom: 110 }}
           onScroll={onScroll}
           scrollEventThrottle={16}
         >
@@ -674,8 +672,15 @@ export default function Home() {
               toward the hills) rather than sitting directly over the
               busiest part of the artwork. */}
           <View style={homeStyles.greetingBlock}>
-            <Text style={homeStyles.greeting}>{greeting(session)}</Text>
-            <Text style={homeStyles.greetingSubtitle}>
+            <Text style={[homeStyles.greeting, onBackdropTextColor && { color: onBackdropTextColor }]}>
+              {greeting(session)}
+            </Text>
+            <Text
+              style={[
+                homeStyles.greetingSubtitle,
+                night && { color: 'rgba(244, 246, 242, 0.75)' },
+              ]}
+            >
               Here's your financial snapshot for {monthName}.
             </Text>
           </View>
@@ -917,14 +922,8 @@ export default function Home() {
             </View>
           )}
         </Animated.ScrollView>
+        </TopEdgeFade>
       )}
-
-      {/* Painted last so it overlays everything above (background,
-          loading/not-linked states, and the scroll content alike) -
-          invisible at rest (scrollY 0), fades in once scrolling begins.
-          See Illustrations.js's own TopFadeMask comment for why this has
-          to be scroll-driven rather than a static overlay. */}
-      {viewingItemId === null && <TopFadeMask scrollY={scrollY} />}
 
       <StatusBar style="auto" />
     </View>
@@ -937,18 +936,18 @@ export default function Home() {
 // lives here, same split sign-in.js's own local StyleSheet already
 // established.
 const homeStyles = StyleSheet.create({
-  // Home background rework (2026-08-24): the artwork is now an
-  // absolutely-positioned layer behind everything (doesn't take up flow
-  // space - top/left/right only, no bottom/height, so it shrinks to its
-  // own content's height and simply overlaps whatever flows below it),
-  // instead of the old headerBlock/headerSceneWrap pairing that reserved
-  // real layout space above the ScrollView. See AtmosphericHomeBackground
-  // (Illustrations.js) for the actual scene/parallax/fade logic.
+  // Full-page backdrop rework (2026-08-26): the artwork is an absolutely
+  // -positioned layer filling the whole screen (top/left/right/bottom:0)
+  // behind everything else, instead of the old headerBlock/headerSceneWrap
+  // pairing that reserved real layout space above the ScrollView, or the
+  // later ~340px-tall header-only strip. See AppBackdrop (Illustrations.js)
+  // for the actual tint/wave-line/sparkle rendering.
   backgroundLayer: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
+    bottom: 0,
   },
   // A small, always-visible, non-scrolling strip (transparent background,
   // so the artwork shows through behind it) - kept minimal (just the
@@ -965,7 +964,7 @@ const homeStyles = StyleSheet.create({
     paddingBottom: 8,
   },
   // Transparent so Animated.ScrollView doesn't paint over
-  // AtmosphericHomeBackground with its own opaque default background.
+  // AppBackdrop with its own opaque default background.
   transparentScroll: {
     backgroundColor: 'transparent',
   },

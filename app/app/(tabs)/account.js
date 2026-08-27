@@ -22,7 +22,7 @@ import { useSessionContext } from '../_lib/session';
 import { useAppData } from '../_lib/appData';
 import { getBiometricLockEnabled, setBiometricLockEnabled } from '../_lib/biometricPreference';
 import { listVerifiedTotpFactors, enrollTotp, verifyTotpEnrollment, unenrollTotp } from '../_lib/mfa';
-import { AtmosphericHomeBackground, TopFadeMask } from '../_components/Illustrations';
+import { AppBackdrop, TopEdgeFade, isNightBackdrop } from '../_components/Illustrations';
 import PrimaryButton from '../_components/PrimaryButton';
 
 // Phase 14 (5-tab conversion, 2026-08-24): account-level actions - Gmail
@@ -48,9 +48,9 @@ import PrimaryButton from '../_components/PrimaryButton';
 //
 // Visual restyle (2026-08-24, design-references/account-tab-mockup-2026-08-24.png):
 // pure layout/styling pass over the exact same state/handlers above - no
-// business logic changed. Reuses AtmosphericHomeBackground/TopFadeMask
-// verbatim from Home (the user's explicit direction: every tab shares the
-// same atmospheric background, not a one-off treatment) and the bank-logo/
+// business logic changed. Reuses AppBackdrop verbatim from Home (the
+// user's explicit direction: every tab shares the same full-page
+// atmospheric background, not a one-off treatment) and the bank-logo/
 // fallback pattern Home's own per-institution drill-down already
 // established, rather than inventing a second version of either.
 function hasRealPlaidError(error) {
@@ -101,13 +101,20 @@ export default function Account() {
   const [mfaError, setMfaError] = useState(null);
   const [disablingMfa, setDisablingMfa] = useState(false);
 
-  // Same scroll-driven parallax/fade wiring as Home (Illustrations.js's
-  // AtmosphericHomeBackground/TopFadeMask) - the shared background concept
-  // every tab now uses, not a one-off copy.
+  // Kept for Animated.ScrollView's own onScroll wiring below - no longer
+  // drives the backdrop (AppBackdrop is a static full-screen layer, not
+  // scroll-parallaxed), the shared background concept every tab now uses.
   const scrollY = useSharedValue(0);
   const onScroll = useAnimatedScrollHandler((event) => {
     scrollY.value = event.contentOffset.y;
   });
+
+  // Text rendered directly on top of AppBackdrop (not inside an opaque
+  // card) needs to switch to a light color during the night backdrop -
+  // colors.darkest reads fine on the light morning/afternoon/evening
+  // tints but is unreadable on night's dark tint.
+  const night = isNightBackdrop();
+  const onBackdropTextColor = night ? colors.background : undefined;
 
   async function fetchGmailStatus() {
     try {
@@ -445,17 +452,28 @@ export default function Account() {
   return (
     <View style={styles.container}>
       <View style={accountStyles.backgroundLayer} pointerEvents="none">
-        <AtmosphericHomeBackground scrollY={scrollY} />
+        <AppBackdrop scrollY={scrollY} />
       </View>
 
+      <TopEdgeFade height={90}>
       <Animated.ScrollView
         style={[styles.list, accountStyles.transparentScroll]}
+        contentContainerStyle={{ paddingBottom: 110 }}
         onScroll={onScroll}
         scrollEventThrottle={16}
       >
         <View style={accountStyles.signedInBlock}>
-          <Text style={accountStyles.signedInLabel}>Signed in as</Text>
-          <Text style={accountStyles.signedInEmail}>{session.user.email}</Text>
+          <Text
+            style={[
+              accountStyles.signedInLabel,
+              night && { color: 'rgba(244, 246, 242, 0.75)' },
+            ]}
+          >
+            Signed in as
+          </Text>
+          <Text style={[accountStyles.signedInEmail, onBackdropTextColor && { color: onBackdropTextColor }]}>
+            {session.user.email}
+          </Text>
         </View>
 
         {error && (
@@ -775,8 +793,8 @@ export default function Account() {
           )}
         </View>
       </Animated.ScrollView>
+      </TopEdgeFade>
 
-      <TopFadeMask scrollY={scrollY} />
       <StatusBar style="auto" />
     </View>
   );
@@ -788,6 +806,7 @@ const accountStyles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
+    bottom: 0,
   },
   transparentScroll: {
     backgroundColor: 'transparent',

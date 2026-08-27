@@ -16,7 +16,7 @@ import { ScenarioResult, describeComparisonDifference } from './ScenarioResult';
 import DigitAmountPicker from './DigitAmountPicker';
 import PrimaryButton from './PrimaryButton';
 import AffordabilityChat from './AffordabilityChat';
-import { LeafAvatar, CheckBadge, CarIllustration, MountainIllustration } from './Illustrations';
+import { LeafAvatar, CheckBadge, CarIllustration, MountainIllustration, isNightBackdrop } from './Illustrations';
 
 // "A few things to consider" (comparison screen) - 30 days, matching the
 // mockup's own "in the next 30 days" copy. Deliberately independent of
@@ -246,6 +246,13 @@ export default function AffordabilityQuery() {
   // fetch plumbing.
   const { goalProgress, subscriptionAudit } = useAppData();
 
+  // This component always renders directly on top of the Budget tab's
+  // AppBackdrop (no card wrapper around its own header/status-label text)
+  // - only ever used there, so it's safe to compute this itself rather
+  // than threading a prop down from budget.js.
+  const night = isNightBackdrop();
+  const onBackdropTextColor = night ? colors.background : undefined;
+
   const [text, setText] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -474,8 +481,12 @@ export default function AffordabilityQuery() {
     <View style={{ gap: 16 }}>
       <View style={{ alignItems: 'center', gap: 4 }}>
         <LeafAvatar size={48} />
-        <Text style={[styles.cardTitle, { fontSize: 19 }]}>Can I afford this?</Text>
-        <Text style={styles.smallText}>Tell Sorrel what you're thinking about.</Text>
+        <Text style={[styles.cardTitle, { fontSize: 19 }, onBackdropTextColor && { color: onBackdropTextColor }]}>
+          Can I afford this?
+        </Text>
+        <Text style={[styles.smallText, night && { color: 'rgba(244, 246, 242, 0.75)' }]}>
+          Tell Sorrel what you're thinking about.
+        </Text>
       </View>
 
       {pendingContext && (
@@ -529,13 +540,17 @@ export default function AffordabilityQuery() {
               anything. */}
           <View style={inlineStyles.inputRow}>
             <TextInput
-              style={[styles.input, inlineStyles.input]}
+              style={[
+                styles.input,
+                inlineStyles.input,
+                night && { borderColor: 'rgba(244, 246, 242, 0.4)', color: colors.background },
+              ]}
               value={text}
               onChangeText={setText}
               placeholder={
                 awaitingFinanceTerm ? 'e.g. 60 months' : pendingContext ? 'e.g. $50' : 'e.g. Can I afford a $50 dinner?'
               }
-              placeholderTextColor={colors.placeholder}
+              placeholderTextColor={night ? 'rgba(244, 246, 242, 0.5)' : colors.placeholder}
               editable={!submitting && !transcribing}
             />
             {transcribing ? (
@@ -596,7 +611,15 @@ export default function AffordabilityQuery() {
         <View style={{ gap: 16 }}>
           <View style={{ alignItems: 'center', gap: 8 }}>
             <CheckBadge size={56} tone={tone} />
-            <Text style={[styles.cardTitle, { fontSize: 20, textAlign: 'center' }]}>{result.status_label}</Text>
+            <Text
+              style={[
+                styles.cardTitle,
+                { fontSize: 20, textAlign: 'center' },
+                onBackdropTextColor && { color: onBackdropTextColor },
+              ]}
+            >
+              {result.status_label}
+            </Text>
           </View>
 
           <View style={styles.card}>

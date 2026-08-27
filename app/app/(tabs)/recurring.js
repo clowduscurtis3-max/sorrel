@@ -7,7 +7,7 @@ import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native
 import { styles, colors } from '../_lib/styles';
 import { useAppData } from '../_lib/appData';
 import { iconForCategory } from '../_lib/categoryIcons';
-import { AtmosphericHomeBackground, TopFadeMask } from '../_components/Illustrations';
+import { AppBackdrop, TopEdgeFade, isNightBackdrop } from '../_components/Illustrations';
 import SorrelWordmark from '../_components/SorrelWordmark';
 
 // Recurring tab restyle (2026-08-25, design-references/recurring-tab-mockup-
@@ -220,27 +220,40 @@ export default function Recurring() {
     scrollY.value = event.contentOffset.y;
   });
 
+  // Text/icons rendered directly on top of AppBackdrop (not inside an
+  // opaque card) need to switch to a light color during the night
+  // backdrop - colors.darkest reads fine on the light morning/afternoon/
+  // evening tints but is unreadable on night's dark tint.
+  const night = isNightBackdrop();
+  const onBackdropTextColor = night ? colors.background : undefined;
+
   const findings = subscriptionAudit ? [...subscriptionAudit.gradual_increases, ...subscriptionAudit.price_jumps] : [];
 
   return (
     <View style={styles.container}>
       <View style={recurringStyles.backgroundLayer} pointerEvents="none">
-        <AtmosphericHomeBackground scrollY={scrollY} />
+        <AppBackdrop scrollY={scrollY} />
       </View>
 
       <View style={recurringStyles.wordmarkStrip}>
-        <SorrelWordmark layout="row" leafSize={30} showTagline={false} />
-        <MaterialIcons name="notifications-none" size={26} color={colors.darkest} />
+        <SorrelWordmark layout="row" leafSize={30} showTagline={false} textColor={onBackdropTextColor} />
+        <MaterialIcons name="notifications-none" size={26} color={onBackdropTextColor || colors.darkest} />
       </View>
 
+      <TopEdgeFade height={90}>
       <Animated.ScrollView
         style={[styles.list, recurringStyles.transparentScroll]}
+        contentContainerStyle={{ paddingBottom: 110 }}
         onScroll={onScroll}
         scrollEventThrottle={16}
       >
         <View style={recurringStyles.titleBlock}>
-          <Text style={recurringStyles.title}>Recurring</Text>
-          <Text style={recurringStyles.subtitle}>
+          <Text style={[recurringStyles.title, onBackdropTextColor && { color: onBackdropTextColor }]}>
+            Recurring
+          </Text>
+          <Text
+            style={[recurringStyles.subtitle, night && { color: 'rgba(244, 246, 242, 0.75)' }]}
+          >
             See all your recurring charges, upcoming payments, and opportunities to save.
           </Text>
         </View>
@@ -405,8 +418,8 @@ export default function Recurring() {
           </>
         )}
       </Animated.ScrollView>
+      </TopEdgeFade>
 
-      <TopFadeMask scrollY={scrollY} />
       <StatusBar style="auto" />
     </View>
   );
@@ -418,7 +431,7 @@ const recurringStyles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    height: 340,
+    bottom: 0,
   },
   wordmarkStrip: {
     flexDirection: 'row',
@@ -433,7 +446,11 @@ const recurringStyles = StyleSheet.create({
   },
   titleBlock: {
     paddingHorizontal: 20,
-    paddingTop: 8,
+    // Pushed down past TopEdgeFade's 90px fade zone (Illustrations.js) -
+    // otherwise the title sat inside that zone even at rest (scroll
+    // position 0), reading as "already faded before scrolling" instead of
+    // only fading once actually scrolled up into it.
+    paddingTop: 110,
     paddingBottom: 16,
     gap: 4,
   },

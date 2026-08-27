@@ -1,17 +1,14 @@
-import { View } from 'react-native';
-import Svg, {
-  Path,
-  Circle,
-  Line,
-  Polygon,
-  Rect,
-  Defs,
-  RadialGradient,
-  LinearGradient,
-  Stop,
-} from 'react-native-svg';
+import { View, StyleSheet } from 'react-native';
+import Svg, { Path, Circle, Line, Polygon, SvgXml, Rect, Defs, LinearGradient, Stop } from 'react-native-svg';
 import Animated, { useAnimatedStyle, interpolate, Extrapolate } from 'react-native-reanimated';
+import MaskedView from '@react-native-masked-view/masked-view';
 import { colors } from '../_lib/styles';
+import {
+  MORNING_BASE_SVG,
+  AFTERNOON_BASE_SVG,
+  EVENING_BASE_SVG,
+  NIGHT_BASE_SVG,
+} from '../_lib/celestialBackdrops';
 
 // Flat, thin-stroke line art for the Budget-tab Sorrel restyle, matching
 // the mockup's visual language as closely as hand-authored SVG reasonably
@@ -192,387 +189,157 @@ export function MountainIllustration({ size = 96 }) {
   );
 }
 
-// Home-tab header accent - redesigned 2026-08-24 per the user's own
-// reference mockup: not a small self-contained badge, but a full-width
-// scene (horizon glow, hills, birds/stars, sparkles) that bleeds behind
-// the greeting text, with the LeafAvatar mark - unchanged, never redrawn
-// or recolored, still the app's one source-of-truth mark - sitting in its
-// own small circular badge at the top-right. Three named states (the
-// user's own vocabulary: "sunrise, sunset, and moonlight"), boundaries
-// deliberately matching (tabs)/index.js's own `greeting()` function
-// exactly (hour<12/hour<18/else) so the scene and the "Good morning/
-// afternoon/evening" text next to it can never disagree.
-function timeOfDayPeriod(hour) {
-  if (hour < 12) return 'sunrise';
-  if (hour < 18) return 'sunset';
-  return 'moonlight';
+// Full-page time-of-day backdrop (2026-08-26): replaces the earlier
+// sunrise/hills/birds hero scene - previously a ~340px-tall strip
+// confined to the top of Home only, fading into colors.background as the
+// user scrolled - with a full-screen solid tint + soft flowing wave-line
+// texture + scattered sparkles, applied behind every tab (Home/Budget/
+// Recurring/Goal/Account alike), matching the user's own reference
+// mockup exactly: four labeled panels (morning/afternoon/evening/night),
+// each its own solid background tint + line/sparkle color, with the app's
+// own nav bar and content cards floating as opaque surfaces on top of it.
+// Four named periods - deliberately their own boundary set, not forced to
+// match (tabs)/index.js's own 3-bucket `greeting()` text exactly, since
+// this is a slower-changing background mood, not the literal greeting
+// word rendered next to it.
+export function backdropPeriod(hour) {
+  if (hour >= 5 && hour < 11) return 'morning';
+  if (hour >= 11 && hour < 17) return 'afternoon';
+  if (hour >= 17 && hour < 20) return 'evening';
+  return 'night';
 }
 
-// One-off warm/cool tones for this illustration only, not part of the
-// 7-hex Sorrel brand palette (_lib/styles.js's `colors`) - same scoped
-// exception already established for colors.warning as an "autumn gold" in
-// SeasonalHills below. A real sunrise/sunset glow reads as green-tinted
-// and wrong if built only from the brand's sage/primary greens (confirmed
-// directly against the user's own reference mockup, sampled pixel colors
-// included) - genuinely warm gold/orange and cool blue-lavender tones are
-// used here, scoped to this one file, never adopted as app-wide semantic
-// colors.
-const SCENE_TONES = {
-  sunrise: { glowOuter: '#F6D48A', glowMid: '#F2B24C', sun: '#FFFBF1', sparkle: '#E3A83F' },
-  sunset: { glowOuter: '#F0B27A', glowMid: '#E8925C', sun: '#FFF3E4', sparkle: '#D9773F' },
-  moonlight: { glow: '#C9D3E8', moon: colors.dark, star: colors.dark },
+// Every other tab/component that renders text or an icon directly on top
+// of AppBackdrop (not inside an opaque card, where the existing dark
+// colors.darkest/colors.dark text already reads fine regardless of time
+// of day) needs to know whether it should switch to a light color instead
+// - the night artwork is dark enough that colors.darkest text on it is
+// unreadable. Kept as a plain function (not a hook - no subscription/
+// state involved) so any file can call it inline.
+export function isNightBackdrop(now = new Date()) {
+  return backdropPeriod(now.getHours()) === 'night';
+}
+
+const CELESTIAL_BASE_XML = {
+  morning: MORNING_BASE_SVG,
+  afternoon: AFTERNOON_BASE_SVG,
+  evening: EVENING_BASE_SVG,
+  night: NIGHT_BASE_SVG,
 };
 
-// Two soft, gently-undulating hill layers spanning the full scene width,
-// anchored to the bottom - same rounded-hill visual language as
-// SeasonalHills below, kept as its own smaller/simpler curve here since
-// this scene is wide and short rather than roughly square.
-function HeaderHills({ tone }) {
-  return (
-    <>
-      <Path
-        d="M0,170 C50,120 110,118 170,148 C220,120 270,108 330,140 C360,122 380,128 400,142 L400,170 Z"
-        fill={colors.sage}
-        fillOpacity={tone === 'moonlight' ? 0.5 : 0.6}
-      />
-      <Path
-        d="M0,170 C40,142 90,146 140,170 C190,140 240,134 290,166 C320,146 360,150 400,170 Z"
-        fill={colors.primary}
-        fillOpacity={tone === 'moonlight' ? 0.4 : 0.5}
-      />
-    </>
-  );
-}
+// Over-scale beyond plain "cover" so there's real margin to translate
+// within for the parallax shift below, clipped by the outer View's
+// overflow:hidden - without this, "cover" alone leaves ~zero vertical
+// slack for this artwork's aspect ratio against a typical phone screen's
+// aspect ratio (checked directly: the two are close enough that "cover"
+// satisfies both dimensions almost exactly, no spare room to shift).
+const PARALLAX_SCALE = 1.18;
+const PARALLAX_DISTANCE = 600;
+const PARALLAX_TRAVEL = 50;
 
-function Bird({ x, y, scale = 1 }) {
-  return (
-    <Path
-      d={`M${x} ${y} q${4 * scale} ${-5 * scale} ${8 * scale} 0 q${4 * scale} ${-5 * scale} ${8 * scale} 0`}
-      stroke={colors.dark}
-      strokeWidth="1.4"
-      fill="none"
-      strokeLinecap="round"
-    />
-  );
-}
+// A scroll-driven line "wiggle" was tried and removed entirely (2026-08-26)
+// - first attempt (an animated feTurbulence/feDisplacementMap filter)
+// crashed on-device ("Cannot find host instance for this component" -
+// filter primitives aren't real mounted views, Reanimated had nothing to
+// attach to); the follow-up (animated transforms on grouped real Path
+// elements) rendered fine but was confirmed laggy on-device even after
+// dialing back twice (fewer groups, then fewer animated paths). Removed
+// rather than dialed back further, per direct instruction - the contour
+// lines are just part of the static artwork below again, exactly as
+// supplied, no separate animated layer.
 
-function Sparkle({ x, y, size = 5, color = colors.accent }) {
-  return (
-    <Path
-      d={`M${x} ${y - size} L${x + size * 0.3} ${y - size * 0.3} L${x + size} ${y} L${x + size * 0.3} ${
-        y + size * 0.3
-      } L${x} ${y + size} L${x - size * 0.3} ${y + size * 0.3} L${x - size} ${y} L${x - size * 0.3} ${
-        y - size * 0.3
-      } Z`}
-      fill={color}
-    />
-  );
-}
+// Applied behind every tab's own content - a plain sibling View, absolute
+// -positioned by each screen's own `backgroundLayer` style to fill the
+// full container (not just a header-height strip) - one shared backdrop,
+// not a per-tab copy, so all five tabs can never visually drift apart.
+//
+// Renders the four finalized, hand-authored celestial-flow SVGs (2026-08-26)
+// exactly as supplied - real gradients/filters/contour paths/stars/sparkles/
+// moon, not a code-drawn approximation of them. `SvgXml` (react-native-svg)
+// parses the raw XML string at render time; `celestialBackdrops.js` embeds
+// that exact XML verbatim (byte-for-byte identical to the canonical .svg
+// files under app/assets/backdrops/ - the real source of truth) as a JS
+// string constant, since Metro has no built-in way to import raw text from
+// an arbitrary file extension. The whole thing carries one parallax
+// transform (scale + scroll-driven translateY). `preserveAspectRatio=
+// "xMidYMid slice"` (matching the source's own `viewBox="0 0 1080 1920"`)
+// scales to fully cover and crops overflow, same as CSS `background-size:
+// cover` - never stretches non-uniformly, never leaves a gap. Never
+// redraw/simplify/rasterize this artwork - if it ever needs to change, get
+// a new SVG source and re-run the embed step, don't hand-edit the paths.
+export function AppBackdrop({ now = new Date(), scrollY }) {
+  const period = backdropPeriod(now.getHours());
+  const baseXml = CELESTIAL_BASE_XML[period];
 
-// Kept as the simple, non-scrolling version of the scene - used nowhere
-// in this app today (Home moved to AtmosphericHomeBackground below), but
-// left in place as the plain static primitive in case a non-scrolling
-// context wants it later, rather than deleting a working, self-contained
-// component. If it stays unused, remove it next time this file is open
-// for other work.
-export function TimeOfDayScene({ height = 150, badgeSize = 88, now = new Date() }) {
-  const period = timeOfDayPeriod(now.getHours());
-  const leafSize = badgeSize * 0.56;
-  const badgeCx = 330;
-  const badgeCy = 62;
-  const tone = SCENE_TONES[period];
+  const parallaxStyle = useAnimatedStyle(() => ({
+    transform: [
+      { scale: PARALLAX_SCALE },
+      {
+        translateY: interpolate(scrollY.value, [0, PARALLAX_DISTANCE], [0, -PARALLAX_TRAVEL], Extrapolate.CLAMP),
+      },
+    ],
+  }));
 
   return (
-    <View style={{ width: '100%', height }}>
-      <Svg
-        width="100%"
-        height="100%"
-        viewBox="0 0 400 170"
-        preserveAspectRatio="none"
-        style={{ position: 'absolute', top: 0, left: 0 }}
-      >
-        {(period === 'sunrise' || period === 'sunset') && (
-          <>
-            <Defs>
-              <RadialGradient id={`glow-${period}`} cx="235" cy="120" r="150" gradientUnits="userSpaceOnUse">
-                <Stop offset="0%" stopColor={tone.glowMid} stopOpacity="0.5" />
-                <Stop offset="35%" stopColor={tone.glowOuter} stopOpacity="0.32" />
-                <Stop offset="75%" stopColor={tone.glowOuter} stopOpacity="0.1" />
-                <Stop offset="100%" stopColor={tone.glowOuter} stopOpacity="0" />
-              </RadialGradient>
-            </Defs>
-            <Circle cx="235" cy="120" r="150" fill={`url(#glow-${period})`} />
-            <Circle cx="235" cy="128" r="52" fill={tone.sun} />
-            <Bird x={112} y={108} scale={0.9} />
-            <Bird x={148} y={85} />
-            <Bird x={178} y={62} scale={0.85} />
-            <Bird x={128} y={122} scale={0.7} />
-            <Sparkle x={196} y={44} size={6} color={tone.sparkle} />
-            <Sparkle x={158} y={62} size={3.5} color={tone.sparkle} />
-            <Sparkle x={300} y={38} size={4} color={tone.sparkle} />
-            <Sparkle x={368} y={88} size={3} color={tone.sparkle} />
-          </>
-        )}
-        {period === 'moonlight' && (
-          <>
-            <Defs>
-              <RadialGradient id="glow-moonlight" cx="260" cy="90" r="120" gradientUnits="userSpaceOnUse">
-                <Stop offset="0%" stopColor={tone.glow} stopOpacity="0.32" />
-                <Stop offset="60%" stopColor={tone.glow} stopOpacity="0.14" />
-                <Stop offset="100%" stopColor={tone.glow} stopOpacity="0" />
-              </RadialGradient>
-            </Defs>
-            <Circle cx="260" cy="90" r="120" fill="url(#glow-moonlight)" />
-            <Circle cx={badgeCx - 30} cy={badgeCy - 6} r="11" fill={tone.moon} fillOpacity="0.85" />
-            <Circle cx={badgeCx - 25} cy={badgeCy - 10} r="9.5" fill={colors.card} />
-            <Circle cx="150" cy="35" r="1.5" fill={tone.star} />
-            <Circle cx="195" cy="18" r="1.1" fill={tone.star} />
-            <Circle cx="120" cy="58" r="1.3" fill={tone.star} />
-            <Circle cx="240" cy="30" r="1" fill={tone.star} />
-            <Circle cx="365" cy="95" r="1.2" fill={tone.star} />
-            <Circle cx="90" cy="90" r="1" fill={tone.star} />
-          </>
-        )}
-
-        <HeaderHills tone={period} />
-      </Svg>
-
-      <View
-        style={{
-          position: 'absolute',
-          top: badgeCy - badgeSize / 2 - 10,
-          right: 400 - badgeCx - badgeSize / 2,
-          width: badgeSize,
-          height: badgeSize,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <Svg width={badgeSize} height={badgeSize} viewBox="0 0 100 100" style={{ position: 'absolute' }}>
-          <Circle cx="50" cy="50" r="48" fill={colors.card} />
-        </Svg>
-        <LeafAvatar size={leafSize} />
-      </View>
+    <View style={{ flex: 1, overflow: 'hidden' }}>
+      <Animated.View style={[{ flex: 1 }, parallaxStyle]}>
+        <SvgXml
+          xml={baseXml}
+          width="100%"
+          height="100%"
+          preserveAspectRatio="xMidYMid slice"
+          style={StyleSheet.absoluteFillObject}
+        />
+      </Animated.View>
     </View>
   );
 }
 
-// Home screen atmospheric background rework (2026-08-24): the same
-// sunrise/sunset/moonlight scene as TimeOfDayScene above, but split into
-// two independently-animatable layers (sky vs. hills+creatures) and
-// grown from a thin 170-unit-tall header strip into a real ~340px-tall
-// background composition, so Home's financial content can scroll over it
-// as a persistent environment instead of a fixed hero image. Reuses
-// HeaderHills/Bird/Sparkle/SCENE_TONES/timeOfDayPeriod verbatim - only
-// the composition/layering/parallax is new, not the art itself.
+// Two earlier approaches to this same problem, both wrong for real reasons
+// found on-device:
+// 1. A fixed gradient patch painted on top of the screen - could never
+//    match the real textured backdrop behind it (a flat color/gradient
+//    drawn over a busy image just looks like its own separate shape), and
+//    sat on top of everything including content only partway scrolled in,
+//    visibly slicing through it.
+// 2. Fading the whole card's opacity based on scroll position - faded the
+//    ENTIRE card uniformly (top, middle, bottom together) rather than just
+//    the sliver actually crossing the top edge, so the box visibly washed
+//    out while still fully on-screen, well before it needed to.
 //
-// The hills+creatures layer deliberately keeps its own original ~170/190-
-// unit-tall local viewBox (pinned to the bottom of the taller container)
-// rather than being redrawn for the full 340-unit canvas - HeaderHills'
-// path data is authored for that proportion, and preserveAspectRatio=
-// "none" stretching it by the small ~12% difference (170->190) is
-// visually negligible for these soft curves. The sky layer (glow/sun/
-// moon/stars) gets its own taller viewBox instead, since it has real
-// room to fill without needing to redraw anything - it's built from
-// simple circles/gradients, not hand-authored curves.
-export const ATMOSPHERIC_BACKGROUND_HEIGHT = 340;
-export const TOP_FADE_MASK_HEIGHT = 130;
-
-const HILLS_LAYER_HEIGHT = 190;
-// Distance (in scroll px) over which each effect completes, and how far
-// each layer travels relative to the 1:1 scroll speed of the cards
-// themselves. Deliberately small - "nothing dramatic" per the explicit
-// product bar for this rework. Tune here first if the on-device feel
-// needs adjusting; nothing else in this component should need to change
-// for a pure speed/timing tweak.
-const SKY_PARALLAX_DISTANCE = 300;
-const SKY_PARALLAX_TRAVEL = 40;
-const HILLS_PARALLAX_DISTANCE = 300;
-const HILLS_PARALLAX_TRAVEL = 90;
-const SCENE_FADE_DISTANCE = 260;
-const FADE_MASK_IN_DISTANCE = 50;
-
-export function AtmosphericHomeBackground({
-  height = ATMOSPHERIC_BACKGROUND_HEIGHT,
-  badgeSize = 88,
-  now = new Date(),
-  scrollY,
-}) {
-  const period = timeOfDayPeriod(now.getHours());
-  const tone = SCENE_TONES[period];
-  const leafSize = badgeSize * 0.56;
-  const badgeCx = 330;
-  const badgeCy = 62;
-
-  // The whole composition dissolves into colors.background the further
-  // down the user scrolls ("the environment can become more subtle" per
-  // the product brief) - not just parallax translation, real opacity.
-  const sceneFadeStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(scrollY.value, [0, SCENE_FADE_DISTANCE], [1, 0], Extrapolate.CLAMP),
-  }));
-  const skyStyle = useAnimatedStyle(() => ({
-    transform: [
-      {
-        translateY: interpolate(
-          scrollY.value,
-          [0, SKY_PARALLAX_DISTANCE],
-          [0, -SKY_PARALLAX_TRAVEL],
-          Extrapolate.CLAMP
-        ),
-      },
-    ],
-  }));
-  const hillsStyle = useAnimatedStyle(() => ({
-    transform: [
-      {
-        translateY: interpolate(
-          scrollY.value,
-          [0, HILLS_PARALLAX_DISTANCE],
-          [0, -HILLS_PARALLAX_TRAVEL],
-          Extrapolate.CLAMP
-        ),
-      },
-    ],
-  }));
-
+// The real fix needs an actual alpha mask - only the specific pixels
+// passing through the top boundary should fade, regardless of what they
+// are (a card, greeting text, anything), while the rest stays fully
+// opaque. That requires @react-native-masked-view/masked-view - plain
+// RN/SVG has no way to alpha-mask an arbitrary View/Text subtree.
+// TopEdgeFade wraps a scrollable region so its own top `height` px fade
+// to transparent (revealing whatever is genuinely behind - the real
+// backdrop) while everything below that stays untouched; scroll position
+// isn't part of this at all, since the ScrollView already clips its own
+// content to its bounds - whatever content currently occupies that top
+// sliver of the viewport is exactly what's supposed to fade.
+function TopEdgeFadeMaskShape({ height }) {
   return (
-    <Animated.View
-      pointerEvents="none"
-      style={[{ width: '100%', height, overflow: 'hidden' }, sceneFadeStyle]}
-    >
-      {/* Sky layer: glow + sun/moon + stars - the most "distant" element,
-          moves slowest. Its own full-height viewBox (unlike the hills
-          layer below), scaled up from TimeOfDayScene's original numbers
-          for this taller canvas. */}
-      <Animated.View
-        style={[{ position: 'absolute', top: 0, left: 0, right: 0, height }, skyStyle]}
-      >
-        <Svg width="100%" height="100%" viewBox={`0 0 400 ${height}`} preserveAspectRatio="none">
-          {(period === 'sunrise' || period === 'sunset') && (
-            <>
-              <Defs>
-                <RadialGradient id={`glow-${period}`} cx="235" cy="170" r="220" gradientUnits="userSpaceOnUse">
-                  <Stop offset="0%" stopColor={tone.glowMid} stopOpacity="0.5" />
-                  <Stop offset="35%" stopColor={tone.glowOuter} stopOpacity="0.32" />
-                  <Stop offset="75%" stopColor={tone.glowOuter} stopOpacity="0.1" />
-                  <Stop offset="100%" stopColor={tone.glowOuter} stopOpacity="0" />
-                </RadialGradient>
-              </Defs>
-              <Circle cx="235" cy="170" r="220" fill={`url(#glow-${period})`} />
-              <Circle cx="235" cy="175" r="68" fill={tone.sun} />
-              <Sparkle x={196} y={70} size={6} color={tone.sparkle} />
-              <Sparkle x={150} y={100} size={3.5} color={tone.sparkle} />
-              <Sparkle x={300} y={60} size={4} color={tone.sparkle} />
-              <Sparkle x={368} y={130} size={3} color={tone.sparkle} />
-            </>
-          )}
-          {period === 'moonlight' && (
-            <>
-              <Defs>
-                <RadialGradient id="glow-moonlight" cx="260" cy="140" r="190" gradientUnits="userSpaceOnUse">
-                  <Stop offset="0%" stopColor={tone.glow} stopOpacity="0.32" />
-                  <Stop offset="60%" stopColor={tone.glow} stopOpacity="0.14" />
-                  <Stop offset="100%" stopColor={tone.glow} stopOpacity="0" />
-                </RadialGradient>
-              </Defs>
-              <Circle cx="260" cy="140" r="190" fill="url(#glow-moonlight)" />
-              <Circle cx={badgeCx - 30} cy={badgeCy - 6} r="11" fill={tone.moon} fillOpacity="0.85" />
-              <Circle cx={badgeCx - 25} cy={badgeCy - 10} r="9.5" fill={colors.card} />
-              <Circle cx="150" cy="45" r="1.5" fill={tone.star} />
-              <Circle cx="195" cy="24" r="1.1" fill={tone.star} />
-              <Circle cx="120" cy="70" r="1.3" fill={tone.star} />
-              <Circle cx="240" cy="38" r="1" fill={tone.star} />
-              <Circle cx="365" cy="115" r="1.2" fill={tone.star} />
-              <Circle cx="90" cy="105" r="1" fill={tone.star} />
-              <Circle cx="60" cy="180" r="1" fill={tone.star} />
-              <Circle cx="330" cy="200" r="1.2" fill={tone.star} />
-            </>
-          )}
-        </Svg>
-      </Animated.View>
-
-      {/* Hills + creatures layer: pinned to the bottom of the container,
-          moves slightly faster than the sky above but still much slower
-          than the 1:1 scroll speed of the cards - the "foreground of the
-          background." Original 170-ish-unit viewBox, unchanged bird/hill
-          coordinates from TimeOfDayScene, just given a modest 190-unit
-          box instead (negligible stretch). */}
-      <Animated.View
-        style={[
-          { position: 'absolute', bottom: 0, left: 0, right: 0, height: HILLS_LAYER_HEIGHT },
-          hillsStyle,
-        ]}
-      >
-        <Svg
-          width="100%"
-          height="100%"
-          viewBox={`0 0 400 ${HILLS_LAYER_HEIGHT}`}
-          preserveAspectRatio="none"
-        >
-          {(period === 'sunrise' || period === 'sunset') && (
-            <>
-              <Bird x={112} y={108} scale={0.9} />
-              <Bird x={148} y={85} />
-              <Bird x={178} y={62} scale={0.85} />
-              <Bird x={128} y={122} scale={0.7} />
-            </>
-          )}
-          <HeaderHills tone={period} />
-        </Svg>
-      </Animated.View>
-
-      {/* Leaf badge - fixed, doesn't parallax (the Sorrel brand mark, not
-          scenery) - deliberately its own unstretched Svg, same reasoning
-          as TimeOfDayScene's own badge above. */}
-      <View
-        style={{
-          position: 'absolute',
-          top: badgeCy - badgeSize / 2 - 10,
-          right: 400 - badgeCx - badgeSize / 2,
-          width: badgeSize,
-          height: badgeSize,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <Svg width={badgeSize} height={badgeSize} viewBox="0 0 100 100" style={{ position: 'absolute' }}>
-          <Circle cx="50" cy="50" r="48" fill={colors.card} />
-        </Svg>
-        <LeafAvatar size={leafSize} />
-      </View>
-    </Animated.View>
+    <View style={{ flex: 1 }}>
+      <Svg width="100%" height={height} viewBox={`0 0 100 ${height}`} preserveAspectRatio="none">
+        <Defs>
+          <LinearGradient id="topEdgeFadeMask" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor="#000000" stopOpacity="0" />
+            <Stop offset="1" stopColor="#000000" stopOpacity="1" />
+          </LinearGradient>
+        </Defs>
+        <Rect x="0" y="0" width="100" height={height} fill="url(#topEdgeFadeMask)" />
+      </Svg>
+      <View style={{ flex: 1, backgroundColor: '#000' }} />
+    </View>
   );
 }
 
-// Soft dissolve zone at the very top of the screen - invisible at rest
-// (scroll position 0, so the full atmosphere is genuinely visible exactly
-// as the product brief asks) and fades in almost immediately once
-// scrolling begins, so cards scrolling up into this band blend into
-// colors.background rather than hitting a hard clip edge. A real SVG
-// linear gradient, not stacked opacity views - see AtmosphericHomeBackground's
-// own comment above and NetWorthChart.js's documented history for why a
-// faked gradient reliably reads as a visible hard-edged ring/band on this
-// stack.
-export function TopFadeMask({ height = TOP_FADE_MASK_HEIGHT, scrollY }) {
-  const maskStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(scrollY.value, [0, FADE_MASK_IN_DISTANCE], [0, 1], Extrapolate.CLAMP),
-  }));
-
+export function TopEdgeFade({ height = 90, children }) {
   return (
-    <Animated.View
-      pointerEvents="none"
-      style={[{ position: 'absolute', top: 0, left: 0, right: 0, height }, maskStyle]}
-    >
-      <Svg width="100%" height="100%" viewBox={`0 0 400 ${height}`} preserveAspectRatio="none">
-        <Defs>
-          <LinearGradient id="topFade" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0%" stopColor={colors.background} stopOpacity="1" />
-            <Stop offset="100%" stopColor={colors.background} stopOpacity="0" />
-          </LinearGradient>
-        </Defs>
-        <Rect x="0" y="0" width="400" height={height} fill="url(#topFade)" />
-      </Svg>
-    </Animated.View>
+    <MaskedView style={{ flex: 1 }} maskElement={<TopEdgeFadeMaskShape height={height} />}>
+      {children}
+    </MaskedView>
   );
 }
 

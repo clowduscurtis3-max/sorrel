@@ -17,6 +17,17 @@ function monthsBetween(from, to) {
   return (to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24 * AVG_DAYS_PER_MONTH);
 }
 
+// Exported (2026-08-27) so callers building their own presentation around
+// useGoalForm's state (e.g. (tabs)/goal.js's redesigned tap-to-reveal edit
+// rows) can show the same derived target date GoalFormFields itself
+// displays, without a second copy of this formula - additive only, doesn't
+// change GoalFormFields'/goal-intake.js's existing behavior at all.
+export function computeTargetDateFromTimeframe(goalTimeframe) {
+  const months = Number(goalTimeframe);
+  if (!goalTimeframe || !Number.isFinite(months) || months <= 0) return null;
+  return new Date(Date.now() + months * AVG_DAYS_PER_MONTH * 86400000);
+}
+
 // Phase 7 Step 1 sub-step 1.6: shared goal-editing logic + fields, used by
 // both goal-intake.js (first-run intake, reached via the root layout's
 // gate) and (tabs)/goal.js (inline editing on the Goal tab). Extracted
@@ -177,11 +188,10 @@ export function GoalFormFields({ form }) {
   // doesn't return created_at, and re-fetching it just for display isn't
   // worth a schema/API change - the timeframe is already an approximation,
   // not an exact deadline, everywhere else it's used).
-  const targetDate = useMemo(() => {
-    const months = Number(form.goalTimeframe);
-    if (!form.goalTimeframe || !Number.isFinite(months) || months <= 0) return null;
-    return new Date(Date.now() + months * AVG_DAYS_PER_MONTH * 86400000);
-  }, [form.goalTimeframe]);
+  const targetDate = useMemo(
+    () => computeTargetDateFromTimeframe(form.goalTimeframe),
+    [form.goalTimeframe]
+  );
 
   const tomorrow = new Date(Date.now() + 86400000);
 

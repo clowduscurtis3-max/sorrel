@@ -2,6 +2,7 @@ import { Tabs } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { AppDataProvider } from '../_lib/appData';
 import { colors } from '../_lib/styles';
+import { isNightBackdrop } from '../_components/Illustrations';
 
 // Phase 7 Step 1: tab shell, originally exactly four tabs (Home/Budget/
 // Recurring/Goal) with account-level actions living in a plain <Modal>
@@ -33,6 +34,19 @@ const TAB_ICONS = {
 };
 
 export default function TabsLayout() {
+  // Floating pill tab bar (2026-08-27), matching the user's own reference
+  // mockup exactly: a rounded, inset-from-the-edges bar rather than a
+  // flat edge-to-edge one, with a light (colors.card) fill during the day
+  // and a dark (colors.darkest) fill at night - previously always the
+  // platform-default white bar regardless of AppBackdrop's own time-of-day
+  // theme, which read as a jarring light bar sitting on top of the night
+  // backdrop. `night` is computed once per render, same "no live-updating
+  // timer, a re-render eventually happening is enough" convention already
+  // used everywhere else this app switches on time-of-day (see
+  // isNightBackdrop's own callers) - this isn't a countdown clock, a
+  // several-times-an-hour discrepancy at a period boundary is fine.
+  const night = isNightBackdrop();
+
   return (
     <AppDataProvider>
       <Tabs
@@ -48,11 +62,33 @@ export default function TabsLayout() {
           // still what drives the tab bar's own label text, independent
           // of whether the header itself is shown.
           headerShown: false,
-          tabBarActiveTintColor: colors.primary,
-          tabBarInactiveTintColor: colors.muted,
+          tabBarActiveTintColor: night ? colors.sage : colors.primary,
+          tabBarInactiveTintColor: night ? 'rgba(244, 246, 242, 0.45)' : colors.muted,
           tabBarIcon: ({ color, size }) => (
             <MaterialIcons name={TAB_ICONS[route.name]} size={size} color={color} />
           ),
+          // Absolutely positioned + inset from all three edges + a large
+          // borderRadius is what actually produces the "floating pill"
+          // look rather than a flat bar - each screen's own ScrollView
+          // content gets matching extra bottom padding (see each tab's
+          // own contentContainerStyle) so the last card can still scroll
+          // fully clear of it instead of sitting behind it.
+          tabBarStyle: {
+            position: 'absolute',
+            left: 16,
+            right: 16,
+            bottom: 20,
+            height: 64,
+            borderRadius: 28,
+            borderTopWidth: 0,
+            backgroundColor: night ? colors.darkest : colors.card,
+            elevation: 8,
+            shadowColor: '#000',
+            shadowOpacity: 0.15,
+            shadowRadius: 10,
+            shadowOffset: { width: 0, height: 4 },
+          },
+          tabBarItemStyle: { paddingTop: 6 },
         })}
       >
         <Tabs.Screen name="index" options={{ title: 'Home' }} />
