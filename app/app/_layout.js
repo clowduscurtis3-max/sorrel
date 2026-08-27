@@ -5,6 +5,7 @@ import * as Notifications from 'expo-notifications';
 import * as LocalAuthentication from 'expo-local-authentication';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import { apiFetch, forceSignOut } from './_lib/api';
 import { SessionContext } from './_lib/session';
@@ -833,24 +834,37 @@ export default function RootLayout() {
     !biometricPassed;
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      {!tabsReady && !mfaLocked && !biometricLocked ? (
-        <Splash />
-      ) : mfaLocked ? (
-        // forceSignOut, not the local `signOut` above - this screen renders
-        // outside AppDataProvider's tree (before <Slot/> ever mounts), so
-        // the push-token-unregistering wrapped sign-out that context would
-        // normally expose isn't reachable here either way. forceSignOut is
-        // the same single choke point Phase 18/19's own sign-out path
-        // already routes through, for the same reason.
-        <MfaChallenge onVerified={() => setMfaPassed(true)} onSignOut={forceSignOut} />
-      ) : biometricLocked ? (
-        <BiometricLock onRetry={attemptBiometricAuth} />
-      ) : (
-        <SessionContext.Provider value={{ session, goal, refetchGoal: fetchGoal, signOut }}>
-          <Slot />
-        </SessionContext.Provider>
-      )}
-    </GestureHandlerRootView>
+    // SafeAreaProvider wired up here (2026-08-27) - react-native-safe-area-
+    // context has been an installed dependency since Phase 7 Step 1.1 but
+    // was never actually mounted anywhere (see the old comment this
+    // superseded in _lib/styles.js's goalScreen style), so every prior
+    // "clear the gesture bar" fix used a guessed fixed pixel value instead
+    // of the device's own real inset. That finally became a real bug, not
+    // just a theoretical gap: the floating pill tab bar's fixed
+    // `bottom: 20` sat half-underneath the OS gesture bar on the user's
+    // actual device, since 20px isn't enough clearance for every device's
+    // real gesture-bar height. useSafeAreaInsets() in (tabs)/_layout.js is
+    // what actually reads that value now.
+    <SafeAreaProvider>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        {!tabsReady && !mfaLocked && !biometricLocked ? (
+          <Splash />
+        ) : mfaLocked ? (
+          // forceSignOut, not the local `signOut` above - this screen renders
+          // outside AppDataProvider's tree (before <Slot/> ever mounts), so
+          // the push-token-unregistering wrapped sign-out that context would
+          // normally expose isn't reachable here either way. forceSignOut is
+          // the same single choke point Phase 18/19's own sign-out path
+          // already routes through, for the same reason.
+          <MfaChallenge onVerified={() => setMfaPassed(true)} onSignOut={forceSignOut} />
+        ) : biometricLocked ? (
+          <BiometricLock onRetry={attemptBiometricAuth} />
+        ) : (
+          <SessionContext.Provider value={{ session, goal, refetchGoal: fetchGoal, signOut }}>
+            <Slot />
+          </SessionContext.Provider>
+        )}
+      </GestureHandlerRootView>
+    </SafeAreaProvider>
   );
 }

@@ -29,6 +29,7 @@ import { statusForCategory, computeSpendStats, computePace, computeMonthProgress
 import AffordabilityQuery from '../_components/AffordabilityQuery';
 import PrimaryButton from '../_components/PrimaryButton';
 import BudgetInsightModal from '../_components/BudgetInsightModal';
+import SorrelWordmark from '../_components/SorrelWordmark';
 import { LeafAvatar, AppBackdrop, TopEdgeFade, isNightBackdrop } from '../_components/Illustrations';
 
 const STATUS_COLOR = {
@@ -91,6 +92,38 @@ export default function Budget() {
     } catch (err) {
       console.error(err);
     }
+  }
+
+  // Phase 11 (2026-08-27): "View spending history" toggle - same
+  // toggle-in-place/refetch-on-open pattern this app has used for every
+  // similar section since Phase 3 Step 4 (never left showing a stale
+  // cached result once new data may have landed elsewhere). Collapsed by
+  // default - this is a secondary, occasional-glance view, not something
+  // that should compete with the main budget-status list for space.
+  const [showHistory, setShowHistory] = useState(false);
+  const [budgetHistory, setBudgetHistory] = useState(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyError, setHistoryError] = useState(null);
+
+  async function fetchBudgetHistory() {
+    setLoadingHistory(true);
+    setHistoryError(null);
+    try {
+      const res = await apiFetch('/budget/history?months=6');
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      setBudgetHistory(await res.json());
+    } catch (err) {
+      console.error(err);
+      setHistoryError(apiErrorMessage(err));
+    } finally {
+      setLoadingHistory(false);
+    }
+  }
+
+  function toggleHistory() {
+    const next = !showHistory;
+    setShowHistory(next);
+    if (next) fetchBudgetHistory();
   }
 
   // Refreshes both budgetStatus (the category list) and the insight pill
@@ -282,6 +315,18 @@ export default function Budget() {
         <AppBackdrop scrollY={scrollY} />
       </View>
 
+      {/* Same fixed wordmark strip every other tab uses (2026-08-27,
+          direct user feedback - "they need to all have the same sorrel
+          logo at the top"). Budget was the one tab still using an
+          in-content "Budget" text title with no wordmark row above it;
+          that in-content title (headerRow, below) stays as this screen's
+          own subtitle-equivalent, it just no longer stands in for the
+          shared header every other tab already has. */}
+      <View style={budgetLocalStyles.wordmarkStrip}>
+        <SorrelWordmark layout="row" leafSize={30} showTagline={false} textColor={onBackdropTextColor} />
+        <MaterialIcons name="notifications-none" size={26} color={onBackdropTextColor || colors.darkest} />
+      </View>
+
       {error && (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>{error}</Text>
@@ -298,7 +343,7 @@ export default function Budget() {
         <Animated.ScrollView
           ref={scrollRef}
           style={budgetLocalStyles.screen}
-          contentContainerStyle={{ paddingBottom: 110 }}
+          contentContainerStyle={{ paddingBottom: 260 }}
           onScroll={onScroll}
           scrollEventThrottle={16}
         >
@@ -348,32 +393,41 @@ export default function Budget() {
               2026-08-24 to match the reference mockup's dark card. Same
               generateBudget() call either way, just a different trigger. */}
           <View style={budgetLocalStyles.generateCard}>
-            <View style={budgetLocalStyles.generateIconCircle}>
-              <MaterialIcons name="auto-fix-high" size={20} color={colors.background} />
-            </View>
-            <View style={budgetLocalStyles.generateTextCol}>
-              <Text style={budgetLocalStyles.generateTitle}>Let Sorrel do the heavy lifting.</Text>
-              <Text style={budgetLocalStyles.generateSubtitle}>
-                We'll analyze your spending and suggest a smarter budget for you.
-              </Text>
-            </View>
-            {generatingBudget ? (
-              <ActivityIndicator color={colors.background} />
-            ) : (
-              <Pressable
-                style={budgetLocalStyles.generateChip}
-                onPress={generateBudget}
-                accessibilityRole="button"
-                accessibilityLabel={hasAnyBudget ? 'Regenerate budget' : 'Generate budget'}
-              >
-                <Text style={budgetLocalStyles.generateChipText}>
-                  {hasAnyBudget ? 'REGENERATE BUDGET' : 'GENERATE BUDGET'}
+            <View style={budgetLocalStyles.generateTopRow}>
+              <View style={budgetLocalStyles.generateIconCircle}>
+                <MaterialIcons name="auto-fix-high" size={20} color={colors.background} />
+              </View>
+              <View style={budgetLocalStyles.generateTextCol}>
+                <Text style={budgetLocalStyles.generateTitle}>Let Sorrel do the heavy lifting.</Text>
+                <Text style={budgetLocalStyles.generateSubtitle}>
+                  We'll analyze your spending and suggest a smarter budget for you.
                 </Text>
-                <Text style={budgetLocalStyles.generateChipSubtext}>from spending history</Text>
-              </Pressable>
-            )}
-            <View style={budgetLocalStyles.generateLeaf}>
-              <LeafAvatar size={64} />
+              </View>
+              {generatingBudget ? (
+                <ActivityIndicator color={colors.background} />
+              ) : (
+                <Pressable
+                  style={budgetLocalStyles.generateChip}
+                  onPress={generateBudget}
+                  accessibilityRole="button"
+                  accessibilityLabel={hasAnyBudget ? 'Regenerate budget' : 'Generate budget'}
+                >
+                  <Text style={budgetLocalStyles.generateChipText}>
+                    {hasAnyBudget ? 'REGENERATE BUDGET' : 'GENERATE BUDGET'}
+                  </Text>
+                  <Text style={budgetLocalStyles.generateChipSubtext}>from spending history</Text>
+                </Pressable>
+              )}
+            </View>
+            {/* Its own row below the button, not an absolutely-positioned
+                overlay (2026-08-27, direct user feedback, twice now - a
+                corner watermark that overlaps or gets clipped by the card's
+                own rounded edge keeps reading as broken/invisible instead of
+                a deliberate flourish). A real flow row guarantees genuine,
+                unclippable space from both the chip above it and the card's
+                own edges, without needing to fight the chip's exact width. */}
+            <View style={budgetLocalStyles.generateLeafRow}>
+              <LeafAvatar size={22} color={colors.background} />
             </View>
           </View>
 
@@ -431,14 +485,82 @@ export default function Budget() {
             </View>
           )}
 
+          {/* Phase 11: "View spending history" - moved right under the
+              at-a-glance stat tiles (2026-08-27, direct user feedback -
+              was buried below the whole category list). Collapsed by
+              default, same toggle-in-place/refetch-on-open pattern as
+              every other secondary section on this screen. */}
+          <Pressable
+            style={[styles.card, budgetLocalStyles.historyToggle]}
+            onPress={toggleHistory}
+            accessibilityRole="button"
+            accessibilityLabel={showHistory ? 'Hide spending history' : 'View spending history'}
+          >
+            <MaterialIcons name="history" size={18} color={colors.primary} />
+            <Text style={budgetLocalStyles.historyToggleText}>
+              {showHistory ? 'Hide spending history' : 'View spending history'}
+            </Text>
+            <MaterialIcons
+              name={showHistory ? 'expand-less' : 'expand-more'}
+              size={20}
+              color={colors.muted}
+            />
+          </Pressable>
+
+          {showHistory && (
+            <View style={budgetLocalStyles.historySection}>
+              {loadingHistory ? (
+                <ActivityIndicator />
+              ) : historyError ? (
+                <Text style={styles.errorText}>{historyError}</Text>
+              ) : !budgetHistory || budgetHistory.periods.length === 0 ? (
+                <Text style={styles.smallText}>No spending history yet.</Text>
+              ) : (
+                <>
+                  {budgetHistory.trends.length > 0 && (
+                    <View style={budgetLocalStyles.trendsCard}>
+                      {budgetHistory.trends.map((t) => (
+                        <View key={t.category} style={budgetLocalStyles.trendRow}>
+                          <MaterialIcons
+                            name={t.direction === 'rising' ? 'trending-up' : 'trending-down'}
+                            size={16}
+                            color={t.direction === 'rising' ? colors.error : colors.positive}
+                          />
+                          <Text style={budgetLocalStyles.trendText}>{t.message}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {[...budgetHistory.periods].reverse().map((period) => {
+                    const stats = computeSpendStats(period);
+                    return (
+                      <View key={period.period_start} style={[styles.card, budgetLocalStyles.historyPeriodCard]}>
+                        <Text style={budgetLocalStyles.historyPeriodLabel}>
+                          {periodLabel(period.period_start)}
+                        </Text>
+                        <View style={budgetLocalStyles.historyPeriodRow}>
+                          <Text style={budgetLocalStyles.historyPeriodStat}>
+                            Budgeted ${stats.budgeted.toFixed(2)}
+                          </Text>
+                          <Text style={budgetLocalStyles.historyPeriodStat}>
+                            Spent ${stats.spent.toFixed(2)}
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </>
+              )}
+            </View>
+          )}
+
           {rows.map((s) => {
             const status = statusForCategory(s.category, s.budgeted, alerts);
             const percent = s.budgeted > 0 ? Math.min(1, s.actual / s.budgeted) : s.budgeted === 0 ? 1 : 0;
             const isEditing = editingBudgetCategory === s.category;
             return (
-              <View key={s.category} style={budgetLocalStyles.categoryCardWrap}>
-                <View style={[budgetLocalStyles.statusDot, { backgroundColor: STATUS_COLOR[status] }]} />
-                <View style={[styles.card, budgetLocalStyles.categoryCard]}>
+              <View key={s.category} style={[styles.card, budgetLocalStyles.categoryCard]}>
                   <View style={budgetLocalStyles.categoryTopRow}>
                     <View style={budgetLocalStyles.categoryIconCircle}>
                       <MaterialIcons name={iconForCategory(s.category)} size={18} color={colors.dark} />
@@ -551,7 +673,6 @@ export default function Budget() {
                         )}
                       </View>
                     ))}
-                </View>
               </View>
             );
           })}
@@ -573,6 +694,20 @@ function monthName() {
   return new Date().toLocaleDateString('en-US', { month: 'long' });
 }
 
+// 'YYYY-MM-01' -> "May 2026". Parsed as UTC (matches monthRange's own
+// date-only strings server-side) rather than via the plain `new Date(str)`
+// constructor, which some engines interpret as local-midnight for a
+// date-only string and could roll back to the prior month's label near a
+// timezone boundary.
+function periodLabel(periodStart) {
+  const [y, m] = periodStart.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-US', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
 const budgetLocalStyles = StyleSheet.create({
   backgroundLayer: {
     position: 'absolute',
@@ -580,6 +715,17 @@ const budgetLocalStyles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
+  },
+  // Same values as every other tab's wordmarkStrip (Home/Recurring/Goal) -
+  // kept identical on purpose so the header reads as one consistent piece
+  // across tabs, not five slightly different ones.
+  wordmarkStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingTop: 8,
+    paddingBottom: 8,
   },
   screen: {
     flex: 1,
@@ -627,15 +773,22 @@ const budgetLocalStyles = StyleSheet.create({
     borderBottomColor: colors.sage,
     marginVertical: 12,
   },
+  // Column, not row (2026-08-27) - the leaf watermark used to be an
+  // absolutely-positioned overlay directly on this container, which kept
+  // either covering the REGENERATE BUDGET chip or getting clipped down to
+  // an unrecognizable sliver by the corner's own borderRadius, depending
+  // on how it was tuned. generateTopRow (below) now holds the original
+  // row content; the leaf gets its own row underneath instead.
   generateCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
     backgroundColor: colors.darkest,
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
-    overflow: 'hidden',
+  },
+  generateTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   generateIconCircle: {
     width: 36,
@@ -674,11 +827,19 @@ const budgetLocalStyles = StyleSheet.create({
     fontSize: 9,
     color: colors.dark,
   },
-  generateLeaf: {
-    position: 'absolute',
-    right: -8,
-    bottom: -10,
-    opacity: 0.35,
+  // A real flow row, not an absolute overlay (2026-08-27, after two prior
+  // absolute-positioned attempts both kept either covering the REGENERATE
+  // BUDGET chip or getting clipped by the card's own rounded corner down
+  // to an unrecognizable sliver) - guarantees genuine gaps from the chip
+  // above (marginTop) and from the card's own edges (paddingRight/
+  // paddingBottom, well inside generateCard's own 16px padding) rather
+  // than depending on exact pixel overlap math against the chip's width.
+  generateLeafRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 10,
+    paddingRight: 2,
+    paddingBottom: 2,
   },
   statRow: {
     flexDirection: 'row',
@@ -712,20 +873,14 @@ const budgetLocalStyles = StyleSheet.create({
     color: colors.dark,
     textAlign: 'center',
   },
-  categoryCardWrap: {
-    flexDirection: 'row',
-    marginBottom: 12,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginTop: 8,
-    marginRight: 8,
-  },
+  // No more status dot (2026-08-27, direct user feedback - "get rid of
+  // those ugly dots... so all the pills can line up") - severity is still
+  // shown via the progress bar's own fill color (STATUS_COLOR, below),
+  // just not duplicated as a second dot that offset every card's left
+  // edge out of alignment with the stat-tiles/history pills above it.
   categoryCard: {
-    flex: 1,
     gap: 8,
+    marginBottom: 12,
   },
   categoryTopRow: {
     flexDirection: 'row',
@@ -801,5 +956,55 @@ const budgetLocalStyles = StyleSheet.create({
     color: colors.muted,
     fontWeight: '600',
     paddingVertical: 6,
+  },
+  historyToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  historyToggleText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.dark,
+  },
+  historySection: {
+    gap: 10,
+    marginTop: 10,
+    marginBottom: 12,
+  },
+  trendsCard: {
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    padding: 12,
+    gap: 8,
+  },
+  trendRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  trendText: {
+    flex: 1,
+    fontSize: 13,
+    color: colors.dark,
+  },
+  historyPeriodCard: {
+    gap: 6,
+  },
+  historyPeriodLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.darkest,
+  },
+  historyPeriodRow: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  historyPeriodStat: {
+    fontSize: 13,
+    color: colors.dark,
   },
 });

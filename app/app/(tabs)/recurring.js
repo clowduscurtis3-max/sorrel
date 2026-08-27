@@ -243,7 +243,7 @@ export default function Recurring() {
       <TopEdgeFade height={90}>
       <Animated.ScrollView
         style={[styles.list, recurringStyles.transparentScroll]}
-        contentContainerStyle={{ paddingBottom: 110 }}
+        contentContainerStyle={{ paddingBottom: 150 }}
         onScroll={onScroll}
         scrollEventThrottle={16}
       >
@@ -433,13 +433,17 @@ const recurringStyles = StyleSheet.create({
     right: 0,
     bottom: 0,
   },
+  // Same values as every other tab's wordmarkStrip (2026-08-27, direct user
+  // feedback - all five tabs should share one identical header, not five
+  // slightly different ones; this one had drifted to its own paddingHorizontal/
+  // paddingTop/paddingBottom before this pass).
   wordmarkStrip: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 4,
+    paddingHorizontal: 24,
+    paddingTop: 8,
+    paddingBottom: 8,
   },
   transparentScroll: {
     backgroundColor: 'transparent',

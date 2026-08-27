@@ -37,39 +37,48 @@ import {
 // Verified by rendering this exact path data to a PNG and comparing
 // side-by-side against a cropped/zoomed copy of the reference before
 // wiring it in, not eyeballed against the small on-screen icon alone.
-export function LeafAvatar({ size = 32 }) {
+// `color` is an optional monochrome override (2026-08-27, for the Budget
+// tab's dark generate-banner flourish, which needs a light/white mark
+// instead of this component's normal distinct green tones) - every path's
+// stroke and fill collapse to that one color when it's provided; omitted
+// entirely (every other call site) keeps the original multi-tone look
+// unchanged.
+export function LeafAvatar({ size = 32, color }) {
+  const stroke = color || colors.dark;
+  const accentFill = color || colors.accent;
+  const primaryFill = color || colors.primary;
   return (
     <Svg width={size} height={size} viewBox="0 0 32 32">
       <Path
         d="M 4.74 22.5 A 13 13 0 1 1 11.55 28.22"
-        stroke={colors.dark}
+        stroke={stroke}
         strokeWidth="1.6"
         strokeLinecap="round"
         fill="none"
       />
       <Path
         d="M 9 26 L 16.5 15.5"
-        stroke={colors.dark}
+        stroke={stroke}
         strokeWidth="1.8"
         strokeLinecap="round"
         fill="none"
       />
       <Path
         d="M16.5 15.5 C 16.5 10.5 21 8 24.5 9 C 24.5 14 21 16.5 16.5 15.5 Z"
-        fill={colors.accent}
-        stroke={colors.dark}
+        fill={accentFill}
+        stroke={stroke}
         strokeWidth="1.2"
       />
       <Path
         d="M 12.5 21 C 10 19.5 9.5 17 10.5 15 C 13.5 15.5 14.5 18 12.5 21 Z"
-        fill={colors.accent}
-        stroke={colors.dark}
+        fill={accentFill}
+        stroke={stroke}
         strokeWidth="1.1"
       />
       <Path
         d="M 12 24.5 C 14.5 22 17.5 21.5 19.5 23 C 17.5 25.5 14.5 26 12 24.5 Z"
-        fill={colors.primary}
-        stroke={colors.dark}
+        fill={primaryFill}
+        stroke={stroke}
         strokeWidth="1.1"
       />
     </Svg>

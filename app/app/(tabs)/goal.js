@@ -585,8 +585,8 @@ export default function Goal() {
             >
               <MaterialIcons
                 name="arrow-back"
-                size={20}
-                color={night ? colors.background : colors.primary}
+                size={26}
+                color={night ? colors.background : colors.darkest}
               />
             </Pressable>
             <View style={goalStyles.editHeaderTextCol}>
@@ -604,8 +604,8 @@ export default function Goal() {
 
           <TopEdgeFade height={90}>
           <Animated.ScrollView
-            style={goalStyles.transparentScroll}
-            contentContainerStyle={{ paddingBottom: 110 }}
+            style={goalStyles.editingScroll}
+            contentContainerStyle={{ paddingBottom: 150 }}
             onScroll={onEditScroll}
             scrollEventThrottle={16}
           >
@@ -922,7 +922,7 @@ export default function Goal() {
           <TopEdgeFade height={90}>
           <Animated.ScrollView
             style={[styles.list, goalStyles.transparentScroll]}
-            contentContainerStyle={{ paddingBottom: 110 }}
+            contentContainerStyle={{ paddingBottom: 150 }}
             onScroll={onScroll}
             scrollEventThrottle={16}
           >
@@ -1340,8 +1340,23 @@ const goalStyles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 8,
   },
+  // Shared by both the Overview and Edit Goal ScrollViews - kept plain
+  // (no paddingTop here). Overview's own first child (titleBlock, below)
+  // already carries the standard paddingTop:110 fade-clearing padding;
+  // adding it here too double-stacked it for Overview specifically (220px
+  // instead of 110) when this was added to fix Edit Goal's own missing
+  // padding - editingScroll (below) carries that fix instead, scoped to
+  // just the screen that actually needed it.
   transparentScroll: {
     backgroundColor: 'transparent',
+  },
+  // Edit Goal's own ScrollView style (2026-08-27) - unlike Overview,
+  // Edit Goal's first child (the Goal Summary card) has no paddingTop of
+  // its own, so this is the one screen that genuinely needs it here
+  // rather than on its first child.
+  editingScroll: {
+    backgroundColor: 'transparent',
+    paddingTop: 110,
   },
   // --- Edit Goal redesign (2026-08-27) ---
   editHeaderRow: {
@@ -1352,15 +1367,14 @@ const goalStyles = StyleSheet.create({
     paddingBottom: 12,
     gap: 12,
   },
-  // Same 40x40 rounded-square card-colored back button as Home's bank
-  // drill-down screen (homeStyles.backButton in (tabs)/index.js) - one
-  // established "how this app does a back button" pattern, not a second
-  // one invented for this screen.
+  // Plain arrow, no square/card background (2026-08-27, direct user
+  // feedback: the rounded-square treatment this used to share with Home's
+  // bank drill-down back button made the arrow itself hard to see - "its
+  // almost invisible in the square"). Keeps the same 40x40 touch target
+  // for a comfortable tap area, just transparent instead of card-colored.
   backButton: {
     width: 40,
     height: 40,
-    borderRadius: 10,
-    backgroundColor: colors.card,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -15,13 +15,34 @@ class NoHistoryError extends Error {}
 // fences-off-the-ends approach can't handle since there's trailing
 // content after the closing fence. Prefers fenced content specifically
 // (discarding anything after it) over just trimming the string ends.
+//
+// Also strips thousands-separator commas written *inside* a number
+// (`"budgeted_amount": 1,107`) - caught live during Phase 11's backfill
+// verification, where a larger-than-usual proposed amount tripped this for
+// the first time (small monthly figures rarely cross the 1,000 mark, but a
+// retrospective multi-month average or a real live user with bigger
+// numbers both can). That's invalid JSON and throws on JSON.parse
+// otherwise. Safe to strip unconditionally: a genuine structural JSON
+// comma is always followed by whitespace, a quote, or a closing
+// bracket/brace, never immediately by three more digits - `\d,\d{3}`
+// followed by a non-digit only ever matches a malformed numeric literal,
+// never real JSON structure. Repeated so a number with more than one
+// comma (`12,345,678`) is fully cleaned, not just its rightmost group.
 function extractJson(text) {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fenced) return fenced[1].trim();
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start !== -1 && end !== -1 && end > start) return text.slice(start, end + 1);
-  return text.trim();
+  let json = fenced ? fenced[1].trim() : null;
+  if (!json) {
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    json = start !== -1 && end !== -1 && end > start ? text.slice(start, end + 1) : text.trim();
+  }
+  let cleaned = json;
+  let prev;
+  do {
+    prev = cleaned;
+    cleaned = cleaned.replace(/(\d),(\d{3})(?=\D|$)/g, '$1$2');
+  } while (cleaned !== prev);
+  return cleaned;
 }
 
 // How far back to look for spending history. Plaid Sandbox only generates
@@ -31,14 +52,26 @@ function extractJson(text) {
 // year ago.
 const HISTORY_DAYS = 90;
 
+// Phase 11: generalizes currentMonthRange's own date math to an arbitrary
+// calendar month, not just "now" - `monthsBack` months before `now`'s own
+// month (0 = the current month, 1 = last month, etc.). `monthRange(0, x)`
+// is byte-for-byte what currentMonthRange(x) already computed, so
+// currentMonthRange is reimplemented on top of this rather than duplicated
+// - every existing caller (alerts.js, scenarioContext.js, roundUps.js,
+// several places in this file, in index.js, notificationEvents.js,
+// budgetInsight.js) is completely unaffected, same signature, same output.
+function monthRange(monthsBack = 0, now = new Date()) {
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - monthsBack, 1));
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - monthsBack + 1, 0));
+  const toDateStr = (d) => d.toISOString().slice(0, 10);
+  return { period_start: toDateStr(start), period_end: toDateStr(end) };
+}
+
 // `now` is injectable so a caller that already has a fixed clock (the Phase 5
 // scenario context) gets a period consistent with it. Defaults to the real
 // clock, so every existing call site is unchanged.
 function currentMonthRange(now = new Date()) {
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0));
-  const toDateStr = (d) => d.toISOString().slice(0, 10);
-  return { period_start: toDateStr(start), period_end: toDateStr(end) };
+  return monthRange(0, now);
 }
 
 // Averages each spend category's actual spend over however many distinct
@@ -47,18 +80,30 @@ function currentMonthRange(now = new Date()) {
 // 3" would with e.g. only 6 weeks of data. Transfers and Uncategorized are
 // deliberately excluded - transfers aren't spend, and an unreviewed guess
 // shouldn't be allowed to shape a budget number.
-function summarizeSpending(transactions) {
+//
+// `anchorDate` is optional (Phase 11) - defaults to the real clock, so this
+// is unchanged for every existing caller. Passed explicitly by the
+// historical backfill path (backfillBudgetHistory, below) so a past
+// month's "budget" is computed only from data that genuinely existed
+// before that month - the upper-bound `d < now` filter added below is a
+// no-op for the live/default case (no real transaction is ever dated in
+// the future) but is what actually prevents look-ahead bias for a
+// historical anchor.
+function summarizeSpending(transactions, anchorDate = new Date()) {
   // UTC-consistent with currentMonthRange() below and with how `t.date`
   // (a plain 'YYYY-MM-DD' string) gets parsed - Date treats date-only ISO
   // strings as UTC midnight, so computing the cutoff from local Date
   // methods (getDate/setDate) could shift the 90-day boundary by up to a
   // day depending on the server's timezone. Using UTC components on both
   // sides avoids that.
-  const now = new Date();
+  const now = anchorDate;
   const cutoff = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - HISTORY_DAYS)
   );
-  const recent = transactions.filter((t) => new Date(t.date) >= cutoff);
+  const recent = transactions.filter((t) => {
+    const d = new Date(t.date);
+    return d >= cutoff && d < now;
+  });
 
   const months = new Set(recent.map((t) => t.date.slice(0, 7)));
   const monthCount = Math.max(1, months.size);
@@ -103,7 +148,18 @@ function describeGoal(goal) {
 // categorization. Throws on failure rather than silently degrading - a
 // bad budget number is worse than no budget, unlike a mis-categorized
 // transaction.
-async function generateBudget(userId) {
+//
+// `target` is optional (Phase 11) - `{ period_start, period_end, anchorDate }`,
+// used by the historical backfill path (backfillBudgetHistory, below) to
+// generate a genuine retrospective budget for a past month instead of the
+// live current-month/today default every existing caller (the "Regenerate
+// budget" button, via POST /budget/generate) still gets unchanged.
+async function generateBudget(userId, target = {}) {
+  const { period_start, period_end } = target.period_start
+    ? target
+    : currentMonthRange();
+  const anchorDate = target.anchorDate || new Date();
+
   const { data: transactions, error: txError } = await supabaseAdmin
     .from('transactions')
     .select('date, amount, category')
@@ -118,8 +174,6 @@ async function generateBudget(userId) {
     .select('goal_type, target_amount, target_timeframe_months, notes')
     .eq('user_id', userId)
     .single();
-
-  const { period_start, period_end } = currentMonthRange();
 
   // Step 4: a category the user has deliberately set (directly, or by
   // accepting an AI re-balance proposal) is left alone on regeneration -
@@ -146,7 +200,7 @@ async function generateBudget(userId) {
     is_user_set: true,
   }));
 
-  const { averages, averageMonthlyIncome, monthCount } = summarizeSpending(transactions);
+  const { averages, averageMonthlyIncome, monthCount } = summarizeSpending(transactions, anchorDate);
 
   // Nothing left for the AI to propose - every category is user-set.
   if (categoriesToGenerate.length === 0) return userSetBudgetRows;
@@ -355,8 +409,14 @@ function computeBudgetStatus({ budgets, actuals }) {
 // no risk of a stale leftover row the way delete-then-insert guards against
 // above - upsert alone already keeps this table exactly in sync every time,
 // with no transient-empty window for a concurrent /budget/status read.
-async function recomputeBudgetActuals(userId) {
-  const { period_start, period_end } = currentMonthRange();
+// `target` is optional (Phase 11) - `{ period_start, period_end }`, used by
+// the historical backfill path to compute real actual spend for a past
+// month instead of the live current-month default every existing caller
+// still gets unchanged.
+async function recomputeBudgetActuals(userId, target = {}) {
+  const { period_start, period_end } = target.period_start
+    ? target
+    : currentMonthRange();
 
   const { data: transactions, error: txError } = await supabaseAdmin
     .from('transactions')
@@ -390,6 +450,70 @@ async function recomputeBudgetActuals(userId) {
     .from('budget_actuals')
     .upsert(rows, { onConflict: 'user_id,category,period_start' });
   if (upsertError) throw upsertError;
+}
+
+// Phase 11: backfills real historical budgets/budget_actuals rows for past
+// months, rather than waiting for real wall-clock months to pass -
+// generateBudget/recomputeBudgetActuals's existing math is reused unchanged
+// against each past month's own transaction window (per this project's
+// standing "don't duplicate financial logic" discipline), just anchored to
+// that month's own close instead of today. `monthsBack` counts back from
+// the current month (1 = last month, 2 = the month before that, etc.) -
+// the current month itself is never touched here, that's the live
+// generate/recompute path via POST /budget/generate.
+//
+// Idempotent and safe to re-run: a month that already has any
+// budget_actuals rows (whether from a genuine live month or a prior
+// backfill run) is left alone, never regenerated/overwritten - this is a
+// one-time population path, not something that should silently redo real
+// work every time it's called.
+async function backfillBudgetHistory(userId, monthsBack) {
+  const results = [];
+  for (let i = 1; i <= monthsBack; i++) {
+    const range = monthRange(i);
+
+    const { data: existing, error: existingError } = await supabaseAdmin
+      .from('budget_actuals')
+      .select('category')
+      .eq('user_id', userId)
+      .eq('period_start', range.period_start)
+      .limit(1);
+    if (existingError) throw existingError;
+    if (existing && existing.length > 0) {
+      results.push({ period_start: range.period_start, status: 'already_present' });
+      continue;
+    }
+
+    // Anchored to the first day of the month AFTER the one being
+    // backfilled - i.e. "as of the close of this month" - so
+    // summarizeSpending's own 90-day window includes this month's full
+    // real spend without leaking in anything genuinely later than it
+    // (look-ahead bias would defeat the whole point of a retrospective
+    // figure).
+    const anchorDate = new Date(monthRange(i - 1).period_start);
+
+    try {
+      await generateBudget(userId, {
+        period_start: range.period_start,
+        period_end: range.period_end,
+        anchorDate,
+      });
+    } catch (err) {
+      if (err instanceof NoHistoryError) {
+        // No transactions at all yet as of this month - nothing to
+        // backfill, not a failure (an account whose real history starts
+        // partway through the backfill window will legitimately hit this
+        // for its earliest months).
+        results.push({ period_start: range.period_start, status: 'no_history' });
+        continue;
+      }
+      throw err;
+    }
+
+    await recomputeBudgetActuals(userId, { period_start: range.period_start, period_end: range.period_end });
+    results.push({ period_start: range.period_start, status: 'backfilled' });
+  }
+  return results;
 }
 
 // Phase 3 Step 4: given a category the user wants to change to a new
@@ -598,9 +722,11 @@ module.exports = {
   generateBudget,
   computeBudgetStatus,
   recomputeBudgetActuals,
+  backfillBudgetHistory,
   proposeRebalance,
   applyBudgetEdit,
   currentMonthRange,
+  monthRange,
   summarizeSpending,
   extractJson,
   NoHistoryError,

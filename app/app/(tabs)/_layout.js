@@ -1,5 +1,6 @@
 import { Tabs } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppDataProvider } from '../_lib/appData';
 import { colors } from '../_lib/styles';
 import { isNightBackdrop } from '../_components/Illustrations';
@@ -46,6 +47,15 @@ export default function TabsLayout() {
   // isNightBackdrop's own callers) - this isn't a countdown clock, a
   // several-times-an-hour discrepancy at a period boundary is fine.
   const night = isNightBackdrop();
+  // Real device gesture-bar/nav-bar clearance (2026-08-27, direct user
+  // feedback: the previous fixed `bottom: 20` sat half-underneath the OS
+  // gesture controls) - this app renders edge-to-edge, so Android reports
+  // a real nonzero insets.bottom for either nav style (a taller value for
+  // the classic three-button bar, a shorter one for gesture nav); reading
+  // it directly clears whichever one the device actually has instead of
+  // guessing one fixed number that only happened to fit some devices.
+  const insets = useSafeAreaInsets();
+  const tabBarBottom = 12 + insets.bottom;
 
   return (
     <AppDataProvider>
@@ -67,6 +77,17 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <MaterialIcons name={TAB_ICONS[route.name]} size={size} color={color} />
           ),
+          // Real labels, not just icons (2026-08-27, direct user feedback -
+          // "they dont have words on them anymore"). tabBarShowLabel/
+          // tabBarLabelStyle are explicit here rather than left to defaults:
+          // the previous height:64 + tabBarItemStyle paddingTop:6 combo left
+          // too little vertical room for icon+label together, so the label
+          // was being clipped off the bottom of the rounded pill entirely -
+          // that clipped-off label area, rendering against whatever sits
+          // behind the floating bar, is also what read as the pill's
+          // "bottom half is black" - a taller bar fixes both at once.
+          tabBarShowLabel: true,
+          tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
           // Absolutely positioned + inset from all three edges + a large
           // borderRadius is what actually produces the "floating pill"
           // look rather than a flat bar - each screen's own ScrollView
@@ -77,8 +98,10 @@ export default function TabsLayout() {
             position: 'absolute',
             left: 16,
             right: 16,
-            bottom: 20,
-            height: 64,
+            bottom: tabBarBottom,
+            height: 78,
+            paddingTop: 10,
+            paddingBottom: 10,
             borderRadius: 28,
             borderTopWidth: 0,
             backgroundColor: night ? colors.darkest : colors.card,
@@ -88,7 +111,6 @@ export default function TabsLayout() {
             shadowRadius: 10,
             shadowOffset: { width: 0, height: 4 },
           },
-          tabBarItemStyle: { paddingTop: 6 },
         })}
       >
         <Tabs.Screen name="index" options={{ title: 'Home' }} />

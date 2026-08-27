@@ -26,11 +26,13 @@ const {
   generateBudget,
   computeBudgetStatus,
   recomputeBudgetActuals,
+  backfillBudgetHistory,
   proposeRebalance,
   applyBudgetEdit,
   currentMonthRange,
   NoHistoryError,
 } = require('./budget');
+const { getBudgetHistory } = require('./budgetHistory');
 const { detectRecurringTransactions } = require('./recurring');
 const { recomputeOverspendAlerts } = require('./alerts');
 const { getGoalProgress } = require('./goalProgress');
@@ -798,6 +800,23 @@ app.post('/admin/generate-net-worth-snapshot', requireUser, async (req, res) => 
   }
 });
 
+// Phase 11: one-time population path (see backfillBudgetHistory's own
+// comment in server/budget.js for the full reasoning) - never called by
+// the app itself, same "manual re-trigger for testing" convention as
+// every other /admin/* route. Idempotent - safe to call repeatedly,
+// already-present months are left untouched.
+app.post('/admin/backfill-budget-history', requireUser, async (req, res) => {
+  try {
+    const requested = parseInt(req.body?.months_back, 10);
+    const monthsBack = Number.isFinite(requested) ? Math.min(Math.max(requested, 1), 12) : 3;
+    const results = await backfillBudgetHistory(req.userId, monthsBack);
+    res.json({ results });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to backfill budget history' });
+  }
+});
+
 // Phase 4 Step A: device registration. `requireUser` already established
 // who's calling from a cryptographically-verified session token, so this
 // writes to req.userId only - a client can never register (or overwrite) a
@@ -1323,6 +1342,24 @@ app.get('/budget/alerts', requireUser, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load budget alerts' });
+  }
+});
+
+// Phase 11: budgeted-vs-actual per category across the current period plus
+// however many past ones exist, oldest-to-newest, plus any detected
+// consistently-rising/falling categories (computeBudgetTrend). `months`
+// is client-provided but clamped to a small, sane range - this reads
+// `months` separate budgets/budget_actuals queries, not something to let
+// grow unbounded from a malformed or malicious request.
+app.get('/budget/history', requireUser, async (req, res) => {
+  try {
+    const requested = parseInt(req.query.months, 10);
+    const months = Number.isFinite(requested) ? Math.min(Math.max(requested, 1), 12) : 6;
+    const history = await getBudgetHistory(req.userId, months);
+    res.json(history);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load budget history' });
   }
 });
 

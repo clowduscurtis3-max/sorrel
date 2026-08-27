@@ -24,6 +24,7 @@ import { getBiometricLockEnabled, setBiometricLockEnabled } from '../_lib/biomet
 import { listVerifiedTotpFactors, enrollTotp, verifyTotpEnrollment, unenrollTotp } from '../_lib/mfa';
 import { AppBackdrop, TopEdgeFade, isNightBackdrop } from '../_components/Illustrations';
 import PrimaryButton from '../_components/PrimaryButton';
+import SorrelWordmark from '../_components/SorrelWordmark';
 
 // Phase 14 (5-tab conversion, 2026-08-24): account-level actions - Gmail
 // link/unlink, per-bank re-link/delete, biometric-lock preference, sign
@@ -455,10 +456,19 @@ export default function Account() {
         <AppBackdrop scrollY={scrollY} />
       </View>
 
+      {/* Same fixed wordmark strip every other tab uses (2026-08-27, direct
+          user feedback - "they need to all have the same sorrel logo at
+          the top"). Account was the one tab with no header row above its
+          scroll content at all. */}
+      <View style={accountStyles.wordmarkStrip}>
+        <SorrelWordmark layout="row" leafSize={30} showTagline={false} textColor={onBackdropTextColor} />
+        <MaterialIcons name="notifications-none" size={26} color={onBackdropTextColor || colors.darkest} />
+      </View>
+
       <TopEdgeFade height={90}>
       <Animated.ScrollView
         style={[styles.list, accountStyles.transparentScroll]}
-        contentContainerStyle={{ paddingBottom: 110 }}
+        contentContainerStyle={{ paddingBottom: 150 }}
         onScroll={onScroll}
         scrollEventThrottle={16}
       >
@@ -808,11 +818,24 @@ const accountStyles = StyleSheet.create({
     right: 0,
     bottom: 0,
   },
+  // Same values as every other tab's wordmarkStrip - kept identical on
+  // purpose so the header reads as one consistent piece across tabs.
+  wordmarkStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingTop: 8,
+    paddingBottom: 8,
+  },
   transparentScroll: {
     backgroundColor: 'transparent',
   },
   signedInBlock: {
-    paddingTop: 100,
+    // Matches every other tab's own first-scroll-item paddingTop (Budget/
+    // Recurring/Goal's 110, Home's greetingBlock) - was 100 here, the one
+    // tab that had drifted slightly from that shared value.
+    paddingTop: 110,
     paddingBottom: 24,
     alignItems: 'center',
     gap: 2,

@@ -660,7 +660,7 @@ export default function Home() {
         <TopEdgeFade height={90}>
         <Animated.ScrollView
           style={[styles.list, homeStyles.transparentScroll]}
-          contentContainerStyle={{ paddingBottom: 110 }}
+          contentContainerStyle={{ paddingBottom: 150 }}
           onScroll={onScroll}
           scrollEventThrottle={16}
         >
@@ -970,14 +970,14 @@ const homeStyles = StyleSheet.create({
   },
   // First child of the Overview ScrollView - the greeting now scrolls
   // away with everything else instead of sitting in a fixed header.
-  // paddingTop is deliberately generous: it pushes the text down past
-  // the sun/glow's busiest area into the calmer part of the scene
-  // (toward the hills), per the "environment should frame the greeting,
-  // not compete with it" brief - a real judgment call, first candidate
-  // to tune after seeing it on-device.
+  // paddingTop matches every other tab's own first-scroll-item value
+  // (2026-08-27, direct user feedback - all five tabs should start their
+  // content at the same height) - was 100 here specifically to clear the
+  // sun/glow's busiest art, now 110 like everywhere else, which still
+  // comfortably clears it.
   greetingBlock: {
     paddingHorizontal: 24,
-    paddingTop: 100,
+    paddingTop: 110,
     paddingBottom: 24,
     gap: 4,
   },
