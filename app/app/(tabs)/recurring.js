@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
+import { formatDecimal, formatDateMDY } from '../_lib/api';
 import { styles, colors } from '../_lib/styles';
 import { useAppData } from '../_lib/appData';
 import { iconForCategory } from '../_lib/categoryIcons';
@@ -97,15 +98,15 @@ function formatDelta(monthComparison) {
   if (!monthComparison?.available) return null;
   const { delta, delta_percent } = monthComparison;
   const direction = delta <= 0 ? 'down' : 'up';
-  const amountText = `$${Math.abs(delta).toFixed(2)}`;
+  const amountText = `$${formatDecimal(Math.abs(delta))}`;
   const percentText = delta_percent === null ? '' : ` (${Math.abs(delta_percent)}%)`;
   return { direction, text: `${amountText}${percentText}` };
 }
 
 function describeFinding(f) {
   return (
-    `${f.display_name}: $${f.previous_amount.toFixed(2)} → $${f.current_amount.toFixed(2)} / ${f.interval} ` +
-    `(+$${f.increase_amount.toFixed(2)})`
+    `${f.display_name}: $${formatDecimal(f.previous_amount)} → $${formatDecimal(f.current_amount)} / ${f.interval} ` +
+    `(+$${formatDecimal(f.increase_amount)})`
   );
 }
 
@@ -140,10 +141,10 @@ function RecurringRow({ entry }) {
       <View style={recurringStyles.entryBody}>
         <Text style={recurringStyles.entryName}>{entry.display_name}</Text>
         <Text style={styles.smallText}>
-          ${entry.typical_amount.toFixed(2)} / {entry.interval} (~${entry.monthly_equivalent_amount.toFixed(2)}/mo)
+          ${formatDecimal(entry.typical_amount)} / {entry.interval} (${formatDecimal(entry.monthly_equivalent_amount)}/mo)
         </Text>
       </View>
-      <Text style={recurringStyles.entryNext}>Next: {entry.next_expected_date}</Text>
+      <Text style={recurringStyles.entryNext}>Next: {formatDateMDY(entry.next_expected_date)}</Text>
     </View>
   );
 }
@@ -171,7 +172,7 @@ function GroupCard({ group, query, intervalFilter, expanded, onToggle }) {
           <Text style={recurringStyles.groupLabel}>{group.label}</Text>
           <Text style={styles.smallText}>{filtered.length} charge{filtered.length === 1 ? '' : 's'}</Text>
         </View>
-        <Text style={recurringStyles.groupTotal}>${groupTotal(filtered).toFixed(2)} / month</Text>
+        <Text style={recurringStyles.groupTotal}>${formatDecimal(groupTotal(filtered))} / month</Text>
         <MaterialIcons name={expanded ? 'expand-less' : 'expand-more'} size={22} color={colors.dark} />
       </Pressable>
       {expanded && (
@@ -268,7 +269,7 @@ export default function Recurring() {
               <View style={recurringStyles.summaryHalf}>
                 <Text style={recurringStyles.cardEyebrow}>ESTIMATED MONTHLY TOTAL</Text>
                 <Text style={recurringStyles.summaryTotal}>
-                  ~${subscriptionAudit.total_monthly_equivalent.toFixed(2)}
+                  ${formatDecimal(subscriptionAudit.total_monthly_equivalent)}
                   <Text style={recurringStyles.summaryTotalUnit}> / month</Text>
                 </Text>
                 <Text style={styles.smallText}>
@@ -285,7 +286,7 @@ export default function Recurring() {
                     <View>
                       <Text style={recurringStyles.groupLabel}>{topCategory.category}</Text>
                       <Text style={styles.smallText}>
-                        ${topCategory.total.toFixed(2)} ({topCategory.percent}%)
+                        ${formatDecimal(topCategory.total)} ({topCategory.percent}%)
                       </Text>
                     </View>
                   </View>
@@ -305,7 +306,7 @@ export default function Recurring() {
                 <GlanceTile
                   icon="attach-money"
                   label="DUE SOON"
-                  value={`$${subscriptionAudit.glance.due_soon_total.toFixed(2)}`}
+                  value={`$${formatDecimal(subscriptionAudit.glance.due_soon_total)}`}
                   sub={`in next ${subscriptionAudit.glance.due_soon_days} days`}
                 />
                 <GlanceTile
@@ -317,7 +318,7 @@ export default function Recurring() {
                 <GlanceTile
                   icon="local-offer"
                   label="POTENTIAL SAVINGS"
-                  value={`$${subscriptionAudit.glance.potential_savings_total.toFixed(2)}`}
+                  value={`$${formatDecimal(subscriptionAudit.glance.potential_savings_total)}`}
                   sub="/ month"
                   isLast
                 />
@@ -391,7 +392,7 @@ export default function Recurring() {
                 </View>
                 <View style={recurringStyles.savingsBody}>
                   <Text style={recurringStyles.groupLabel}>
-                    You could save ${subscriptionAudit.glance.potential_savings_total.toFixed(2)} per month
+                    You could save ${formatDecimal(subscriptionAudit.glance.potential_savings_total)} per month
                   </Text>
                   <Text style={styles.smallText}>
                     Detected price increases across {subscriptionAudit.glance.potential_savings_count} recurring

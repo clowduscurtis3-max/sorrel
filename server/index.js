@@ -77,7 +77,13 @@ const {
   verifyObjectIntegrity,
 } = require('./affordabilityParse');
 const { transcribeAudio } = require('./transcribe');
-const { parseFinanceTermMonths, computeEstimatedPayment, getCurrentAutoLoanRate } = require('./financeRate');
+const {
+  parseFinanceTermMonths,
+  computeEstimatedPayment,
+  getCurrentAutoLoanRate,
+  MIN_TERM_MONTHS,
+  MAX_TERM_MONTHS,
+} = require('./financeRate');
 const { runAffordabilityChatTurn } = require('./affordabilityChat');
 const {
   signup,
@@ -1535,6 +1541,21 @@ const MAX_AFFORDABILITY_QUERY_LENGTH = 500;
 // number - anything that doesn't verify (missing, forged, expired, or
 // signed for a different user) collapses to null, the same "no total price
 // known yet" state as if it had never been mentioned.
+// finance_term_months_stated round-trips as a plain client-echoed field, not
+// a signed token like total_price_stated - unlike a dollar amount, a wrong/
+// tampered term just means one clarification question gets asked (or
+// skipped) incorrectly, not a fabricated financial figure, so the same
+// bounds check parseFinanceTermMonths itself enforces (a real, sane loan
+// term) is enough independent validation here.
+function isValidFinanceTermMonths(value) {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= MIN_TERM_MONTHS &&
+    value <= MAX_TERM_MONTHS
+  );
+}
+
 function sanitizeClarificationContext(raw, userId) {
   const sanitized = sanitizeParsedOutput(
     { ...raw, amount_stated: null, total_price_stated: null },
@@ -1548,6 +1569,9 @@ function sanitizeClarificationContext(raw, userId) {
     wants_timeline: sanitized.wants_timeline,
     financing_relevant: sanitized.financing_relevant,
     total_price_stated: totalPriceStated,
+    finance_term_months_stated: isValidFinanceTermMonths(raw?.finance_term_months_stated)
+      ? raw.finance_term_months_stated
+      : null,
     awaiting: ['financing_confirmation', 'total_price', 'finance_term', 'promo_term'].includes(raw?.awaiting)
       ? raw.awaiting
       : null,
@@ -1561,6 +1585,73 @@ function sanitizeClarificationContext(raw, userId) {
 // as a fact about the specific purchase, always disclosed as an assumption
 // in the resulting caveat text.
 const DEFAULT_PROMO_TERM_MONTHS = 12;
+
+// A rough national-average estimate for the tax/title/license/registration
+// fees a real car purchase adds on top of the price the user states (they're
+// naming what the vehicle costs, not necessarily the full drive-off total).
+// Leaving this out entirely would make the estimated payment materially and
+// misleadingly low - real TTL commonly runs several percent of the purchase
+// price. 6% is a defensible national ballpark (state vehicle sales tax
+// typically runs roughly 4-7%, title/registration fees are comparatively
+// small flat amounts on top) - explicitly NOT a live/verified per-state
+// figure, since this app has no concept of the user's state anywhere in its
+// schema (unlike the auto-loan rate itself, there's no FRED-equivalent live
+// source for this). Applied as a disclosed assumption, same "honest
+// default, not a guess" discipline DEFAULT_PROMO_TERM_MONTHS already uses -
+// stated explicitly in the caveat below, never silently baked in.
+const ESTIMATED_TTL_RATE_PERCENT = 6;
+
+// Shared by nextFinancingStep (term already known - stated up front or
+// carried forward from an earlier turn) and the finance_term reply handler
+// below (term given as its own follow-up answer) - one implementation of
+// "fetch the real published rate, compute the payment, respond" rather than
+// two copies that could drift apart.
+async function respondWithVehicleFinanceEstimate(req, res, now, today, { totalPrice, termMonths }) {
+  let rate;
+  try {
+    rate = await getCurrentAutoLoanRate();
+  } catch (err) {
+    logError('affordability: FRED rate fetch failed', err);
+    return res.json({
+      status: 'insufficient_data',
+      detail:
+        "Couldn't pull current average loan rates right now - try again in a bit, or tell Sorrel the monthly payment directly if you already know it.",
+    });
+  }
+
+  // The user's stated price is treated as the vehicle's base price, not the
+  // out-the-door total - tax/title/license get added on top (see
+  // ESTIMATED_TTL_RATE_PERCENT's own comment) before financing math runs,
+  // so the monthly payment reflects what's actually likely to be financed.
+  const estimatedOutTheDoorPrice = Math.round(totalPrice * (1 + ESTIMATED_TTL_RATE_PERCENT / 100) * 100) / 100;
+
+  const estimatedPayment = computeEstimatedPayment({
+    totalPrice: estimatedOutTheDoorPrice,
+    termMonths,
+    annualRatePercent: rate.rate,
+  });
+
+  return respondWithAffordabilityResult(req, res, {
+    now,
+    today,
+    amount: estimatedPayment,
+    category: 'Transportation',
+    recurrence: 'monthly',
+    recurrenceWasAmbiguous: false,
+    totalPriceStated: totalPrice,
+    rateEstimate: {
+      estimated_payment: estimatedPayment,
+      annual_rate_percent: rate.rate,
+      as_of_date: rate.as_of_date,
+      term_months: termMonths,
+      base_price: totalPrice,
+      estimated_ttl_rate_percent: ESTIMATED_TTL_RATE_PERCENT,
+      total_price: estimatedOutTheDoorPrice,
+      source: `Federal Reserve (FRED series ${rate.series_id})`,
+      caveat: `This is an estimated payment based on a $${totalPrice.toFixed(2)} price plus an assumed ${ESTIMATED_TTL_RATE_PERCENT}% for tax, title, and license (a national average - your state/county may charge more or less), financed at the average new-auto-loan rate published by the Federal Reserve (${rate.rate}% as of ${rate.as_of_date}) - not a real quote. Your actual rate, tax, and fees depend on your credit, lender, and location.`,
+    },
+  });
+}
 
 // Once financing is established (recurrence forced to 'monthly' by the
 // caller) and no direct monthly-payment amount is known yet, decides what
@@ -1604,6 +1695,7 @@ async function nextFinancingStep(req, res, now, today, ctx) {
     wants_timeline: ctx.wants_timeline,
     financing_relevant: ctx.financing_relevant,
     total_price_stated: ctx.total_price_stated,
+    finance_term_months_stated: ctx.finance_term_months_stated ?? null,
   };
   if (ctx.category === 'Transportation' || ctx.category === 'Shopping') {
     if (ctx.total_price_stated === null) {
@@ -1614,6 +1706,19 @@ async function nextFinancingStep(req, res, now, today, ctx) {
       });
     }
     if (ctx.category === 'Transportation') {
+      // The term is often already known by now - either stated up front in
+      // the very first message ("finance a $35,000 car over 60 months",
+      // extracted deterministically from that message's own raw text, same
+      // guardrail discipline as amount/total-price extraction) or carried
+      // forward from an earlier turn in this same conversation. Only ask
+      // when it's genuinely still unknown, rather than re-asking a question
+      // the user already answered.
+      if (ctx.finance_term_months_stated !== null && ctx.finance_term_months_stated !== undefined) {
+        return respondWithVehicleFinanceEstimate(req, res, now, today, {
+          totalPrice: ctx.total_price_stated,
+          termMonths: ctx.finance_term_months_stated,
+        });
+      }
       return respondWithContext(res, req.userId, {
         status: 'needs_finance_term',
         message: 'How long will the finance term be?',
@@ -1837,41 +1942,9 @@ app.post('/affordability/query', requireUser, async (req, res) => {
         });
       }
 
-      let rate;
-      try {
-        rate = await getCurrentAutoLoanRate();
-      } catch (err) {
-        logError('affordability: FRED rate fetch failed', err);
-        return res.json({
-          status: 'insufficient_data',
-          detail:
-            "Couldn't pull current average loan rates right now - try again in a bit, or tell Sorrel the monthly payment directly if you already know it.",
-        });
-      }
-
-      const estimatedPayment = computeEstimatedPayment({
+      return respondWithVehicleFinanceEstimate(req, res, now, today, {
         totalPrice: clarificationBase.total_price_stated,
         termMonths,
-        annualRatePercent: rate.rate,
-      });
-
-      return respondWithAffordabilityResult(req, res, {
-        now,
-        today,
-        amount: estimatedPayment,
-        category: clarificationBase.category,
-        recurrence: 'monthly',
-        recurrenceWasAmbiguous: false,
-        totalPriceStated: clarificationBase.total_price_stated,
-        rateEstimate: {
-          estimated_payment: estimatedPayment,
-          annual_rate_percent: rate.rate,
-          as_of_date: rate.as_of_date,
-          term_months: termMonths,
-          total_price: clarificationBase.total_price_stated,
-          source: `Federal Reserve (FRED series ${rate.series_id})`,
-          caveat: `This is an estimated payment based on the average new-auto-loan rate published by the Federal Reserve (${rate.rate}% as of ${rate.as_of_date}) - not a real quote. Your actual rate depends on your credit and lender.`,
-        },
       });
     }
 
@@ -1933,11 +2006,23 @@ app.post('/affordability/query', requireUser, async (req, res) => {
         },
         text
       );
-      // total_price_stated is carried through untouched rather than
-      // re-validated against this turn's text - see sanitizeClarificationContext.
-      parsed = { ...sanitized, total_price_stated: clarificationBase.total_price_stated };
+      // total_price_stated and finance_term_months_stated are both carried
+      // through untouched rather than re-validated against this turn's text
+      // - see sanitizeClarificationContext.
+      parsed = {
+        ...sanitized,
+        total_price_stated: clarificationBase.total_price_stated,
+        finance_term_months_stated: clarificationBase.finance_term_months_stated,
+      };
     } else {
       parsed = await parseAffordabilityQuery(text);
+      // Deterministic, same guardrail discipline as amount/total-price
+      // extraction (never trust a model to state a fact - trace it straight
+      // from the user's own raw text). Lets a term stated up front in the
+      // first message ("finance a $35,000 car over 60 months") skip the
+      // finance_term question entirely later in this flow, instead of
+      // re-asking something the user already said.
+      parsed = { ...parsed, finance_term_months_stated: parseFinanceTermMonths(text) };
     }
 
     if (parsed.intent === 'unsupported') {
@@ -1955,6 +2040,7 @@ app.post('/affordability/query', requireUser, async (req, res) => {
       wants_timeline: parsed.wants_timeline,
       financing_relevant: parsed.financing_relevant,
       total_price_stated: parsed.total_price_stated,
+      finance_term_months_stated: parsed.finance_term_months_stated ?? null,
     };
 
     // 'unknown' can't be fed to the engine (normalizeScenario only accepts a

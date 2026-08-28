@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { View, Text, Modal, Pressable, ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { apiFetch, apiErrorMessage } from '../_lib/api';
+import { apiFetch, apiErrorMessage, formatDecimal } from '../_lib/api';
 import { styles, colors } from '../_lib/styles';
 import PrimaryButton from './PrimaryButton';
 
@@ -174,7 +174,7 @@ export default function BudgetInsightModal({ visible, onClose, insight, onBudget
                         {m.name}
                       </Text>
                       <Text style={localStyles.merchantAmount}>
-                        ${m.total.toFixed(2)} · {m.count}x
+                        ${formatDecimal(m.total)} · {m.count}x
                       </Text>
                     </View>
                   ))}
@@ -201,7 +201,7 @@ export default function BudgetInsightModal({ visible, onClose, insight, onBudget
                       <View style={styles.rowMain}>
                         <Text style={localStyles.merchantName}>{a.category}</Text>
                         <Text style={localStyles.merchantAmount}>
-                          ${a.current_amount.toFixed(2)} → ${a.proposed_amount.toFixed(2)}
+                          ${formatDecimal(a.current_amount)} → ${formatDecimal(a.proposed_amount)}
                         </Text>
                       </View>
                       {a.reasoning && <Text style={styles.smallText}>{a.reasoning}</Text>}
@@ -229,8 +229,8 @@ export default function BudgetInsightModal({ visible, onClose, insight, onBudget
               ) : (
                 <View style={[styles.card, localStyles.resultCard]}>
                   <Text style={localStyles.resultText}>
-                    Your current budget is ${realistic.total_budgeted.toFixed(2)}, but your actual
-                    spending has averaged ${realistic.total_average_spend.toFixed(2)} over the last{' '}
+                    Your current budget is ${formatDecimal(realistic.total_budgeted)}, but your actual
+                    spending has averaged ${formatDecimal(realistic.total_average_spend)} over the last{' '}
                     {realistic.months_of_history} month{realistic.months_of_history === 1 ? '' : 's'}.
                   </Text>
                   <Text style={styles.smallText}>

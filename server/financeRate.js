@@ -122,4 +122,6 @@ module.exports = {
   computeEstimatedPayment,
   getCurrentAutoLoanRate,
   FRED_SERIES_ID,
+  MIN_TERM_MONTHS,
+  MAX_TERM_MONTHS,
 };

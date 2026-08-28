@@ -8,7 +8,7 @@ import {
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
 } from 'expo-audio';
-import { apiFetch, apiErrorMessage } from '../_lib/api';
+import { apiFetch, apiErrorMessage, formatDecimal, formatWhole, formatDateMDY } from '../_lib/api';
 import { styles, colors } from '../_lib/styles';
 import { formatAmountLabel } from '../_lib/amountPicker';
 import { useAppData } from '../_lib/appData';
@@ -107,14 +107,14 @@ function monthsOfExpenses(goalProgress) {
 export function describeProjection(p) {
   if (p.status === 'already_affordable') {
     return (
-      `You already have enough saved for this — $${p.saved_amount.toFixed(2)} toward the ` +
-      `$${p.target_amount.toFixed(2)} target.`
+      `You already have enough saved for this — $${formatDecimal(p.saved_amount)} toward the ` +
+      `$${formatDecimal(p.target_amount)} target.`
     );
   }
   const days = p.days_from_now;
   return (
-    `At your current saving pace (about $${p.monthly_pace.toFixed(2)}/month), you're on track ` +
-    `for this by ${p.projected_date} — about ${days} day${days === 1 ? '' : 's'} from now.`
+    `At your current saving pace (about $${formatDecimal(p.monthly_pace)}/month), you're on track ` +
+    `for this by ${formatDateMDY(p.projected_date)} — about ${days} day${days === 1 ? '' : 's'} from now.`
   );
 }
 
@@ -135,7 +135,7 @@ export function describeGoalCallout(goalImpact) {
   }
   return (
     `This pushes your projected goal date back about ${goalImpact.delay_days} ` +
-    `day${goalImpact.delay_days === 1 ? '' : 's'}, to around ${goalImpact.projected_date_after}.`
+    `day${goalImpact.delay_days === 1 ? '' : 's'}, to around ${formatDateMDY(goalImpact.projected_date_after)}.`
   );
 }
 
@@ -155,7 +155,7 @@ export function describeSuggestion(suggestions) {
       : names.length === 2
       ? `${names[0]} and ${names[1]}`
       : `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
-  return `There's real room in ${list} this period (about $${s.combined_available.toFixed(0)} combined) that could help cover this.`;
+  return `There's real room in ${list} this period (about $${formatWhole(s.combined_available)} combined) that could help cover this.`;
 }
 
 // The main result screen's primary explanation (2026-08-28, direct user
@@ -693,7 +693,7 @@ export default function AffordabilityQuery() {
           <View style={styles.card}>
             <View style={styles.comparisonTableRow}>
               <Text style={styles.comparisonTableLabel}>Amount</Text>
-              <Text style={styles.comparisonTableValue}>${result.scenario.amount.toFixed(2)}</Text>
+              <Text style={styles.comparisonTableValue}>${formatDecimal(result.scenario.amount)}</Text>
             </View>
             <View style={styles.comparisonTableRow}>
               <Text style={styles.comparisonTableLabel}>Recurrence</Text>
@@ -718,12 +718,13 @@ export default function AffordabilityQuery() {
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Estimated payment</Text>
               <Text style={styles.smallText}>
-                Based on a {result.rate_estimate.term_months}-month term on $
-                {result.rate_estimate.total_price.toFixed(2)} at the average new-auto-loan rate of{' '}
-                {result.rate_estimate.annual_rate_percent}% APR (published by the Federal Reserve as of{' '}
-                {result.rate_estimate.as_of_date}), the estimated payment is $
-                {result.rate_estimate.estimated_payment.toFixed(2)}/month. This is an estimate, not a real
-                quote - your actual rate depends on your credit and lender.
+                Based on a ${formatDecimal(result.rate_estimate.base_price)} price plus an assumed{' '}
+                {result.rate_estimate.estimated_ttl_rate_percent}% for tax, title, and license ($
+                {formatDecimal(result.rate_estimate.total_price)} total), financed over {result.rate_estimate.term_months}{' '}
+                months at the average new-auto-loan rate of {result.rate_estimate.annual_rate_percent}% APR
+                (published by the Federal Reserve as of {formatDateMDY(result.rate_estimate.as_of_date)}), the estimated payment is
+                ${formatDecimal(result.rate_estimate.estimated_payment)}/month. This is an estimate, not a real quote -
+                your actual rate, tax, and fees depend on your credit, lender, and location.
               </Text>
             </View>
           )}
@@ -739,8 +740,8 @@ export default function AffordabilityQuery() {
               <Text style={styles.cardTitle}>Estimated payment (0% plan)</Text>
               <Text style={styles.smallText}>
                 If this is financed on a 0%-interest plan over {result.promo_plan_estimate.term_months} months, $
-                {result.promo_plan_estimate.total_price.toFixed(2)} works out to $
-                {result.promo_plan_estimate.estimated_payment.toFixed(2)}/month.
+                {formatDecimal(result.promo_plan_estimate.total_price)} works out to $
+                {formatDecimal(result.promo_plan_estimate.estimated_payment)}/month.
               </Text>
               <Text style={[styles.smallText, { marginTop: 8 }]}>
                 {result.promo_plan_estimate.confirmation_caveat}
@@ -819,7 +820,7 @@ export default function AffordabilityQuery() {
               <View style={{ marginTop: 8, gap: 4 }}>
                 {fundSourceSplit.adjustments.map((a) => (
                   <Text key={a.category} style={styles.smallText}>
-                    • Cut ${a.reduce_by.toFixed(2)} from {a.category} — {a.reasoning}
+                    • Cut ${formatDecimal(a.reduce_by)} from {a.category} — {a.reasoning}
                   </Text>
                 ))}
                 {fundSourceSplit.summary && (
@@ -833,7 +834,7 @@ export default function AffordabilityQuery() {
             <View style={styles.card}>
               <Text style={styles.cardTitle}>After adding this payment</Text>
               <Text style={styles.smallText}>
-                You'd have ${result.budget_impact.total_remaining_after.toFixed(2)} left in your budget this
+                You'd have ${formatDecimal(result.budget_impact.total_remaining_after)} left in your budget this
                 period.
               </Text>
             </View>
@@ -853,9 +854,9 @@ export default function AffordabilityQuery() {
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Total price</Text>
               <Text style={styles.smallText}>
-                The ${result.total_price_comparison.total_price.toFixed(2)} total price is about{' '}
+                The ${formatDecimal(result.total_price_comparison.total_price)} total price is about{' '}
                 {result.total_price_comparison.ratio.toFixed(1)}x your available cash ($
-                {result.total_price_comparison.liquid_balance.toFixed(2)}).
+                {formatDecimal(result.total_price_comparison.liquid_balance)}).
               </Text>
             </View>
           )}
@@ -901,7 +902,7 @@ export default function AffordabilityQuery() {
                       </View>
                       <View style={[styles.card, { flex: 1, alignItems: 'center' }]}>
                         <MountainIllustration size={64} />
-                        <Text style={styles.cardTitle}>Wait until {wait.result.scenario.date}</Text>
+                        <Text style={styles.cardTitle}>Wait until {formatDateMDY(wait.result.scenario.date)}</Text>
                         <Text style={{ color: STATUS_TEXT_COLOR[STATUS_TONE[wait.result.status] || 'positive'], fontWeight: '600', fontSize: 13 }}>
                           {wait.result.status_label}
                         </Text>
@@ -921,7 +922,7 @@ export default function AffordabilityQuery() {
                       <View style={styles.comparisonTableRow}>
                         <Text style={styles.comparisonTableLabel}>Discretionary spending (buy now)</Text>
                         <Text style={styles.comparisonTableValue}>
-                          -${buyNow.result.budget_impact?.charge_this_period?.toFixed(2) ?? '—'}
+                          -${formatDecimal(buyNow.result.budget_impact?.charge_this_period) ?? '—'}
                         </Text>
                       </View>
                       <View style={[styles.comparisonTableRow, { borderBottomWidth: 0 }]}>
@@ -987,13 +988,13 @@ export default function AffordabilityQuery() {
                               </Text>
                             ) : monthsOfExpenses(goalProgress) != null ? (
                               <Text style={styles.smallText}>
-                                You have ${goalProgress.saved_amount.toFixed(2)} set aside — about{' '}
+                                You have ${formatDecimal(goalProgress.saved_amount)} set aside — about{' '}
                                 {monthsOfExpenses(goalProgress).toFixed(1)} months of essential
                                 expenses.
                               </Text>
                             ) : (
                               <Text style={styles.smallText}>
-                                You have ${goalProgress.saved_amount.toFixed(2)} set aside.
+                                You have ${formatDecimal(goalProgress.saved_amount)} set aside.
                               </Text>
                             )}
                           </View>
@@ -1010,7 +1011,7 @@ export default function AffordabilityQuery() {
                           <View style={styles.card}>
                             <Text style={styles.cardTitle}>Upcoming bills</Text>
                             <Text style={styles.smallText}>
-                              You have ${upcomingBillsTotal(subscriptionAudit).toFixed(2)} in bills
+                              You have ${formatDecimal(upcomingBillsTotal(subscriptionAudit))} in bills
                               due in the next {UPCOMING_BILLS_CARD_WINDOW_DAYS} days.
                             </Text>
                           </View>
@@ -1037,7 +1038,7 @@ export default function AffordabilityQuery() {
       {response?.status === 'result' && response.max_comfortable && (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>
-            Comfortable up to ${response.max_comfortable.max_comfortable_amount.toFixed(2)}
+            Comfortable up to ${formatDecimal(response.max_comfortable.max_comfortable_amount)}
           </Text>
           <Text
             style={{

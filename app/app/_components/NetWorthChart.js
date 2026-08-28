@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { colors } from '../_lib/styles';
+import { formatDateMDY } from '../_lib/api';
 
 // Net worth trend chart (Home tab redesign, 2026-08-24) - a single-series
 // line/area chart, hand-drawn with react-native-svg (already an installed,
@@ -198,7 +199,7 @@ export default function NetWorthChart({ history }) {
                   onPress={() => setSelectedIndex(i)}
                   style={[styles.hitTarget, { left: c.x - 14, top: c.y - 14 }]}
                   accessibilityRole="button"
-                  accessibilityLabel={`Net worth ${formatCompactCurrency(points[i].net_worth)} on ${points[i].snapshot_date}`}
+                  accessibilityLabel={`Net worth ${formatCompactCurrency(points[i].net_worth)} on ${formatDateMDY(points[i].snapshot_date)}`}
                 />
               ))}
 

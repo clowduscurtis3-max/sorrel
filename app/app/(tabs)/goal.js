@@ -11,7 +11,7 @@ import {
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
 } from 'expo-audio';
-import { apiFetch, apiErrorMessage, GOAL_TYPES, parseDollarAmount } from '../_lib/api';
+import { apiFetch, apiErrorMessage, GOAL_TYPES, parseDollarAmount, formatDecimal, formatWhole } from '../_lib/api';
 import { styles, colors } from '../_lib/styles';
 import { useSessionContext } from '../_lib/session';
 import { useAppData } from '../_lib/appData';
@@ -143,7 +143,7 @@ function computeGoalAdvisorTip({ goalProgress, subscriptionAudit, budgetStatus }
   if (priceJump) {
     return {
       icon: 'trending-up',
-      text: `A price increase was detected on ${priceJump.display_name} (+$${priceJump.increase_amount.toFixed(2)}) - canceling or renegotiating that could free up real money toward this goal.`,
+      text: `A price increase was detected on ${priceJump.display_name} (+$${formatDecimal(priceJump.increase_amount)}) - canceling or renegotiating that could free up real money toward this goal.`,
     };
   }
 
@@ -654,7 +654,18 @@ export default function Goal() {
           <TopEdgeFade height={90}>
           <Animated.ScrollView
             style={goalStyles.editingScroll}
-            contentContainerStyle={{ paddingBottom: 150 }}
+            // 150 (the default every other tab uses) wasn't enough here -
+            // this screen's content (a couple of short cards) is close
+            // enough to viewport height that there's little natural
+            // overflow to scroll through, so the Save Changes/Delete Goal
+            // buttons at the very end stayed pinned behind the floating tab
+            // bar even at max scroll (real, user-reported 2026-08-28). 350
+            // overshot the other direction (confirmed on-device: a large
+            // blank gap between Delete Goal and the tab bar at max scroll) -
+            // 260 matches Budget's own ScrollView, which needed more than
+            // the 150 default for the same reason and was already tuned
+            // against a real device.
+            contentContainerStyle={{ paddingBottom: 260 }}
             onScroll={onEditScroll}
             scrollEventThrottle={16}
           >
@@ -887,7 +898,7 @@ export default function Goal() {
                       <View style={goalStyles.progressValuesRow}>
                         <View>
                           <Text style={goalStyles.progressBigValue}>
-                            ${goalProgress.saved_amount.toFixed(2)}
+                            ${formatDecimal(goalProgress.saved_amount)}
                           </Text>
                           <Text style={styles.smallText}>saved so far</Text>
                         </View>
@@ -902,7 +913,7 @@ export default function Goal() {
                         <View style={[goalStyles.progressFill, { width: `${percent}%` }]} />
                       </View>
                       <Text style={[styles.smallText, { marginTop: 8 }]}>
-                        ${remaining.toFixed(2)} to go
+                        ${formatDecimal(remaining)} to go
                       </Text>
                     </>
                   );
@@ -924,8 +935,8 @@ export default function Goal() {
                   <Text style={goalStyles.cardEyebrow}>SORREL'S TAKE</Text>
                   <Text style={goalStyles.insightText}>
                     {goalProgress.projections.deadline_passed
-                      ? `Your target date of ${formatTargetDate(goalProgress.projections.target_date)} has passed - you'd still need about $${goalProgress.projections.monthly_savings_needed.toFixed(0)} per month to reach this goal.`
-                      : `To reach your goal by ${formatTargetDate(goalProgress.projections.target_date)}, you'll need to save about $${goalProgress.projections.monthly_savings_needed.toFixed(0)} per month.`}
+                      ? `Your target date of ${formatTargetDate(goalProgress.projections.target_date)} has passed - you'd still need about $${formatWhole(goalProgress.projections.monthly_savings_needed)} per month to reach this goal.`
+                      : `To reach your goal by ${formatTargetDate(goalProgress.projections.target_date)}, you'll need to save about $${formatWhole(goalProgress.projections.monthly_savings_needed)} per month.`}
                   </Text>
                   <Pressable
                     onPress={() => setShowCalculationDetail((s) => !s)}
@@ -943,21 +954,21 @@ export default function Goal() {
                   {showCalculationDetail && (
                     <View style={goalStyles.calculationDetail}>
                       <Text style={styles.smallText}>
-                        Target amount: ${goalProgress.target_amount.toFixed(2)}
+                        Target amount: ${formatDecimal(goalProgress.target_amount)}
                       </Text>
                       <Text style={styles.smallText}>
-                        Saved so far: ${goalProgress.saved_amount.toFixed(2)}
+                        Saved so far: ${formatDecimal(goalProgress.saved_amount)}
                       </Text>
                       <Text style={styles.smallText}>
                         Remaining: $
-                        {Math.max(0, goalProgress.target_amount - goalProgress.saved_amount).toFixed(2)}
+                        {formatDecimal(Math.max(0, goalProgress.target_amount - goalProgress.saved_amount))}
                       </Text>
                       <Text style={styles.smallText}>
                         Time remaining: {formatTimeRemaining(goalProgress.projections.months_remaining)}
                       </Text>
                       <Text style={styles.smallText}>
                         Remaining ÷ time remaining = about $
-                        {goalProgress.projections.monthly_savings_needed.toFixed(0)}/month
+                        {formatWhole(goalProgress.projections.monthly_savings_needed)}/month
                       </Text>
                     </View>
                   )}
@@ -1033,7 +1044,7 @@ export default function Goal() {
                         <View style={goalStyles.primaryGoalHeaderText}>
                           <Text style={goalStyles.primaryGoalEyebrow}>Primary Goal</Text>
                           <Text style={goalStyles.primaryGoalTarget}>
-                            ${goalProgress.target_amount.toFixed(2)} Target
+                            ${formatDecimal(goalProgress.target_amount)} Target
                           </Text>
                         </View>
                         <View style={[goalStyles.badge, { backgroundColor: badge.color }]}>
@@ -1047,7 +1058,7 @@ export default function Goal() {
 
                       <View style={goalStyles.savedRow}>
                         <Text style={goalStyles.savedAmount}>
-                          ${goalProgress.saved_amount.toFixed(2)} saved
+                          ${formatDecimal(goalProgress.saved_amount)} saved
                         </Text>
                         <Text style={goalStyles.savedPercent}>{Math.round(percent)}%</Text>
                       </View>
@@ -1086,7 +1097,7 @@ export default function Goal() {
                             : 'MONTHLY SAVINGS NEEDED'}
                         </Text>
                         <Text style={goalStyles.projectionValue}>
-                          ${goalProgress.projections.monthly_savings_needed.toFixed(0)}
+                          ${formatWhole(goalProgress.projections.monthly_savings_needed)}
                         </Text>
                       </View>
                       <View style={goalStyles.projectionDivider} />
@@ -1189,7 +1200,7 @@ export default function Goal() {
                             </Text>
                           ) : calculatorResult.available && calculatorResult.status === 'projected' ? (
                             <Text style={styles.smallText}>
-                              At ${calculatorResult.hypothetical_monthly_amount.toFixed(0)}/month, the
+                              At ${formatWhole(calculatorResult.hypothetical_monthly_amount)}/month, the
                               target would be reached around{' '}
                               {formatTargetDate(calculatorResult.projected_date)}.
                             </Text>
@@ -1224,7 +1235,7 @@ export default function Goal() {
                       {milestonesResult.milestones.map((milestone) => (
                         <View key={milestone.percent} style={goalStyles.milestoneRow}>
                           <Text style={goalStyles.milestoneLabel}>
-                            {milestone.percent}% · ${milestone.amount.toFixed(0)}
+                            {milestone.percent}% · ${formatWhole(milestone.amount)}
                           </Text>
                           <Text style={goalStyles.milestoneStatus}>
                             {describeMilestoneStatus(milestone)}
@@ -1265,7 +1276,7 @@ export default function Goal() {
                         purchase{roundUpsResult?.transaction_count === 1 ? '' : 's'} up to the next
                         dollar would have added up to{' '}
                         <Text style={goalStyles.inlineBold}>
-                          ${(roundUpsResult?.total_round_ups ?? 0).toFixed(2)}
+                          ${formatDecimal(roundUpsResult?.total_round_ups ?? 0)}
                         </Text>
                         . This is an estimate only - nothing is actually being set aside
                         automatically.
@@ -1327,7 +1338,7 @@ export default function Goal() {
                     ) : (
                       <>
                         <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
-                          Based on ${estimate.averageMonthlyEssential.toFixed(0)}/month in
+                          Based on ${formatWhole(estimate.averageMonthlyEssential)}/month in
                           essential spending ({estimate.monthsOfHistory} months of history), a
                           typical emergency fund covers 3-6 months of essential expenses.
                         </Text>
@@ -1433,6 +1444,7 @@ const goalStyles = StyleSheet.create({
   // its own, so this is the one screen that genuinely needs it here
   // rather than on its first child.
   editingScroll: {
+    flex: 1,
     backgroundColor: 'transparent',
     paddingTop: 110,
   },

@@ -18,7 +18,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { createPlaidLinkSession } from 'react-native-plaid-link-sdk';
 import { MaterialIcons } from '@expo/vector-icons';
 import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
-import { apiFetch, apiErrorMessage, formatAmount, CATEGORIES } from '../_lib/api';
+import { apiFetch, apiErrorMessage, formatAmount, formatDecimal, formatWhole, CATEGORIES } from '../_lib/api';
 import { styles, colors } from '../_lib/styles';
 import { useAppData } from '../_lib/appData';
 import { useSessionContext } from '../_lib/session';
@@ -581,7 +581,7 @@ export default function Home() {
                     <>
                       <Text style={homeStyles.cardEyebrow}>TOTAL AVAILABLE</Text>
                       <Text style={homeStyles.bankTotal}>
-                        ${total.toFixed(2)}
+                        ${formatDecimal(total)}
                         <Text style={homeStyles.bankTotalSuffix}> available</Text>
                       </Text>
                     </>
@@ -625,7 +625,7 @@ export default function Home() {
                                 {a.mask ? `  ····${a.mask}` : ''}
                               </Text>
                               <Text style={homeStyles.accountBalance}>
-                                {balance != null ? `$${balance.toFixed(2)}` : '—'}
+                                {balance != null ? `$${formatDecimal(balance)}` : '—'}
                               </Text>
                               <MaterialIcons name="chevron-right" size={20} color={colors.dark} />
                             </View>
@@ -870,8 +870,8 @@ export default function Home() {
               </Text>
               <Text style={homeStyles.insightText}>
                 {monthlyReview.saved >= 0
-                  ? `You saved $${monthlyReview.saved.toFixed(2)} — $${monthlyReview.spend.toFixed(2)} spent on $${monthlyReview.income.toFixed(2)} income.`
-                  : `You spent $${Math.abs(monthlyReview.saved).toFixed(2)} more than you earned — $${monthlyReview.spend.toFixed(2)} spent on $${monthlyReview.income.toFixed(2)} income.`}
+                  ? `You saved $${formatDecimal(monthlyReview.saved)} — $${formatDecimal(monthlyReview.spend)} spent on $${formatDecimal(monthlyReview.income)} income.`
+                  : `You spent $${formatDecimal(Math.abs(monthlyReview.saved))} more than you earned — $${formatDecimal(monthlyReview.spend)} spent on $${formatDecimal(monthlyReview.income)} income.`}
               </Text>
               {monthlyReview.note && (
                 <View style={homeStyles.changeRow}>
@@ -898,15 +898,15 @@ export default function Home() {
             <View style={homeStyles.statTile}>
               <MaterialIcons name="account-balance-wallet" size={18} color={colors.dark} />
               <Text style={homeStyles.statLabel}>SPENT SO FAR</Text>
-              <Text style={homeStyles.statValue}>${spendStats.spent.toFixed(0)}</Text>
-              <Text style={homeStyles.statSub}>of ${spendStats.budgeted.toFixed(0)}</Text>
+              <Text style={homeStyles.statValue}>${formatWhole(spendStats.spent)}</Text>
+              <Text style={homeStyles.statSub}>of ${formatWhole(spendStats.budgeted)}</Text>
             </View>
             <View style={homeStyles.statDivider} />
             <View style={homeStyles.statTile}>
               <MaterialIcons name="show-chart" size={18} color={colors.dark} />
               <Text style={homeStyles.statLabel}>PACE</Text>
               <Text style={homeStyles.statValue}>
-                {pace ? `$${pace.aheadBy.toFixed(0)}` : '—'}
+                {pace ? `$${formatWhole(pace.aheadBy)}` : '—'}
               </Text>
               <Text
                 style={[
@@ -954,7 +954,7 @@ export default function Home() {
                 return (
                   <View key={bill.id} style={styles.alertRow}>
                     <Text style={styles.alertText}>
-                      {bill.display_name} — ${bill.typical_amount.toFixed(2)}
+                      {bill.display_name} — ${formatDecimal(bill.typical_amount)}
                     </Text>
                     <Text style={styles.smallText}>
                       {formatDueText(bill.next_expected_date)}
@@ -987,7 +987,7 @@ export default function Home() {
                         {(i.institution_name || 'Linked bank').toUpperCase()}
                       </Text>
                       <Text style={homeStyles.accountBalance}>
-                        {total != null ? `$${total.toFixed(2)}` : '—'}
+                        {total != null ? `$${formatDecimal(total)}` : '—'}
                       </Text>
                       <MaterialIcons name="chevron-right" size={20} color={colors.dark} />
                     </Pressable>
@@ -1022,7 +1022,7 @@ export default function Home() {
                 })}
               </Text>
               <Text style={styles.smallText}>
-                ${netWorth.current.assets.toFixed(2)} assets — ${netWorth.current.liabilities.toFixed(2)}{' '}
+                ${formatDecimal(netWorth.current.assets)} assets — ${formatDecimal(netWorth.current.liabilities)}{' '}
                 liabilities
               </Text>
 

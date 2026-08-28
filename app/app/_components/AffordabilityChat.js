@@ -5,14 +5,15 @@ import {
   Text,
   TextInput,
   ScrollView,
-  Button,
+  Pressable,
   ActivityIndicator,
   KeyboardAvoidingView,
   Keyboard,
   Platform,
   StyleSheet,
 } from 'react-native';
-import { apiFetch, apiErrorMessage } from '../_lib/api';
+import { MaterialIcons } from '@expo/vector-icons';
+import { apiFetch, apiErrorMessage, formatDecimal, formatDateMDY } from '../_lib/api';
 import { styles, colors } from '../_lib/styles';
 import { ScenarioResult } from './ScenarioResult';
 import { describeProjection, buildOpeningSections } from './AffordabilityQuery';
@@ -37,7 +38,7 @@ function renderToolResult({ tool, result }) {
     if (!result.available) return <Text style={styles.smallText}>{result.detail}</Text>;
     return (
       <>
-        <Text style={styles.cardTitle}>Comfortable up to ${result.max_comfortable_amount.toFixed(2)}</Text>
+        <Text style={styles.cardTitle}>Comfortable up to ${formatDecimal(result.max_comfortable_amount)}</Text>
         <ScenarioResult result={result.boundary_result} />
       </>
     );
@@ -50,7 +51,7 @@ function renderToolResult({ tool, result }) {
       <>
         <Text style={styles.cardTitle}>Buy now</Text>
         <ScenarioResult result={buyNow.result} />
-        <Text style={styles.cardTitle}>Wait until {wait.result.scenario.date}</Text>
+        <Text style={styles.cardTitle}>Wait until {formatDateMDY(wait.result.scenario.date)}</Text>
         <ScenarioResult result={wait.result} />
       </>
     );
@@ -70,8 +71,8 @@ function renderToolResult({ tool, result }) {
     // own header note on why they're never folded into one), so both get
     // named here rather than only ever showing one.
     let reductionParts = [];
-    if (hasDownPayment) reductionParts.push(`a $${result.down_payment.toFixed(2)} down payment`);
-    if (hasTradeIn) reductionParts.push(`a $${result.trade_in_value.toFixed(2)} trade-in`);
+    if (hasDownPayment) reductionParts.push(`a $${formatDecimal(result.down_payment)} down payment`);
+    if (hasTradeIn) reductionParts.push(`a $${formatDecimal(result.trade_in_value)} trade-in`);
     const hasReduction = reductionParts.length > 0;
     // annual_rate_percent may be undefined on a 0%-promo Shopping default
     // (no explicit rate line needed there) - only shown when it's a real
@@ -80,10 +81,10 @@ function renderToolResult({ tool, result }) {
     const showRate = typeof result.annual_rate_percent === 'number' && (result.is_hypothetical_rate || result.annual_rate_percent > 0);
     return (
       <Text style={styles.smallText}>
-        Estimated payment: ${result.estimated_payment.toFixed(2)}/month over {result.term_months} months
+        Estimated payment: ${formatDecimal(result.estimated_payment)}/month over {result.term_months} months
         {hasReduction
-          ? ` financing $${result.financed_amount.toFixed(2)} (the $${result.total_price.toFixed(2)} price minus ${reductionParts.join(' and ')})`
-          : ` on $${result.total_price.toFixed(2)}`}
+          ? ` financing $${formatDecimal(result.financed_amount)} (the $${formatDecimal(result.total_price)} price minus ${reductionParts.join(' and ')})`
+          : ` on $${formatDecimal(result.total_price)}`}
         {showRate ? ` at ${result.annual_rate_percent}%${result.is_hypothetical_rate ? ' (hypothetical)' : ''}.` : '.'}
       </Text>
     );
@@ -233,10 +234,15 @@ export default function AffordabilityChat({ visible, onClose, anchorResult }) {
     <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
       <View style={styles.container}>
         <View style={styles.topBar}>
+          <Pressable
+            onPress={handleClose}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            hitSlop={12}
+          >
+            <MaterialIcons name="arrow-back" size={24} color="#000" />
+          </Pressable>
           <View />
-          <View>
-            <Button title="Close" onPress={handleClose} />
-          </View>
         </View>
 
         <View style={styles.header}>

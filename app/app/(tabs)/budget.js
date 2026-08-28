@@ -21,7 +21,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
 import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
-import { apiFetch, apiErrorMessage } from '../_lib/api';
+import { apiFetch, apiErrorMessage, formatDecimal } from '../_lib/api';
 import { styles, colors } from '../_lib/styles';
 import { useAppData } from '../_lib/appData';
 import { iconForCategory } from '../_lib/categoryIcons';
@@ -440,14 +440,14 @@ export default function Budget() {
               <View style={budgetLocalStyles.statTile}>
                 <MaterialIcons name="account-balance-wallet" size={18} color={colors.dark} />
                 <Text style={budgetLocalStyles.statLabel}>TOTAL BUDGET</Text>
-                <Text style={budgetLocalStyles.statValue}>${spendStats.budgeted.toFixed(2)}</Text>
+                <Text style={budgetLocalStyles.statValue}>${formatDecimal(spendStats.budgeted)}</Text>
               </View>
               <View style={budgetLocalStyles.statDivider} />
               <View style={budgetLocalStyles.statTile}>
                 <MaterialIcons name="pie-chart" size={18} color={colors.dark} />
                 <Text style={budgetLocalStyles.statLabel}>SPENT SO FAR</Text>
                 <Text style={[budgetLocalStyles.statValue, spentPercent > 100 && { color: colors.error }]}>
-                  ${spendStats.spent.toFixed(2)}
+                  ${formatDecimal(spendStats.spent)}
                 </Text>
                 {spentPercent != null && (
                   <Text style={[budgetLocalStyles.statSub, spentPercent > 100 && { color: colors.error }]}>
@@ -462,7 +462,7 @@ export default function Budget() {
                 <Text
                   style={[budgetLocalStyles.statValue, pace && !pace.isAhead && { color: colors.error }]}
                 >
-                  {pace ? `$${pace.aheadBy.toFixed(2)}` : '—'}
+                  {pace ? `$${formatDecimal(pace.aheadBy)}` : '—'}
                 </Text>
                 <Text
                   style={[
@@ -541,10 +541,10 @@ export default function Budget() {
                         </Text>
                         <View style={budgetLocalStyles.historyPeriodRow}>
                           <Text style={budgetLocalStyles.historyPeriodStat}>
-                            Budgeted ${stats.budgeted.toFixed(2)}
+                            Budgeted ${formatDecimal(stats.budgeted)}
                           </Text>
                           <Text style={budgetLocalStyles.historyPeriodStat}>
-                            Spent ${stats.spent.toFixed(2)}
+                            Spent ${formatDecimal(stats.spent)}
                           </Text>
                         </View>
                       </View>
@@ -581,8 +581,8 @@ export default function Budget() {
 
                   <Text style={budgetLocalStyles.categorySpentLine}>
                     {s.budgeted == null
-                      ? `spent $${s.actual.toFixed(2)} `
-                      : `spent $${s.actual.toFixed(2)} of $${s.budgeted.toFixed(2)} `}
+                      ? `spent $${formatDecimal(s.actual)} `
+                      : `spent $${formatDecimal(s.actual)} of $${formatDecimal(s.budgeted)} `}
                     {s.budgeted == null ? (
                       <Text style={budgetLocalStyles.notBudgetedText}>(not budgeted yet)</Text>
                     ) : (
@@ -592,7 +592,7 @@ export default function Budget() {
                           fontWeight: '600',
                         }}
                       >
-                        ({s.remaining < 0 ? '-' : ''}${Math.abs(s.remaining).toFixed(2)} left)
+                        ({s.remaining < 0 ? '-' : ''}${formatDecimal(Math.abs(s.remaining))} left)
                       </Text>
                     )}
                   </Text>

@@ -191,13 +191,51 @@ export function apiErrorMessage(err) {
   return 'Something went wrong. Please try again.';
 }
 
+// Shared by every dollar figure rendered anywhere in this app - a plain
+// `.toFixed(2)` never grouped digits ("35000.00" instead of "35,000.00"),
+// which read wrong for anything above four figures (real, user-reported
+// 2026-08-28). `toLocaleString` groups AND fixes the decimal count in one
+// call, so this is a drop-in replacement for `.toFixed(2)` everywhere it was
+// used, not a behavior change beyond adding the separators - the minus sign
+// on a negative value still comes from `toLocaleString` itself, same as
+// `.toFixed` produced. Defensively returns undefined (not NaN/"undefined")
+// for a non-finite/missing input so callers using `formatDecimal(x) ?? '—'`
+// for an optional value keep working exactly as their old `x?.toFixed(2) ??
+// '—'` did.
+export function formatDecimal(amount) {
+  if (typeof amount !== 'number' || !Number.isFinite(amount)) return undefined;
+  return amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Same as formatDecimal, but for the whole-dollar `.toFixed(0)` call sites
+// (stat tiles, pace figures) that never showed cents to begin with.
+export function formatWhole(amount) {
+  if (typeof amount !== 'number' || !Number.isFinite(amount)) return undefined;
+  return amount.toLocaleString('en-US', { maximumFractionDigits: 0 });
+}
+
 // Plaid's amount convention is negative-for-money-in (income, refunds) and
 // positive-for-money-out (spend) - budget.js already accounts for this
 // (Math.abs when summing Income). The transaction list didn't, so income/
 // refund rows rendered as e.g. "$-500.00" instead of a clearly-signed
 // credit.
 export function formatAmount(amount) {
-  return amount < 0 ? `+$${Math.abs(amount).toFixed(2)}` : `$${amount.toFixed(2)}`;
+  return amount < 0 ? `+$${formatDecimal(Math.abs(amount))}` : `$${formatDecimal(amount)}`;
+}
+
+// Every plain YYYY-MM-DD calendar date this app receives from the server (a
+// scenario date, a projected/next-expected date, a published rate's as-of
+// date) gets displayed the same way - MM/DD/YYYY, not the ISO
+// year-first order, which reads backwards to this app's US audience (real,
+// user-reported 2026-08-28). Parsed at UTC midnight (same "avoid a
+// local-timezone off-by-one" pattern this app's other date formatters -
+// formatTargetDate in goal.js, periodLabel in budget.js - already use)
+// since these are plain calendar dates, not real moments in time.
+export function formatDateMDY(isoDate) {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  return `${mm}/${dd}/${d.getUTCFullYear()}`;
 }
 
 // Shared by every plain typed/voice-transcribed dollar-amount field in this
