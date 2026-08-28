@@ -516,6 +516,111 @@ async function backfillBudgetHistory(userId, monthsBack) {
   return results;
 }
 
+// Shared core, extracted from proposeRebalance (2026-08-27, Phase 23):
+// given a dollar amount that needs to be found and a set of candidate
+// categories with real, already-verified room to trim from, asks Claude
+// which to cut and by how much, with reasoning. `framing` is the only
+// thing that differs between call sites (proposeRebalance: "you just
+// increased X's budget"; Phase 23's fund-source suggestion: "this
+// purchase would leave you short") - the actual reasoning task, guardrails,
+// and response contract are identical, so this is one implementation, not
+// two near-duplicate prompts. `candidates` is `[{ category, room }]` -
+// `room` must already be a real, server-verified ceiling (this project's
+// "never fabricate a financial fact" rule applies to every input handed to
+// Claude here, not just its output) - never a client-echoed number taken
+// on faith.
+async function proposeCategoryTrim({ amountNeeded, candidates, framing }) {
+  const candidateRooms = Object.fromEntries(candidates.map((c) => [c.category, c.room]));
+  const candidateCategories = candidates.map((c) => c.category);
+
+  const message = await anthropic.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 1024,
+    system:
+      `You are a budgeting assistant for a personal finance app, presenting a ` +
+      `recommendation to the user - warm, plain-language, never a dry system ` +
+      `statement, but NEVER first person. Do not write "I", "I'm", "I suggest", ` +
+      `"I recommend", or anything else casting yourself as a self making a ` +
+      `decision - you are not a person, you're software presenting information ` +
+      `for the user to weigh. Talk about the recommendation itself, in second ` +
+      `person ("you") or neutral active voice, e.g. "Trimming Shopping covers ` +
+      `most of the increase" or "This leaves your essentials untouched" - never ` +
+      `"I'm trimming Shopping" or "I'd leave your essentials untouched". ` +
+      `${framing} Propose which of the given categories should be reduced to ` +
+      `cover exactly $${amountNeeded.toFixed(2)}, and by how much each. Prefer ` +
+      `trimming categories with the most room (largest current amounts, or ` +
+      `discretionary spend like Dining/Entertainment/Shopping/Subscriptions/` +
+      `Travel) over cutting something already tight or a necessity. Never propose ` +
+      `reducing a category below $0, and never propose more total reduction than ` +
+      `$${amountNeeded.toFixed(2)}. Drawing from just one or two categories is ` +
+      `fine if that reads more sensibly than spreading thin across all of them. ` +
+      `For each category you touch, give a one-sentence reasoning that makes the ` +
+      `case for this adjustment so the user can weigh it themselves - explain WHY ` +
+      `this category and this amount make sense (e.g. "Dining is one of the ` +
+      `easier areas to dial back when you need to free up cash, so trimming it ` +
+      `here covers what you need without touching essentials"), NOT an ` +
+      `announcement of an action you're taking (avoid "I'm reducing/I moved/I'm ` +
+      `cutting" phrasing entirely - nothing is applied unless the user approves ` +
+      `it, so don't write as if you already decided something for them). Same ` +
+      `rule for "summary". Respond with ONLY a JSON object: {"adjustments": ` +
+      `[{"category": "...", "reduce_by": <number>, "reasoning": "..."}], ` +
+      `"summary": "one sentence overall explanation"}. Only include categories ` +
+      `you're actually adjusting.`,
+    messages: [
+      {
+        role: 'user',
+        content: JSON.stringify({
+          amount_needed: amountNeeded,
+          candidate_categories_with_room: candidateRooms,
+        }),
+      },
+    ],
+  });
+
+  const text = message.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
+  const cleaned = extractJson(text);
+
+  let parsed;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (err) {
+    console.error('Failed to parse Claude category-trim response:', err.message);
+    console.error('stop_reason:', message.stop_reason, '- raw response:', text);
+    throw new Error('AI suggestion failed - could not parse a valid response.');
+  }
+
+  // Same validation discipline as generateBudget: only trust finite,
+  // non-negative numbers, and cap the total so a bad response can never
+  // propose taking more money than is actually needed, or more than a
+  // category's own verified room.
+  const rawAdjustments = Array.isArray(parsed.adjustments) ? parsed.adjustments : [];
+  let remaining = amountNeeded;
+  const adjustments = [];
+  for (const a of rawAdjustments) {
+    if (!candidateCategories.includes(a.category)) continue;
+    const reduceBy = a.reduce_by;
+    if (typeof reduceBy !== 'number' || !Number.isFinite(reduceBy) || reduceBy <= 0) continue;
+    const capped = Math.min(reduceBy, remaining, candidateRooms[a.category]);
+    if (capped <= 0) continue;
+    const rounded = Math.round(capped * 100) / 100;
+    adjustments.push({
+      category: a.category,
+      room: candidateRooms[a.category],
+      reduce_by: rounded,
+      reasoning: typeof a.reasoning === 'string' ? a.reasoning : null,
+    });
+    remaining = Math.round((remaining - rounded) * 100) / 100;
+    if (remaining <= 0) break;
+  }
+
+  return {
+    adjustments,
+    covered: Math.round((amountNeeded - remaining) * 100) / 100,
+    remaining_uncovered: Math.max(0, remaining),
+    summary: typeof parsed.summary === 'string' ? parsed.summary : null,
+  };
+}
+
 // Phase 3 Step 4: given a category the user wants to change to a new
 // amount, proposes which other categories should absorb the difference -
 // a preview only, nothing is persisted here (see applyBudgetEdit for
@@ -566,98 +671,49 @@ async function proposeRebalance(userId, category, newAmount) {
     };
   }
 
-  const message = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 1024,
-    system:
-      `You are a budgeting assistant for a personal finance app, presenting a ` +
-      `recommendation to the user - warm, plain-language, never a dry system ` +
-      `statement, but NEVER first person. Do not write "I", "I'm", "I suggest", ` +
-      `"I recommend", or anything else casting yourself as a self making a ` +
-      `decision - you are not a person, you're software presenting information ` +
-      `for the user to weigh. Talk about the recommendation itself, in second ` +
-      `person ("you") or neutral active voice, e.g. "Trimming Shopping covers ` +
-      `most of the increase" or "This leaves your essentials untouched" - never ` +
-      `"I'm trimming Shopping" or "I'd leave your essentials untouched". The ` +
-      `user just increased their "${category}" budget ` +
-      `by $${delta.toFixed(2)}. Propose which of the given categories should be ` +
-      `reduced to cover exactly that $${delta.toFixed(2)}, and by how much each. ` +
-      `Prefer trimming categories with the most room (largest current budgets, or ` +
-      `discretionary spend like Dining/Entertainment/Shopping/Subscriptions/` +
-      `Travel) over cutting something already tight or a necessity. Never propose ` +
-      `reducing a category below $0, and never propose more total reduction than ` +
-      `$${delta.toFixed(2)}. Drawing from just one or two categories is fine if ` +
-      `that reads more sensibly than spreading thin across all of them. For each ` +
-      `category you touch, give a one-sentence reasoning that makes the case for ` +
-      `this adjustment so the user can weigh it themselves - explain WHY this ` +
-      `category and this amount make sense (e.g. "Dining is one of the easier ` +
-      `areas to dial back when you need to free up cash, so trimming it here ` +
-      `covers what you need without touching essentials"), NOT an announcement ` +
-      `of an action you're taking (avoid "I'm reducing/I moved/I'm cutting" ` +
-      `phrasing entirely - nothing is applied unless the user approves it, so ` +
-      `don't write as if you already decided something for them). Same rule for ` +
-      `"summary". Respond with ONLY a JSON object: {"adjustments": [{"category": ` +
-      `"...", "reduce_by": <number>, "reasoning": "..."}], "summary": "one ` +
-      `sentence overall explanation"}. Only include categories you're actually ` +
-      `adjusting.`,
-    messages: [
-      {
-        role: 'user',
-        content: JSON.stringify({
-          category_being_increased: category,
-          increase_amount: delta,
-          other_category_current_budgets: candidateBudgets,
-        }),
-      },
-    ],
+  const result = await proposeCategoryTrim({
+    amountNeeded: delta,
+    candidates: candidateCategories.map((c) => ({ category: c, room: candidateBudgets[c] })),
+    framing: `The user just increased their "${category}" budget by $${delta.toFixed(2)}.`,
   });
-
-  const text = message.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
-  const cleaned = extractJson(text);
-
-  let parsed;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch (err) {
-    console.error('Failed to parse Claude rebalance response:', err.message);
-    console.error('stop_reason:', message.stop_reason, '- raw response:', text);
-    throw new Error('AI re-balancing failed - could not parse a valid response.');
-  }
-
-  // Same validation discipline as generateBudget: only trust finite,
-  // non-negative numbers, and cap the total so a bad response can never
-  // propose taking more money than the edit actually requires.
-  const rawAdjustments = Array.isArray(parsed.adjustments) ? parsed.adjustments : [];
-  let remaining = delta;
-  const adjustments = [];
-  for (const a of rawAdjustments) {
-    if (!candidateCategories.includes(a.category)) continue;
-    const reduceBy = a.reduce_by;
-    if (typeof reduceBy !== 'number' || !Number.isFinite(reduceBy) || reduceBy <= 0) continue;
-    const capped = Math.min(reduceBy, remaining, candidateBudgets[a.category]);
-    if (capped <= 0) continue;
-    const rounded = Math.round(capped * 100) / 100;
-    adjustments.push({
-      category: a.category,
-      current_amount: candidateBudgets[a.category],
-      proposed_amount: Math.round((candidateBudgets[a.category] - rounded) * 100) / 100,
-      reduce_by: rounded,
-      reasoning: typeof a.reasoning === 'string' ? a.reasoning : null,
-    });
-    remaining = Math.round((remaining - rounded) * 100) / 100;
-    if (remaining <= 0) break;
-  }
 
   return {
     category,
     previous_amount: currentAmount,
     new_amount: newAmount,
     delta,
-    adjustments,
-    covered: Math.round((delta - remaining) * 100) / 100,
-    remaining_uncovered: Math.max(0, remaining),
-    summary: typeof parsed.summary === 'string' ? parsed.summary : null,
+    adjustments: result.adjustments.map((a) => ({
+      category: a.category,
+      current_amount: a.room,
+      proposed_amount: Math.round((a.room - a.reduce_by) * 100) / 100,
+      reduce_by: a.reduce_by,
+      reasoning: a.reasoning,
+    })),
+    covered: result.covered,
+    remaining_uncovered: result.remaining_uncovered,
+    summary: result.summary,
   };
+}
+
+// Phase 23 (fund-source suggestion for "Can I afford this?"): given the
+// already-computed, server-verified `suggestions[0]` shape
+// scenario.js's buildSuggestions produces ({ shortfall_amount, categories:
+// [{category, available}] }), asks Claude for the exact per-category split
+// - never receives or trusts a client-echoed shortfall/room figure, only
+// numbers this same server has already independently derived from the
+// real account via evaluateScenario. Returns `null` when there's nothing
+// to propose (no candidates at all) rather than an empty/misleading
+// adjustment list.
+async function proposeFundSourceSplit(suggestion) {
+  if (!suggestion || !suggestion.categories || suggestion.categories.length === 0) return null;
+
+  return proposeCategoryTrim({
+    amountNeeded: suggestion.shortfall_amount,
+    candidates: suggestion.categories.map((c) => ({ category: c.category, room: c.available })),
+    framing:
+      `A hypothetical purchase the user is asking about would leave this ` +
+      `period's budget $${suggestion.shortfall_amount.toFixed(2)} short.`,
+  });
 }
 
 // Phase 3 Step 4: persists a user's budget edit plus whichever offsetting
@@ -724,6 +780,7 @@ module.exports = {
   recomputeBudgetActuals,
   backfillBudgetHistory,
   proposeRebalance,
+  proposeFundSourceSplit,
   applyBudgetEdit,
   currentMonthRange,
   monthRange,

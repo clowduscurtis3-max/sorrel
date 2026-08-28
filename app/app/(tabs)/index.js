@@ -161,6 +161,7 @@ export default function Home() {
     netWorth,
     budgetStatus,
     homeChanges,
+    monthlyReview,
     bankRelinkSignal,
   } = useAppData();
   const { session } = useSessionContext();
@@ -849,6 +850,46 @@ export default function Home() {
                 )}
               </View>
             )}
+
+          {/* Monthly review (Phase 17) - last closed calendar month's
+              income/spend/saved, the category that moved the most vs. the
+              month before, and the account's current goal pace. `review`
+              is null (not a fabricated $0 card) when last month has no
+              real budget/actuals data yet - see server/monthlyReview.js.
+              Same up=error/down=positive coloring homeChanges.net_worth
+              uses above, but flipped: for a spend category, "up" is the
+              bad direction and "down" is the good one, the opposite of a
+              rising net worth. */}
+          {monthlyReview && (
+            <View style={[styles.card, homeStyles.cardMargin]}>
+              <Text style={homeStyles.cardEyebrow}>
+                {new Date(`${monthlyReview.period_start}T00:00:00Z`)
+                  .toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' })
+                  .toUpperCase()}{' '}
+                REVIEW
+              </Text>
+              <Text style={homeStyles.insightText}>
+                {monthlyReview.saved >= 0
+                  ? `You saved $${monthlyReview.saved.toFixed(2)} — $${monthlyReview.spend.toFixed(2)} spent on $${monthlyReview.income.toFixed(2)} income.`
+                  : `You spent $${Math.abs(monthlyReview.saved).toFixed(2)} more than you earned — $${monthlyReview.spend.toFixed(2)} spent on $${monthlyReview.income.toFixed(2)} income.`}
+              </Text>
+              {monthlyReview.note && (
+                <View style={homeStyles.changeRow}>
+                  <MaterialIcons
+                    name={monthlyReview.biggest_move.direction === 'up' ? 'trending-up' : 'trending-down'}
+                    size={18}
+                    color={
+                      monthlyReview.biggest_move.direction === 'up' ? colors.error : colors.positive
+                    }
+                  />
+                  <Text style={homeStyles.changeText}>{monthlyReview.note}</Text>
+                </View>
+              )}
+              {monthlyReview.goal_pace?.message && (
+                <Text style={homeStyles.changeMore}>{monthlyReview.goal_pace.message}</Text>
+              )}
+            </View>
+          )}
 
           {/* Stat tiles - each already backed by data computed above; a
               restyle/composition over existing numbers, no new math beyond

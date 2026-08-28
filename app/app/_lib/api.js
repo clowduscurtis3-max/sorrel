@@ -199,3 +199,22 @@ export function apiErrorMessage(err) {
 export function formatAmount(amount) {
   return amount < 0 ? `+$${Math.abs(amount).toFixed(2)}` : `$${amount.toFixed(2)}`;
 }
+
+// Shared by every plain typed/voice-transcribed dollar-amount field in this
+// app (the Goal Calculator's amount field, 2026-08-25; GoalForm's target
+// amount, 2026-08-27) - strips everything but digits/decimal point so
+// "$200", "200 dollars", and "200" (typed or however Whisper transcribed
+// it) all resolve the same way. No server-side guardrail is needed here the
+// way the "Can I afford this?" flow needs one - this is the user's own
+// direct planning input, never narrated back as a claimed financial fact
+// from an untrusted source. Returns null (not 0 or NaN) for anything that
+// doesn't resolve to a real positive amount, so callers can tell "nothing
+// entered yet" and "typed something unparseable" apart from a genuine $0.
+export function parseDollarAmount(text) {
+  if (!text) return null;
+  const cleaned = String(text).replace(/[^0-9.]/g, '');
+  if (!cleaned) return null;
+  const value = parseFloat(cleaned);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return value;
+}

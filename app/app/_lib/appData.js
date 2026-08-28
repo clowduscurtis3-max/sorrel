@@ -93,6 +93,11 @@ export function AppDataProvider({ children }) {
   // resume), never a tight poll, so every call already represents a real
   // "user just checked in" moment.
   const [homeChanges, setHomeChanges] = useState(null);
+  // Phase 17 (Monthly review) - GET /monthly-review's own shape verbatim
+  // ({ review }), review is null until enough historical budget/actuals
+  // data exists for last month specifically (see monthlyReview.js's own
+  // comment) - never fabricated as a $0 review in the meantime.
+  const [monthlyReview, setMonthlyReview] = useState(null);
 
   // Real bug found by adversarial review, 2026-08-13: re-linking a bank
   // account via AccountMenu (a plain sibling <Modal>, not a router route -
@@ -210,6 +215,17 @@ export function AppDataProvider({ children }) {
     }
   }
 
+  async function fetchMonthlyReview() {
+    try {
+      const res = await apiFetch('/monthly-review');
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const data = await res.json();
+      setMonthlyReview(data.review);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   useEffect(() => {
     if (!session) return;
     fetchAlerts();
@@ -220,6 +236,7 @@ export function AppDataProvider({ children }) {
     fetchNetWorth();
     fetchBudgetStatus();
     fetchHomeChanges();
+    fetchMonthlyReview();
     registerDeviceForPushNotifications().then((token) => {
       pushTokenRef.current = token;
     });
@@ -297,6 +314,7 @@ export function AppDataProvider({ children }) {
         netWorth,
         budgetStatus,
         homeChanges,
+        monthlyReview,
         refetchAlerts: fetchAlerts,
         refetchGoalProgress: fetchGoalProgress,
         refetchSubscriptionAudit: fetchSubscriptionAudit,

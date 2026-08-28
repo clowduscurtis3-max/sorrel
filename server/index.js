@@ -28,12 +28,14 @@ const {
   recomputeBudgetActuals,
   backfillBudgetHistory,
   proposeRebalance,
+  proposeFundSourceSplit,
   applyBudgetEdit,
   currentMonthRange,
   NoHistoryError,
 } = require('./budget');
 const { getBudgetHistory } = require('./budgetHistory');
 const { getHomeChanges } = require('./homeChanges');
+const { getMonthlyReview } = require('./monthlyReview');
 const { detectRecurringTransactions } = require('./recurring');
 const { recomputeOverspendAlerts } = require('./alerts');
 const { getGoalProgress } = require('./goalProgress');
@@ -1364,6 +1366,27 @@ app.get('/budget/history', requireUser, async (req, res) => {
   }
 });
 
+// Phase 17 (Monthly review): last closed calendar month's income/spend/
+// saved, the category that moved the most vs. the month before, and the
+// account's current goal pace - reusing Phase 3/11's own budget-status and
+// goal-progress math rather than a third implementation. `months_ago`
+// (client-provided, clamped) selects which closed period to review - 1
+// (last month) is the default. `review: null` means that period has no
+// real budget/actuals data yet (never synced/budgeted that far back), not
+// an error - the client should say so rather than show a fabricated $0
+// review.
+app.get('/monthly-review', requireUser, async (req, res) => {
+  try {
+    const requested = parseInt(req.query.months_ago, 10);
+    const monthsAgo = Number.isFinite(requested) ? Math.min(Math.max(requested, 1), 12) : 1;
+    const review = await getMonthlyReview(req.userId, monthsAgo);
+    res.json({ review });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load monthly review' });
+  }
+});
+
 // Phase 16 ("What changed?" since last open): diffs notification_events
 // and net_worth_snapshots against this user's own last-checked-in
 // timestamp, then advances that timestamp to now (see getHomeChanges's own
@@ -1407,6 +1430,39 @@ app.post('/scenarios/evaluate', requireUser, async (req, res) => {
     }
     console.error(err);
     res.status(500).json({ error: 'Failed to evaluate scenario' });
+  }
+});
+
+// Phase 23 (fund-source suggestion): given the same scenario shape
+// /scenarios/evaluate accepts, re-derives budgetImpact/suggestions itself
+// (evaluateScenario is cheap/deterministic - no Claude cost for this part)
+// rather than trusting a client-echoed shortfall/room figure, then asks
+// Claude for the exact per-category split only once real candidate room
+// has been independently verified server-side. On-demand only (not called
+// automatically by /scenarios/evaluate itself) - same "preview, real cost,
+// call only when actually wanted" discipline /budget/rebalance-proposal
+// already follows, since evaluateScenario alone runs many times per
+// request elsewhere in this app (findMaxComfortableAmount's own binary
+// search), and embedding a Claude call inside it would multiply an
+// intentionally cheap function into an expensive one.
+app.post('/scenarios/suggestion-split', requireUser, async (req, res) => {
+  try {
+    const now = new Date();
+    normalizeScenario(req.body, now);
+    const context = await loadScenarioContext(req.userId, now);
+    const result = evaluateScenario({ context, scenario: req.body });
+    const suggestion = result.suggestions?.[0] || null;
+    if (!suggestion) {
+      return res.json({ proposal: null });
+    }
+    const proposal = await proposeFundSourceSplit(suggestion);
+    res.json({ proposal });
+  } catch (err) {
+    if (err instanceof ScenarioValidationError) {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Failed to propose a fund-source split' });
   }
 });
 

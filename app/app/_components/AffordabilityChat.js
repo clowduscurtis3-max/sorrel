@@ -15,7 +15,7 @@ import {
 import { apiFetch, apiErrorMessage } from '../_lib/api';
 import { styles, colors } from '../_lib/styles';
 import { ScenarioResult } from './ScenarioResult';
-import { describeProjection, describeSuggestion, describeGoalCallout } from './AffordabilityQuery';
+import { describeProjection, buildOpeningSections } from './AffordabilityQuery';
 import PrimaryButton from './PrimaryButton';
 
 // Real bug found by adversarial review (2026-08-22): the five chat tools
@@ -123,42 +123,10 @@ function renderToolResult({ tool, result }) {
 // server-side (see scenarioExplain.js) into three short, separately
 // labeled sections instead: why (reasoning), where money could come from
 // (possible_room), and what Sorrel would actually do (recommended_actions).
-// Real gap found by /code-review (2026-08-22), still true under the new
-// shape: if the original explainScenario call failed (a Claude outage/
-// timeout), the chat must not open completely empty - it falls back to
-// the same deterministic facts (tradeoffs/suggestions/goal_impact/
-// limitations) that are always present in `anchorResult` regardless of
-// that call's outcome, reusing the exact same describeSuggestion/
-// describeGoalCallout helpers the main result card already uses so the
-// fallback phrasing matches what the user already saw there.
-function buildOpeningSections(anchorResult) {
-  const explanation = anchorResult?.explanation;
-  // New shape: { reasoning, possible_room, recommended_actions }, all
-  // non-empty strings (scenarioExplain.js's parseSections never returns a
-  // partial object).
-  if (explanation && typeof explanation === 'object' && explanation.reasoning) {
-    return explanation;
-  }
-
-  const reasoning =
-    // Old plain-string shape (a stale/legacy result) still reads fine as
-    // the "why" section on its own.
-    (typeof explanation === 'string' && explanation) ||
-    anchorResult?.tradeoffs?.[0]?.text ||
-    anchorResult?.limitations?.[0] ||
-    null;
-
-  const possibleRoom =
-    describeSuggestion(anchorResult?.suggestions) ||
-    "There's no obvious room in the budget to free up right now, based on what's already known.";
-
-  const recommendedActions =
-    describeGoalCallout(anchorResult?.goal_impact) ||
-    'Review the numbers above before deciding whether to move ahead.';
-
-  if (!reasoning) return null;
-  return { reasoning, possible_room: possibleRoom, recommended_actions: recommendedActions };
-}
+// `buildOpeningSections` itself now lives in AffordabilityQuery.js
+// (2026-08-28) - the main result screen shows two of its three sections
+// directly (see that file's own "Why" card), so this chat and that screen
+// share one implementation rather than two copies that could drift apart.
 
 // Plain-text version of the sections, sent as the conversation's first
 // assistant turn so a follow-up like "what did you mean by that" still has

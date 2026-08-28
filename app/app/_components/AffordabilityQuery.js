@@ -139,17 +139,6 @@ export function describeGoalCallout(goalImpact) {
   );
 }
 
-// "AI-narrated responses + conversation memory" follow-up (CLAUDE.md): the
-// full tradeoffs/limitations list read as a long, list-y block once several
-// caveats stack up (found on-device testing the financing flow) - trimmed
-// to a short, glance-able template (2-4 bullets straight off already-
-// computed fields) with a "More details" link into a real chat
-// (AffordabilityChat.js) for anyone who wants the full picture or a genuine
-// follow-up. Deterministic, no new Claude call - same cost-conscious
-// default as describeGoalCallout/describeComparisonDifference right next
-// to this. The full explanation paragraph isn't dropped, just relocated:
-// it becomes the chat's own opening message (see AffordabilityChat.js),
-// not shown twice.
 // Concrete "here's where the money could come from" line, straight off
 // server/scenario.js's buildSuggestions (real unspent budget in other
 // categories this period - never invented here). Added per direct user
@@ -169,17 +158,48 @@ export function describeSuggestion(suggestions) {
   return `There's real room in ${list} this period (about $${s.combined_available.toFixed(0)} combined) that could help cover this.`;
 }
 
-function shortResultSummary(result) {
-  const bullets = [];
-  const topTradeoff = result.tradeoffs?.[0];
-  if (topTradeoff) bullets.push(topTradeoff.text);
-  const suggestionLine = describeSuggestion(result.suggestions);
-  if (suggestionLine) bullets.push(suggestionLine);
-  const goalLine = describeGoalCallout(result.goal_impact);
-  if (goalLine) bullets.push(goalLine);
-  const topLimitation = result.limitations?.[0];
-  if (topLimitation) bullets.push(topLimitation);
-  return bullets.slice(0, 3);
+// The main result screen's primary explanation (2026-08-28, direct user
+// request - the old deterministic bullet list "feels like a robot spitting
+// facts," specifically confusing on a real case where a category's
+// pre-existing overage and a new charge's own cost got silently added
+// together into one unexplained number). Reuses `anchorResult.explanation`
+// (the already-generated, already-paid-for Claude call from
+// /affordability/query - zero new cost) rather than a fresh call, same
+// three-section shape (reasoning/possible_room/recommended_actions)
+// AffordabilityChat.js's own opening message already uses, so the two
+// surfaces never disagree on phrasing. Falls back to the deterministic
+// tradeoffs/suggestions/goal_impact facts (never empty) when the
+// explanation call failed - a Claude outage must never leave the main
+// result screen with nothing to show.
+// Exported so AffordabilityChat.js's own opening message reuses this
+// exact implementation instead of a second copy.
+export function buildOpeningSections(anchorResult) {
+  const explanation = anchorResult?.explanation;
+  // New shape: { reasoning, possible_room, recommended_actions }, all
+  // non-empty strings (scenarioExplain.js's parseSections never returns a
+  // partial object).
+  if (explanation && typeof explanation === 'object' && explanation.reasoning) {
+    return explanation;
+  }
+
+  const reasoning =
+    // Old plain-string shape (a stale/legacy result) still reads fine as
+    // the "why" section on its own.
+    (typeof explanation === 'string' && explanation) ||
+    anchorResult?.tradeoffs?.[0]?.text ||
+    anchorResult?.limitations?.[0] ||
+    null;
+
+  const possibleRoom =
+    describeSuggestion(anchorResult?.suggestions) ||
+    "There's no obvious room in the budget to free up right now, based on what's already known.";
+
+  const recommendedActions =
+    describeGoalCallout(anchorResult?.goal_impact) ||
+    'Review the numbers above before deciding whether to move ahead.';
+
+  if (!reasoning) return null;
+  return { reasoning, possible_room: possibleRoom, recommended_actions: recommendedActions };
 }
 
 // Short two-word-ish label for the comparison table's Goal progress row -
@@ -278,6 +298,15 @@ export default function AffordabilityQuery() {
   const [comparisonError, setComparisonError] = useState(null);
   const [comparison, setComparison] = useState(null);
 
+  // Phase 23 (fund-source suggestion): the AI-authored exact per-category
+  // split, shown only as an explicit secondary action under the
+  // deterministic "there's room in X and Y" line - never auto-run, same
+  // "preview, real cost, only when actually wanted" reasoning
+  // /scenarios/suggestion-split itself follows server-side.
+  const [checkingFundSource, setCheckingFundSource] = useState(false);
+  const [fundSourceError, setFundSourceError] = useState(null);
+  const [fundSourceSplit, setFundSourceSplit] = useState(null);
+
   // "AI-narrated responses + conversation memory" follow-up: which result
   // (if any) a "More details" tap opened the chat for - the chat itself
   // holds no state here beyond this, since its own conversation is fully
@@ -374,10 +403,12 @@ export default function AffordabilityQuery() {
       }
       const body = await res.json();
       setResponse(body);
-      // A fresh result makes any prior comparison stale - it was run
-      // against a different (or now-superseded) checked amount.
+      // A fresh result makes any prior comparison/fund-source split stale -
+      // both were run against a different (or now-superseded) checked amount.
       setComparison(null);
       setComparisonError(null);
+      setFundSourceSplit(null);
+      setFundSourceError(null);
       if (
         body.status === 'needs_amount' ||
         body.status === 'needs_financing_confirmation' ||
@@ -430,6 +461,8 @@ export default function AffordabilityQuery() {
     setError(null);
     setComparison(null);
     setComparisonError(null);
+    setFundSourceSplit(null);
+    setFundSourceError(null);
     setOriginalQuestion('');
   }
 
@@ -466,7 +499,42 @@ export default function AffordabilityQuery() {
     }
   }
 
+  // Same reuse-the-normalized-scenario pattern checkComparison uses above -
+  // the server re-derives budgetImpact/suggestions itself from this
+  // scenario rather than trusting anything else the client might send, so
+  // sending back the same amount/category/recurrence the result was
+  // already evaluated from is all this needs.
+  async function checkFundSourceSplit() {
+    if (!response?.result?.scenario) return;
+    const { amount, category, recurrence } = response.result.scenario;
+    setCheckingFundSource(true);
+    setFundSourceError(null);
+    setFundSourceSplit(null);
+    try {
+      const res = await apiFetch('/scenarios/suggestion-split', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount, category, recurrence }),
+      });
+      if (!res.ok) {
+        if (res.status === 400) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || 'SERVER_ERROR');
+        }
+        throw new Error('SERVER_ERROR');
+      }
+      const body = await res.json();
+      setFundSourceSplit(body.proposal);
+    } catch (err) {
+      console.error(err);
+      setFundSourceError(err.message === 'SERVER_ERROR' ? apiErrorMessage(err) : err.message);
+    } finally {
+      setCheckingFundSource(false);
+    }
+  }
+
   const result = response?.status === 'result' ? response.result : null;
+  const opening = result ? buildOpeningSections(result) : null;
   const tone = result ? STATUS_TONE[result.status] || 'positive' : 'positive';
   const awaitingFinancing = pendingContext?.awaiting === 'financing_confirmation';
   // "60 months" / "5 years" isn't a dollar amount - the wheel doesn't apply
@@ -683,11 +751,26 @@ export default function AffordabilityQuery() {
 
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Why</Text>
-            {shortResultSummary(result).map((line, i) => (
-              <Text key={i} style={styles.smallText}>
-                {line}
+            {/* Two of the same three warm, advisor-voice sections
+                AffordabilityChat.js's opening message uses (reasoning +
+                possible_room) - `recommended_actions` stays chat-only,
+                where "what should I actually do" fits better as a deeper
+                follow-up than a third paragraph on the glance-able primary
+                screen (direct user request, 2026-08-28: shorter, still
+                friendly). Falls back to the deterministic tradeoffs/
+                suggestion text via buildOpeningSections' own fallback path
+                if the explanation call failed - never empty. */}
+            {opening && (
+              <>
+                <Text style={styles.smallText}>{opening.reasoning}</Text>
+                <Text style={[styles.smallText, { marginTop: 8 }]}>{opening.possible_room}</Text>
+              </>
+            )}
+            {result.limitations?.[0] && (
+              <Text style={[styles.smallText, { marginTop: 8, color: colors.muted }]}>
+                {result.limitations[0]}
               </Text>
-            ))}
+            )}
             <Pressable
               onPress={() => {
                 setChatAnchorResult(result);
@@ -700,6 +783,50 @@ export default function AffordabilityQuery() {
                 More details
               </Text>
             </Pressable>
+
+            {/* Phase 23 (fund-source suggestion): only offered when the
+                deterministic "there's room in X and Y" suggestion above is
+                itself present - an exact split has nothing to propose
+                otherwise. On-demand, real (small) AI cost per tap - never
+                fired automatically alongside the result itself. */}
+            {result.suggestions?.[0] && !fundSourceSplit && (
+              <Pressable
+                onPress={checkFundSourceSplit}
+                disabled={checkingFundSource}
+                accessibilityRole="button"
+                accessibilityLabel="See the exact split"
+                style={{ marginTop: 8 }}
+              >
+                {checkingFundSource ? (
+                  <ActivityIndicator />
+                ) : (
+                  <Text style={[styles.smallText, { color: colors.primary, textDecorationLine: 'underline' }]}>
+                    See the exact split
+                  </Text>
+                )}
+              </Pressable>
+            )}
+
+            {fundSourceError && <Text style={styles.errorText}>{fundSourceError}</Text>}
+
+            {fundSourceSplit && fundSourceSplit.adjustments.length === 0 && (
+              <Text style={[styles.smallText, { marginTop: 8 }]}>
+                {fundSourceSplit.summary || "Couldn't find a clean split across those categories."}
+              </Text>
+            )}
+
+            {fundSourceSplit && fundSourceSplit.adjustments.length > 0 && (
+              <View style={{ marginTop: 8, gap: 4 }}>
+                {fundSourceSplit.adjustments.map((a) => (
+                  <Text key={a.category} style={styles.smallText}>
+                    • Cut ${a.reduce_by.toFixed(2)} from {a.category} — {a.reasoning}
+                  </Text>
+                ))}
+                {fundSourceSplit.summary && (
+                  <Text style={[styles.smallText, { marginTop: 4 }]}>{fundSourceSplit.summary}</Text>
+                )}
+              </View>
+            )}
           </View>
 
           {result.budget_impact?.available && (

@@ -1,11 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
-import { View, Text, Button, TextInput } from 'react-native';
+import { View, Text, Button, TextInput, ActivityIndicator, Pressable, StyleSheet } from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons';
+import {
+  useAudioRecorder,
+  useAudioRecorderState,
+  RecordingPresets,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+} from 'expo-audio';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { apiFetch, apiErrorMessage, GOAL_TYPES } from '../_lib/api';
-import { styles } from '../_lib/styles';
+import { apiFetch, apiErrorMessage, GOAL_TYPES, parseDollarAmount } from '../_lib/api';
+import { styles, colors } from '../_lib/styles';
 import { useSessionContext } from '../_lib/session';
-import { formatAmountLabel } from '../_lib/amountPicker';
-import NumberScrollWheel from './NumberScrollWheel';
 
 // Mirrors server/goalProgress.js's AVG_DAYS_PER_MONTH - kept as its own
 // constant here (no module shared between the RN app and the server) so a
@@ -111,7 +117,7 @@ export function useGoalForm(initialGoal, { onSaved, onGoalProgressChanged } = {}
     setError(null);
     const body = {
       goal_type: overrides.goal_type ?? goalType,
-      target_amount: goalAmount ? Number(goalAmount) : null,
+      target_amount: goalAmount ? parseDollarAmount(goalAmount) : null,
       target_timeframe_months: goalTimeframe ? Number(goalTimeframe) : null,
       notes: goalNotes || null,
       ...overrides,
@@ -146,7 +152,19 @@ export function useGoalForm(initialGoal, { onSaved, onGoalProgressChanged } = {}
     }
   }
 
+  // The amount field is now plain typed/voice-transcribed text (2026-08-27,
+  // direct user request - replaced the wheel picker), so unlike the old
+  // picker-backed value it can genuinely hold something unparseable (a
+  // stray word Whisper misheard, a half-typed entry). Validated only here,
+  // not inside persist() itself - skip() also calls persist() but always
+  // passes its own explicit target_amount: null override, ignoring
+  // goalAmount entirely, so it must never be blocked by stale unparseable
+  // text left in the field.
   function save() {
+    if (goalAmount && parseDollarAmount(goalAmount) == null) {
+      setError('Enter a valid target amount, like $10,000, or leave it blank.');
+      return;
+    }
     persist();
   }
 
@@ -195,12 +213,68 @@ export function GoalFormFields({ form }) {
 
   const tomorrow = new Date(Date.now() + 86400000);
 
-  // Optional field, same show/hide-on-demand pattern as the target-date
-  // button below it (a wheel visible by default would take real screen
-  // space for a value most goals may never set). Once opened it stays open
-  // - re-tapping the summary button toggles it, it doesn't auto-close after
-  // one drag, since a wheel is meant for several adjustments in a row.
-  const [showAmountWheel, setShowAmountWheel] = useState(false);
+  // Voice input for the target-amount field (2026-08-27) - same record ->
+  // transcribe -> land-in-the-text-field flow AffordabilityQuery.js and the
+  // Goal Calculator's own amount field ((tabs)/goal.js) already use, reused
+  // here rather than a second implementation. Replaces the
+  // NumberScrollWheel/DigitAmountPicker picker chain entirely, per direct
+  // user request (2026-08-27): "the wheel picker seems to be too much
+  // trouble than it's actually worth." parseDollarAmount (_lib/api.js,
+  // shared with the Goal Calculator) treats typed and transcribed text
+  // identically.
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorderState = useAudioRecorderState(recorder);
+  const [transcribing, setTranscribing] = useState(false);
+  const [voiceError, setVoiceError] = useState(null);
+
+  async function startRecording() {
+    setVoiceError(null);
+    const { granted } = await requestRecordingPermissionsAsync();
+    if (!granted) {
+      setVoiceError('Microphone access is needed to speak the amount.');
+      return;
+    }
+    await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+    await recorder.prepareToRecordAsync();
+    recorder.record();
+  }
+
+  async function stopRecordingAndTranscribe() {
+    await recorder.stop();
+    if (!recorder.uri) {
+      setVoiceError("That recording didn't come through - try again or type it.");
+      return;
+    }
+    setTranscribing(true);
+    setVoiceError(null);
+    try {
+      const fileResponse = await fetch(recorder.uri);
+      const blob = await fileResponse.blob();
+      const res = await apiFetch('/affordability/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'audio/m4a' },
+        body: blob,
+      });
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const { text: transcribed } = await res.json();
+      form.setGoalAmount(transcribed || '');
+    } catch (err) {
+      console.error(err);
+      setVoiceError(
+        err.message === 'SERVER_ERROR' ? apiErrorMessage(err) : "Couldn't transcribe that - try again or type it."
+      );
+    } finally {
+      setTranscribing(false);
+    }
+  }
+
+  function onMicPress() {
+    if (recorderState.isRecording) {
+      stopRecordingAndTranscribe();
+    } else {
+      startRecording();
+    }
+  }
 
   return (
     <>
@@ -235,22 +309,39 @@ export function GoalFormFields({ form }) {
       )}
 
       <Text style={styles.smallText}>Target amount (optional)</Text>
-      <Button
-        title={form.goalAmount ? formatAmountLabel(form.goalAmount) : 'Set a target amount'}
-        onPress={() => setShowAmountWheel((s) => !s)}
-      />
+      <View style={localStyles.amountInputRow}>
+        <TextInput
+          style={[styles.input, localStyles.amountInput]}
+          value={form.goalAmount}
+          onChangeText={form.setGoalAmount}
+          placeholder="e.g. $10,000"
+          placeholderTextColor={colors.placeholder}
+          keyboardType="numeric"
+          editable={!transcribing && !recorderState.isRecording}
+        />
+        {transcribing ? (
+          <ActivityIndicator style={localStyles.micButton} />
+        ) : (
+          <Pressable
+            onPress={onMicPress}
+            accessibilityRole="button"
+            accessibilityLabel={recorderState.isRecording ? 'Stop recording' : 'Speak the amount'}
+            style={[
+              localStyles.micButton,
+              recorderState.isRecording ? localStyles.micButtonRecording : localStyles.micButtonIdle,
+            ]}
+          >
+            <MaterialIcons
+              name={recorderState.isRecording ? 'stop' : 'mic'}
+              size={20}
+              color={colors.background}
+            />
+          </Pressable>
+        )}
+      </View>
+      {voiceError && <Text style={styles.errorText}>{voiceError}</Text>}
       {form.goalAmount && (
         <Button title="Clear target amount" onPress={() => form.setGoalAmount('')} />
-      )}
-      {showAmountWheel && (
-        <NumberScrollWheel
-          value={form.goalAmount ? Number(form.goalAmount) : 0}
-          onValueChange={(v) => form.setGoalAmount(String(v))}
-          min={0}
-          max={1000000}
-          step={50}
-          formatLabel={formatAmountLabel}
-        />
       )}
       <Text style={styles.smallText}>Target date (optional)</Text>
       <Button
@@ -280,3 +371,30 @@ export function GoalFormFields({ form }) {
     </>
   );
 }
+
+// Mirrors (tabs)/goal.js's calculatorInputRow/calculatorInput/
+// calculatorMicButton* exactly - same text+mic pattern, different screen,
+// no reason for the two to drift visually.
+const localStyles = StyleSheet.create({
+  amountInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  amountInput: {
+    flex: 1,
+  },
+  micButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  micButtonIdle: {
+    backgroundColor: colors.primary,
+  },
+  micButtonRecording: {
+    backgroundColor: colors.error,
+  },
+});

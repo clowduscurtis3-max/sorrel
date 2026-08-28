@@ -11,13 +11,12 @@ import {
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
 } from 'expo-audio';
-import { apiFetch, apiErrorMessage, GOAL_TYPES } from '../_lib/api';
+import { apiFetch, apiErrorMessage, GOAL_TYPES, parseDollarAmount } from '../_lib/api';
 import { styles, colors } from '../_lib/styles';
 import { useSessionContext } from '../_lib/session';
 import { useAppData } from '../_lib/appData';
 import { useGoalForm, computeTargetDateFromTimeframe } from '../_components/GoalForm';
 import { formatAmountLabel } from '../_lib/amountPicker';
-import NumberScrollWheel from '../_components/NumberScrollWheel';
 import { AppBackdrop, TopEdgeFade, isNightBackdrop } from '../_components/Illustrations';
 import SorrelWordmark from '../_components/SorrelWordmark';
 import PrimaryButton from '../_components/PrimaryButton';
@@ -92,25 +91,6 @@ function emergencyEstimateRefusalMessage(estimate) {
     return 'Too much recent spending is still uncategorized to estimate a recommended emergency fund reliably.';
   }
   return null;
-}
-
-// Goal Calculator's amount field is plain typed/voice-transcribed text
-// (2026-08-25, direct user request - replaced the DigitAmountPicker
-// wheel), so it needs its own light client-side parse before becoming the
-// `hypothetical_monthly_amount` number POST /goal/calculator expects.
-// Strips everything but digits/decimal point so "$200", "200 dollars", and
-// "200" (typed or however Whisper transcribed it) all resolve the same
-// way - no server-side guardrail is needed here the way the "Can I afford
-// this?" flow needs one, since this is the user's own direct planning
-// input, never narrated back as a claimed financial fact from an
-// untrusted source.
-function parseDollarAmount(text) {
-  if (!text) return null;
-  const cleaned = String(text).replace(/[^0-9.]/g, '');
-  if (!cleaned) return null;
-  const value = parseFloat(cleaned);
-  if (!Number.isFinite(value) || value <= 0) return null;
-  return value;
 }
 
 function formatTargetDate(isoDate) {
@@ -221,8 +201,14 @@ function computeGoalAdvisorTip({ goalProgress, subscriptionAudit, budgetStatus }
 // Tips carousel, and Savings Shortcuts (Round-Ups/Auto-Save/etc.) are all
 // explicitly deferred - each bundles either a real scoped tool or an
 // entirely new backend concept that doesn't exist yet, not visual styling
-// over existing data. The editing branch below is untouched (GoalFormFields
-// is shared with goal-intake.js, out of this pass's scope).
+// over existing data. The editing branch below is untouched as of this
+// note (GoalFormFields is shared with goal-intake.js, out of this pass's
+// scope) - **superseded 2026-08-27 by the Edit Goal redesign**, which
+// replaced the editing branch with its own tap-to-reveal rows built
+// directly against `form`, no longer sharing GoalFormFields at all. See
+// that section's own header comment below for the current, accurate
+// picture - kept here unedited as a historical note, not corrected in
+// place.
 export default function Goal() {
   const { goal, refetchGoal } = useSessionContext();
   const { goalProgress, refetchGoalProgress, subscriptionAudit, budgetStatus } = useAppData();
@@ -247,6 +233,69 @@ export default function Goal() {
   // already in goalProgress/goalProgress.projections, not a second
   // calculation or a fetch of its own.
   const [showCalculationDetail, setShowCalculationDetail] = useState(false);
+
+  // Voice input for the inline "Target amount" editor row above (2026-08-27,
+  // direct user request - replaced NumberScrollWheel here too, same reason
+  // as GoalForm.js's own swap: "the wheel picker seems to be too much
+  // trouble than it's actually worth"). This screen builds its own tap-to-
+  // reveal rows rather than rendering GoalFormFields (see this component's
+  // own header comment), so it needs its own recorder instance - same
+  // record -> transcribe -> land-in-the-field flow as the Goal Calculator's
+  // amount field further down this file, kept separate rather than shared
+  // since the two rows can be open independently.
+  const editAmountRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const editAmountRecorderState = useAudioRecorderState(editAmountRecorder);
+  const [editAmountTranscribing, setEditAmountTranscribing] = useState(false);
+  const [editAmountVoiceError, setEditAmountVoiceError] = useState(null);
+
+  async function startEditAmountRecording() {
+    setEditAmountVoiceError(null);
+    const { granted } = await requestRecordingPermissionsAsync();
+    if (!granted) {
+      setEditAmountVoiceError('Microphone access is needed to speak the amount.');
+      return;
+    }
+    await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+    await editAmountRecorder.prepareToRecordAsync();
+    editAmountRecorder.record();
+  }
+
+  async function stopEditAmountRecordingAndTranscribe() {
+    await editAmountRecorder.stop();
+    if (!editAmountRecorder.uri) {
+      setEditAmountVoiceError("That recording didn't come through - try again or type it.");
+      return;
+    }
+    setEditAmountTranscribing(true);
+    setEditAmountVoiceError(null);
+    try {
+      const fileResponse = await fetch(editAmountRecorder.uri);
+      const blob = await fileResponse.blob();
+      const res = await apiFetch('/affordability/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'audio/m4a' },
+        body: blob,
+      });
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const { text: transcribed } = await res.json();
+      form.setGoalAmount(transcribed || '');
+    } catch (err) {
+      console.error(err);
+      setEditAmountVoiceError(
+        err.message === 'SERVER_ERROR' ? apiErrorMessage(err) : "Couldn't transcribe that - try again or type it."
+      );
+    } finally {
+      setEditAmountTranscribing(false);
+    }
+  }
+
+  function onEditAmountMicPress() {
+    if (editAmountRecorderState.isRecording) {
+      stopEditAmountRecordingAndTranscribe();
+    } else {
+      startEditAmountRecording();
+    }
+  }
 
   // Own scroll tracking for the editing screen's ScrollView (separate from
   // the read-only Overview's own scrollY below) - same AppBackdrop
@@ -650,14 +699,43 @@ export default function Goal() {
               </Pressable>
               {activeEditor === 'amount' && (
                 <View style={goalStyles.inlineEditor}>
-                  <NumberScrollWheel
-                    value={form.goalAmount ? Number(form.goalAmount) : 0}
-                    onValueChange={(v) => form.setGoalAmount(String(v))}
-                    min={0}
-                    max={1000000}
-                    step={50}
-                    formatLabel={formatAmountLabel}
-                  />
+                  <View style={goalStyles.calculatorInputRow}>
+                    <TextInput
+                      style={[styles.input, goalStyles.calculatorInput]}
+                      value={form.goalAmount}
+                      onChangeText={form.setGoalAmount}
+                      placeholder="e.g. $10,000"
+                      placeholderTextColor={colors.placeholder}
+                      keyboardType="numeric"
+                      editable={!editAmountTranscribing && !editAmountRecorderState.isRecording}
+                    />
+                    {editAmountTranscribing ? (
+                      <ActivityIndicator style={goalStyles.calculatorMicButton} />
+                    ) : (
+                      <Pressable
+                        onPress={onEditAmountMicPress}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          editAmountRecorderState.isRecording ? 'Stop recording' : 'Speak the amount'
+                        }
+                        style={[
+                          goalStyles.calculatorMicButton,
+                          editAmountRecorderState.isRecording
+                            ? goalStyles.calculatorMicButtonRecording
+                            : goalStyles.calculatorMicButtonIdle,
+                        ]}
+                      >
+                        <MaterialIcons
+                          name={editAmountRecorderState.isRecording ? 'stop' : 'mic'}
+                          size={20}
+                          color={colors.background}
+                        />
+                      </Pressable>
+                    )}
+                  </View>
+                  {editAmountVoiceError && (
+                    <Text style={styles.errorText}>{editAmountVoiceError}</Text>
+                  )}
                   <View style={goalStyles.inlineEditorActions}>
                     {!!form.goalAmount && (
                       <Pressable

@@ -661,12 +661,24 @@ function buildTradeoffs({ normalized, cash, budgetImpact, goalImpact }) {
   }
 
   if (budgetImpact.available && budgetImpact.pushes_category_over) {
+    // Real confusion found live (2026-08-27): when a category is already
+    // over budget before this purchase, `category_remaining_after` is the
+    // *combined* overage (pre-existing + this charge) - stating it alone
+    // as "this takes you $X past budget" reads as if the whole $X were
+    // caused by this one purchase. Split into the two real components
+    // whenever there's a pre-existing overage to separate out; the single-
+    // number version stays for the common case (room before, this pushes
+    // it over), where there's genuinely only one contributing number.
+    const alreadyOver = budgetImpact.category_remaining_before < 0;
     tradeoffs.push({
       kind: 'budget',
       severity: 'high',
-      text:
-        `This would take ${budgetImpact.category} ${money(budgetImpact.category_remaining_after)} ` +
-        `past its ${money(budgetImpact.category_budgeted)} budget for this period.`,
+      text: alreadyOver
+        ? `${budgetImpact.category} is already ${money(budgetImpact.category_remaining_before)} over its ` +
+          `${money(budgetImpact.category_budgeted)} budget - adding this brings it to ` +
+          `${money(budgetImpact.category_remaining_after)} over.`
+        : `This would take ${budgetImpact.category} ${money(budgetImpact.category_remaining_after)} ` +
+          `past its ${money(budgetImpact.category_budgeted)} budget for this period.`,
     });
   } else if (
     budgetImpact.available &&
@@ -684,13 +696,21 @@ function buildTradeoffs({ normalized, cash, budgetImpact, goalImpact }) {
   }
 
   if (budgetImpact.available && budgetImpact.total_remaining_after < 0) {
+    // Same real confusion as the category case above, plus a second real
+    // bug: `total_remaining_before` being negative means the whole budget
+    // is *already* over, not that money is "left" - the old wording called
+    // a negative number "left" unconditionally, which is simply wrong, not
+    // just unclear.
+    const alreadyOver = budgetImpact.total_remaining_before < 0;
     tradeoffs.push({
       kind: 'budget',
       severity: 'high',
-      text:
-        `This is ${money(budgetImpact.total_remaining_after)} more than the ` +
-        `${money(budgetImpact.total_remaining_before)} left across your whole budget for this ` +
-        `period.`,
+      text: alreadyOver
+        ? `Your whole budget is already ${money(budgetImpact.total_remaining_before)} over for this ` +
+          `period - adding this brings it to ${money(budgetImpact.total_remaining_after)} over.`
+        : `This is ${money(budgetImpact.total_remaining_after)} more than the ` +
+          `${money(budgetImpact.total_remaining_before)} left across your whole budget for this ` +
+          `period.`,
     });
   } else if (
     budgetImpact.available &&
