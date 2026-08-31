@@ -479,7 +479,7 @@ export default function Account() {
               night && { color: 'rgba(244, 246, 242, 0.75)' },
             ]}
           >
-            Signed in as
+            SIGNED IN AS
           </Text>
           <Text style={[accountStyles.signedInEmail, onBackdropTextColor && { color: onBackdropTextColor }]}>
             {session.user.email}
@@ -840,8 +840,17 @@ const accountStyles = StyleSheet.create({
     alignItems: 'center',
     gap: 2,
   },
+  // Matches Home/Recurring/Goal's own cardEyebrow exactly (2026-08-31
+  // consistency pass) - this was a one-off 13px/regular style, the only
+  // "label above a value" element in the app not using either of its two
+  // established label conventions (this eyebrow style for a full-width
+  // section header, or the smaller centered statLabel used in stat-tile
+  // rows - Budget's own statLabel already matches Home's exactly, so that
+  // one didn't need changing).
   signedInLabel: {
-    fontSize: 13,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
     color: colors.dark,
   },
   signedInEmail: {
