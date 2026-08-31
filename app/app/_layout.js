@@ -16,6 +16,8 @@ import { getAuthenticatorAssuranceLevel } from './_lib/mfa';
 import {
   LOCK_AFTER_BACKGROUND_MS,
   SIGN_OUT_AFTER_BACKGROUND_MS,
+  RESUME_SETTLE_DEBOUNCE_MS,
+  RESUME_MAX_CHURN_WAIT_MS,
   BACKGROUNDED_AT_STORAGE_KEY,
   SIGNED_OUT_REASON_STORAGE_KEY,
 } from './_lib/sessionTimeouts';
@@ -285,6 +287,20 @@ export default function RootLayout() {
   // needed at all (Android can report the app 'active' for a moment for
   // reasons that have nothing to do with a genuine return).
   const pendingResumeCheckRef = useRef(null);
+  // Real bug found on-device (2026-08-31): a native dialog on some other
+  // screen (the Edit Goal date picker, see (tabs)/goal.js's own fix for the
+  // root cause) can generate a rapid burst of 'active'/'inactive' blips on
+  // resume, each one cancelling and rescheduling the 2s debounce below
+  // before it ever gets a clean run - with no upper bound, a long enough
+  // burst could starve checkBackgroundElapsedAndAct() of ever firing at
+  // all, silently skipping the fail-closed lock/sign-out decision even
+  // after a genuinely long background period (confirmed on-device: 10+
+  // minutes backgrounded, zero biometric prompt, landed straight back in).
+  // Tracks when the *first* resume signal in an unsettled burst arrived, so
+  // a burst that never fully quiets down still forces a check once
+  // MAX_RESUME_DEBOUNCE_WAIT_MS has passed, rather than being deferrable
+  // forever.
+  const resumeChurnStartRef = useRef(null);
   // Reentrancy guard, same idiom as api.js's own signOutInProgress. This
   // function has two independent trigger sites (the warm-resume listener
   // below, and the cold-start effect further down) that can both end up
@@ -471,11 +487,14 @@ export default function RootLayout() {
         if (!wasBackground && nextState.match(/inactive|background/)) {
           // Leaving the foreground again before a pending debounced check
           // ever confirmed a genuine return - cancel it, this was itself
-          // just a blip.
+          // just a blip. Also resets the churn-burst tracker below, so the
+          // next resume attempt (whenever it genuinely happens) starts
+          // counting its own settle window fresh.
           if (pendingResumeCheckRef.current) {
             clearTimeout(pendingResumeCheckRef.current);
             pendingResumeCheckRef.current = null;
           }
+          resumeChurnStartRef.current = null;
           if (sessionRef.current) {
             AsyncStorage.getItem(BACKGROUNDED_AT_STORAGE_KEY).then((existing) => {
               if (!existing) {
@@ -484,10 +503,24 @@ export default function RootLayout() {
             });
           }
         } else if (wasBackground && nextState === 'active') {
+          // Bounded debounce - see resumeChurnStartRef's own comment for
+          // why an unbounded one is a real fail-open risk. A burst of
+          // blips keeps rescheduling at the normal settle delay until this
+          // burst has run long enough to hit the hard ceiling, at which
+          // point the check fires almost immediately instead of waiting
+          // for a quiet window that may never come.
+          const now = Date.now();
+          if (!resumeChurnStartRef.current) {
+            resumeChurnStartRef.current = now;
+          }
+          const churnElapsed = now - resumeChurnStartRef.current;
+          const delay =
+            churnElapsed >= RESUME_MAX_CHURN_WAIT_MS ? 0 : RESUME_SETTLE_DEBOUNCE_MS;
           pendingResumeCheckRef.current = setTimeout(() => {
             pendingResumeCheckRef.current = null;
+            resumeChurnStartRef.current = null;
             checkBackgroundElapsedAndAct();
-          }, 2000);
+          }, delay);
         }
       }
       backgroundTrackingAppStateRef.current = nextState;
