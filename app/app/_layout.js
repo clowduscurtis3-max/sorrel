@@ -392,8 +392,38 @@ export default function RootLayout() {
     // this backgrounding event is a no-op: the stored timestamp is still
     // consumed above (never leaks into a later, unrelated check), MFA's
     // own screen is simply left exactly as it was.
-    console.error('[LOCK-DEBUG] inner: mfaGateCleared=', mfaGateCleared);
-    if (!mfaGateCleared) return;
+    //
+    // Real bug found on-device via [LOCK-DEBUG] (2026-08-31): `mfaGateCleared`
+    // (`mfaRequired === false || mfaPassed`) treats `mfaRequired === null`
+    // ("not yet checked" - its own real initial value, re-entered any time
+    // this component remounts, e.g. Android recreating the Activity after a
+    // long background period, same as a cold start for React state) exactly
+    // the same as "a real MFA challenge is genuinely still outstanding."
+    // That's correct for this same value's OTHER use (gating whether the
+    // tabs tree renders at all - an undetermined answer should keep the
+    // user waiting there), but wrong here: this code path runs against an
+    // already-fully-rendered, already-in-use app, so "undetermined" silently
+    // abandoning the relock decision is a fail-*open* outcome, not a
+    // fail-closed one - the exact gap `canLock` right below already avoids
+    // for biometric availability by re-checking live instead of trusting
+    // cached state. Only a *confirmed* outstanding challenge
+    // (`mfaRequired === true && !mfaPassed`) should still skip; a genuinely
+    // undetermined value gets resolved live, right here, the same way
+    // checkMfaRequirement() itself resolves it - matching this function's
+    // own established "fail closed on a real detection error" discipline
+    // rather than a third, silent behavior for "don't know yet."
+    let mfaCleared = mfaRequired === false || mfaPassed;
+    if (mfaRequired === null) {
+      try {
+        const { currentLevel, nextLevel } = await getAuthenticatorAssuranceLevel();
+        mfaCleared = currentLevel === nextLevel;
+      } catch (err) {
+        console.error('[LOCK-DEBUG] inner: live MFA re-check threw', err);
+        mfaCleared = false;
+      }
+    }
+    console.error('[LOCK-DEBUG] inner: mfaRequired=', mfaRequired, 'mfaPassed=', mfaPassed, 'mfaCleared=', mfaCleared);
+    if (!mfaCleared) return;
     const backgroundedAt = parseInt(stored, 10);
     if (!Number.isFinite(backgroundedAt)) return;
     const elapsed = Date.now() - backgroundedAt;
