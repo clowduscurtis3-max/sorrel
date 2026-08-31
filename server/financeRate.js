@@ -18,12 +18,21 @@ const { logError } = require('./safeLog');
 // "Finance Rate on Consumer Installment Loans at Commercial Banks, New
 // Autos 48 Month Loan" - https://fred.stlouisfed.org/series/TERMCBAUTO48NS
 const FRED_SERIES_ID = 'TERMCBAUTO48NS';
+// "30-Year Fixed Rate Mortgage Average in the United States" (Freddie
+// Mac's weekly PMMS survey, published via FRED) -
+// https://fred.stlouisfed.org/series/MORTGAGE30US . Phase 25 Step 2
+// (2026-08-31) - confirmed live before use, not assumed: returned 6.66%
+// as of 2026-08-27 when checked directly against FRED's own API.
+const MORTGAGE_FRED_SERIES_ID = 'MORTGAGE30US';
 const FRED_OBSERVATIONS_URL = 'https://api.stlouisfed.org/fred/series/observations';
 
-// This series doesn't move faster than quarterly - a 24h cache just avoids
-// hitting FRED on every single request in a burst, not a freshness concern.
+// This series doesn't move faster than quarterly (mortgage: weekly, but
+// still far slower than request bursts) - a 24h cache just avoids hitting
+// FRED on every single request in a burst, not a freshness concern.
+// Keyed by series id so the auto-loan and mortgage rates cache
+// independently rather than one overwriting the other.
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-let cachedRate = null; // { rate, as_of_date, series_id, fetchedAt }
+const rateCache = new Map(); // series_id -> { rate, as_of_date, series_id, fetchedAt }
 
 // Deterministic, no Claude call - "60 months" / "5 years" / "60" / "60mo"
 // all real, common ways to state a loan term. Returns null (never a guess)
@@ -74,10 +83,13 @@ function computeEstimatedPayment({ totalPrice, termMonths, annualRatePercent }) 
 // responsible for turning that into an honest insufficient_data response.
 // FRED represents a missing data point as the literal string "." - parsed
 // as NaN and caught by the finite/positive check below, not silently
-// treated as a real 0% rate.
-async function getCurrentAutoLoanRate() {
-  if (cachedRate && Date.now() - cachedRate.fetchedAt < CACHE_TTL_MS) {
-    return { rate: cachedRate.rate, as_of_date: cachedRate.as_of_date, series_id: cachedRate.series_id };
+// treated as a real 0% rate. Shared by both getCurrentAutoLoanRate and
+// getCurrentMortgageRate (Phase 25 Step 2) - same series/cache/failure
+// shape either way, just a different FRED series id.
+async function getCurrentRate(seriesId) {
+  const cached = rateCache.get(seriesId);
+  if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
+    return { rate: cached.rate, as_of_date: cached.as_of_date, series_id: cached.series_id };
   }
 
   const apiKey = process.env.FRED_API_KEY;
@@ -86,7 +98,7 @@ async function getCurrentAutoLoanRate() {
   }
 
   const params = new URLSearchParams({
-    series_id: FRED_SERIES_ID,
+    series_id: seriesId,
     api_key: apiKey,
     file_type: 'json',
     sort_order: 'desc',
@@ -113,15 +125,29 @@ async function getCurrentAutoLoanRate() {
     throw new Error('FRED returned no usable rate observation');
   }
 
-  cachedRate = { rate, as_of_date: observation.date, series_id: FRED_SERIES_ID, fetchedAt: Date.now() };
-  return { rate, as_of_date: observation.date, series_id: FRED_SERIES_ID };
+  const result = { rate, as_of_date: observation.date, series_id: seriesId, fetchedAt: Date.now() };
+  rateCache.set(seriesId, result);
+  return { rate, as_of_date: observation.date, series_id: seriesId };
+}
+
+async function getCurrentAutoLoanRate() {
+  return getCurrentRate(FRED_SERIES_ID);
+}
+
+// Phase 25 Step 2 (2026-08-31): the same free/live-verified pattern as
+// getCurrentAutoLoanRate above, generalized for the home-affordability
+// tool's own mortgage-rate need.
+async function getCurrentMortgageRate() {
+  return getCurrentRate(MORTGAGE_FRED_SERIES_ID);
 }
 
 module.exports = {
   parseFinanceTermMonths,
   computeEstimatedPayment,
   getCurrentAutoLoanRate,
+  getCurrentMortgageRate,
   FRED_SERIES_ID,
+  MORTGAGE_FRED_SERIES_ID,
   MIN_TERM_MONTHS,
   MAX_TERM_MONTHS,
 };

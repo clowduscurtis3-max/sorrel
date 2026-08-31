@@ -85,6 +85,7 @@ const {
   MAX_TERM_MONTHS,
 } = require('./financeRate');
 const { runAffordabilityChatTurn } = require('./affordabilityChat');
+const { getHomeAffordability } = require('./homeAffordability');
 const {
   signup,
   linkUsernamePassword,
@@ -1470,6 +1471,38 @@ app.post('/scenarios/suggestion-split', requireUser, async (req, res) => {
     }
     console.error(err);
     res.status(500).json({ error: 'Failed to propose a fund-source split' });
+  }
+});
+
+// Phase 25 ("Can I afford to buy a house?"): deliberately its own
+// endpoint/surface, not folded into the "Can I afford this?" scenario
+// engine above - a home purchase is a multi-variable planning question
+// (down payment, PITI, PMI, DTI against real existing debt) that unfolds
+// over weeks, not a one-message affordability check, per this phase's
+// own brief. Validates only what a caller could get wrong by construction
+// (missing/non-numeric fields) - the deeper validation (down payment vs.
+// home price, negative numbers) already lives in computeHomeAffordability
+// itself, not duplicated here.
+app.post('/home-affordability', requireUser, async (req, res) => {
+  try {
+    const { home_price, down_payment, state, loan_term_years, annual_rate_percent } = req.body || {};
+    if (!Number.isFinite(home_price) || !Number.isFinite(down_payment) || !state) {
+      return res.status(400).json({ error: 'home_price, down_payment, and state are required' });
+    }
+    const result = await getHomeAffordability(req.userId, {
+      homePrice: home_price,
+      downPayment: down_payment,
+      state,
+      loanTermYears: Number.isFinite(loan_term_years) ? loan_term_years : undefined,
+      annualRatePercent: Number.isFinite(annual_rate_percent) ? annual_rate_percent : undefined,
+    });
+    res.json({ result });
+  } catch (err) {
+    if (err.message && /homePrice|downPayment|annualRatePercent/.test(err.message)) {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Failed to compute home affordability' });
   }
 });
 
