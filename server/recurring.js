@@ -102,7 +102,7 @@ function toDateOnly(d) {
 async function detectRecurringTransactions(userId) {
   const { data: transactions, error } = await supabaseAdmin
     .from('transactions')
-    .select('transaction_id, account_id, merchant_name, name, amount, date, category')
+    .select('transaction_id, account_id, merchant_name, name, amount, date, category, debt_type')
     .eq('user_id', userId)
     .order('date', { ascending: true });
   if (error) throw error;
@@ -157,6 +157,13 @@ async function detectRecurringTransactions(userId) {
         account_id: accountId,
         display_name: latest.merchant_name || latest.name,
         category: latest.category || null,
+        // Phase 25 Step 1 (2026-08-31): carried through the same way
+        // `category` already is - a recurring loan payment (car, credit
+        // card, student loan, mortgage, personal) stays recognizable as
+        // debt on the detected series itself, not just the raw
+        // transaction, so a DTI calculation can read recurring_series
+        // directly the same way isObligationSeries already does.
+        debt_type: latest.debt_type || null,
         interval: interval.name,
         typical_amount: Math.round(cluster.repAmount * 100) / 100,
         last_seen_date: toDateOnly(lastSeen),

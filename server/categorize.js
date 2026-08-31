@@ -63,6 +63,37 @@ const DETAILED_LABELS = {
 
 const LOW_CONFIDENCE = new Set(['LOW', 'UNKNOWN']);
 
+// Phase 25 Step 1 (2026-08-31): Plaid's own `personal_finance_category.detailed`
+// already distinguishes exactly which kind of debt a LOAN_PAYMENTS
+// transaction is - confirmed against Plaid's published taxonomy CSV, not
+// guessed. This is a genuinely separate signal from `category` above
+// (which still maps every one of these to "Bills & Utilities" unchanged,
+// on purpose - this doesn't touch the existing budget/UI taxonomy, it
+// just stops discarding a detail Plaid already sends for free). Values
+// are this app's own short enum, not Plaid's raw strings, so a future
+// caller (a DTI calculation) never has to know Plaid's own naming.
+const DEBT_TYPE_LABELS = {
+  LOAN_PAYMENTS_CAR_PAYMENT: 'auto',
+  LOAN_PAYMENTS_CREDIT_CARD_PAYMENT: 'credit_card',
+  LOAN_PAYMENTS_PERSONAL_LOAN_PAYMENT: 'personal',
+  LOAN_PAYMENTS_MORTGAGE_PAYMENT: 'mortgage',
+  LOAN_PAYMENTS_STUDENT_LOAN_PAYMENT: 'student_loan',
+  LOAN_PAYMENTS_OTHER_PAYMENT: 'other',
+};
+
+// Returns one of DEBT_TYPE_LABELS' values, or null when Plaid hasn't
+// classified this as a loan payment at all. Deliberately never asks
+// Claude to guess this - debt-servicing merchants (loan servicers, credit
+// card issuers) are exactly the kind of transaction Plaid's own
+// classifier is strong on, so a transaction Plaid doesn't confidently
+// flag here is simply not counted as a debt payment, matching this app's
+// "never fabricate a financial fact" rule rather than inventing a guess
+// for something genuinely not knowable from the data on hand.
+function debtTypeFromPlaid(pfc) {
+  if (!pfc || !pfc.detailed) return null;
+  return DEBT_TYPE_LABELS[pfc.detailed] || null;
+}
+
 // Turns a raw merchant string into a stable lookup key: lowercased, digits
 // stripped (order IDs, dates, card-last-4 embedded in the name - e.g. Plaid
 // Sandbox's "Uber 072515 SF**POOL**" vs "Uber 063015 SF**POOL**" - would
@@ -230,6 +261,11 @@ async function categorizeTransactions(transactions, userId) {
       category,
       category_reasoning: reasoning,
       category_confidence: confidence,
+      // Independent of category/confidence/source above (merchant
+      // preference, Plaid direct match, or Claude) - a manual category
+      // correction changes how the spend is *displayed*, not the
+      // underlying fact of whether money is going toward debt.
+      debt_type: debtTypeFromPlaid(t.personal_finance_category),
     };
   });
 }
@@ -241,4 +277,6 @@ module.exports = {
   FLOW_CATEGORIES,
   ESSENTIAL_CATEGORIES,
   normalizeMerchantKey,
+  debtTypeFromPlaid,
+  DEBT_TYPE_LABELS,
 };

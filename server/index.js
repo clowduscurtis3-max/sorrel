@@ -1121,6 +1121,7 @@ app.post('/admin/recategorize', requireUser, async (req, res) => {
         category: t.category,
         category_reasoning: t.category_reasoning,
         category_confidence: t.category_confidence,
+        debt_type: t.debt_type,
       })),
       { onConflict: 'transaction_id' }
     );
@@ -2646,6 +2647,7 @@ async function syncTransactions(itemRowId, userId, access_token, cursor, attempt
           category: t.category,
           category_reasoning: t.category_reasoning,
           category_confidence: t.category_confidence,
+          debt_type: t.debt_type,
         })),
         { onConflict: 'transaction_id' }
       );
