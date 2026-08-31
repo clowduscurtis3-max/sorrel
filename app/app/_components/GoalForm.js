@@ -198,7 +198,14 @@ export function useGoalForm(initialGoal, { onSaved, onGoalProgressChanged } = {}
 // The middle section only - type picker, "something else" description,
 // target amount/timeframe, and any error. No Save/Skip/Cancel buttons and
 // no outer screen chrome (see the module comment above for why).
-export function GoalFormFields({ form }) {
+// `textColor`: optional override for goal-intake.js's own night-backdrop
+// adaptation (2026-08-31) - only ever passed by that one caller (see this
+// file's own header comment on GoalFormFields' current sole usage), so a
+// simple prop rather than a context is enough. Only applied to the bare
+// labels sitting directly on the backdrop; input text/error text are
+// untouched (inputs render on their own opaque box, error text stays red
+// regardless of backdrop, matching every other screen's own convention).
+export function GoalFormFields({ form, textColor }) {
   const [showDatePicker, setShowDatePicker] = useState(false);
 
   // Derived display-only date from the persisted months value, computed
@@ -278,7 +285,9 @@ export function GoalFormFields({ form }) {
 
   return (
     <>
-      <Text style={styles.text}>What are you hoping to achieve financially?</Text>
+      <Text style={[styles.text, textColor && { color: textColor }]}>
+        What are you hoping to achieve financially?
+      </Text>
       <View style={styles.goalTypeRow}>
         {/* 'general' ("Just be smarter with money") is deliberately not
             offered as its own type button here (removed per direct user
@@ -298,7 +307,7 @@ export function GoalFormFields({ form }) {
 
       {form.goalType === 'other' && (
         <>
-          <Text style={styles.smallText}>Describe your goal</Text>
+          <Text style={[styles.smallText, textColor && { color: textColor }]}>Describe your goal</Text>
           <TextInput
             style={styles.input}
             placeholder="e.g. Save for a wedding"
@@ -308,7 +317,7 @@ export function GoalFormFields({ form }) {
         </>
       )}
 
-      <Text style={styles.smallText}>Target amount (optional)</Text>
+      <Text style={[styles.smallText, textColor && { color: textColor }]}>Target amount (optional)</Text>
       <View style={localStyles.amountInputRow}>
         <TextInput
           style={[styles.input, localStyles.amountInput]}
@@ -343,7 +352,7 @@ export function GoalFormFields({ form }) {
       {form.goalAmount && (
         <Button title="Clear target amount" onPress={() => form.setGoalAmount('')} />
       )}
-      <Text style={styles.smallText}>Target date (optional)</Text>
+      <Text style={[styles.smallText, textColor && { color: textColor }]}>Target date (optional)</Text>
       <Button
         title={targetDate ? targetDate.toLocaleDateString() : 'Pick a target date'}
         onPress={() => setShowDatePicker(true)}

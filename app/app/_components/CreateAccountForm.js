@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import { useSharedValue } from 'react-native-reanimated';
 import { colors } from '../_lib/styles';
 import { API_URL } from '../_lib/api';
 import SorrelWordmark from './SorrelWordmark';
+import { AppBackdrop, isNightBackdrop } from './Illustrations';
 
 const MIN_USERNAME_LENGTH = 3;
 const MIN_PASSWORD_LENGTH = 8;
@@ -26,6 +28,16 @@ export default function CreateAccountForm({ onBack, onCreated }) {
   const [email, setEmail] = useState('');
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Atmospheric backdrop (2026-08-31, direct user request), scoped to this
+  // screen and goal-intake.js only - a "warm, welcome" moment like the rest
+  // of the actual app, unlike sign-in/biometric-lock/MFA which stay flat by
+  // deliberate choice (fast, transactional security gates, not onboarding).
+  // No real scroll on this screen, so scrollY never changes - AppBackdrop
+  // still requires a real shared value, not a plain number.
+  const scrollY = useSharedValue(0);
+  const night = isNightBackdrop();
+  const onBackdropTextColor = night ? colors.background : undefined;
 
   function continueToEmailStep() {
     setError(null);
@@ -66,8 +78,14 @@ export default function CreateAccountForm({ onBack, onCreated }) {
 
   return (
     <View style={styles.container}>
-      <SorrelWordmark leafSize={64} />
-      <Text style={styles.title}>Create your account</Text>
+      <View style={styles.backgroundLayer} pointerEvents="none">
+        <AppBackdrop scrollY={scrollY} />
+      </View>
+
+      <SorrelWordmark leafSize={64} textColor={onBackdropTextColor} taglineColor={onBackdropTextColor} />
+      <Text style={[styles.title, onBackdropTextColor && { color: onBackdropTextColor }]}>
+        Create your account
+      </Text>
 
       {step === 1 ? (
         <>
@@ -114,12 +132,14 @@ export default function CreateAccountForm({ onBack, onCreated }) {
             <Text style={styles.ctaText}>Continue</Text>
           </Pressable>
           <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel="Back to sign in">
-            <Text style={styles.linkText}>Back to sign in</Text>
+            <Text style={[styles.linkText, onBackdropTextColor && { color: onBackdropTextColor }]}>
+              Back to sign in
+            </Text>
           </Pressable>
         </>
       ) : (
         <>
-          <Text style={styles.subtitle}>
+          <Text style={[styles.subtitle, onBackdropTextColor && { color: onBackdropTextColor }]}>
             One last step - we'll check this against the list of people allowed to use Sorrel.
           </Text>
           <View style={styles.fieldRow}>
@@ -153,7 +173,9 @@ export default function CreateAccountForm({ onBack, onCreated }) {
             accessibilityRole="button"
             accessibilityLabel="Back"
           >
-            <Text style={styles.linkText}>Back</Text>
+            <Text style={[styles.linkText, onBackdropTextColor && { color: onBackdropTextColor }]}>
+              Back
+            </Text>
           </Pressable>
         </>
       )}
@@ -168,6 +190,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.background,
     padding: 24,
+  },
+  // Absolutely positioned so AppBackdrop fills the container regardless of
+  // the container's own centered flex alignment - same pattern every tab
+  // already uses for its own background layer.
+  backgroundLayer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   title: { fontSize: 20, fontWeight: '700', color: colors.darkest, marginTop: 18, marginBottom: 24 },
   subtitle: {

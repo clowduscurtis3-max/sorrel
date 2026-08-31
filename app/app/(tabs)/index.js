@@ -615,6 +615,7 @@ export default function Home() {
 
               <SectionList
                 style={styles.list}
+                contentContainerStyle={{ paddingBottom: 150 }}
                 sections={groupByCategory(bankTransactions)}
                 keyExtractor={(item) => item.key}
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}

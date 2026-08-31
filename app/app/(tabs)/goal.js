@@ -1624,8 +1624,11 @@ const goalStyles = StyleSheet.create({
     paddingBottom: 24,
     gap: 4,
   },
+  // fontSize 26, matching Budget's and Recurring's own page title exactly
+  // (found via a cross-tab consistency pass, 2026-08-31) - this was 22,
+  // the one tab whose title read visibly smaller than its two siblings.
   title: {
-    fontSize: 22,
+    fontSize: 26,
     fontWeight: '700',
     color: colors.darkest,
   },
