@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { View, Text, Pressable, TextInput, ActivityIndicator, Alert, StyleSheet } from 'react-native';
+import { useEffect, useState } from 'react';
+import { View, Text, Pressable, TextInput, ActivityIndicator, Alert, AppState, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { MaterialIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -229,6 +229,30 @@ export default function Goal() {
   // shown at once regardless of what the user actually came here to
   // change.
   const [activeEditor, setActiveEditor] = useState(null);
+
+  // Real bug found on-device (2026-08-31): backgrounding the app while the
+  // inline "Target date" editor was open (the native Android DateTimePicker
+  // dialog showing) left `activeEditor` as 'date' across the background/
+  // foreground cycle - plain component state, untouched by the app merely
+  // being backgrounded. On resume, Android's own FragmentManager restores
+  // the DateTimePicker's DialogFragment on top of whatever re-render this
+  // screen's foreground-refresh triggers; each dismissal just re-triggered
+  // the still-`'date'`-declared row to render the picker again, an
+  // effectively endless reopen loop the user could only escape by force-
+  // closing the app. `activeEditor`/`'amount'`/`'type'` don't own a native
+  // OS dialog the same way and aren't known to have this problem, but
+  // closing whichever inline editor is open on backgrounding is the
+  // correct general rule regardless - nothing in this screen's own state
+  // should assume it survives a real background period unexamined.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState.match(/inactive|background/)) {
+        setActiveEditor(null);
+      }
+    });
+    return () => subscription.remove();
+  }, []);
+
   // "See how I calculated this" - a plain expand/collapse over numbers
   // already in goalProgress/goalProgress.projections, not a second
   // calculation or a fetch of its own.
