@@ -315,6 +315,7 @@ export default function RootLayout() {
   const checkInProgressRef = useRef(false);
 
   async function checkBackgroundElapsedAndAct() {
+    console.error('[LOCK-DEBUG] checkBackgroundElapsedAndAct CALLED, inProgress=', checkInProgressRef.current);
     if (checkInProgressRef.current) return;
     checkInProgressRef.current = true;
     try {
@@ -358,6 +359,10 @@ export default function RootLayout() {
 
   async function checkBackgroundElapsedAndActInner() {
     const stored = await AsyncStorage.getItem(BACKGROUNDED_AT_STORAGE_KEY);
+    // TEMP DIAGNOSTIC (2026-08-31, remove once the missing-biometric-prompt
+    // bug is root-caused) - console.error so it surfaces in the same LogBox
+    // popup already visible on-device, no logcat/adb access this session.
+    console.error('[LOCK-DEBUG] inner: stored=', stored);
     // Consumed either way once we actually reach this point - by now the
     // debounce below has already confirmed this is a genuine, settled
     // return (or this is the cold-start path, which has no such ambiguity
@@ -370,6 +375,7 @@ export default function RootLayout() {
     // which mirrors React state that a spurious RootLayout remount can
     // reset independently of whether a session is actually valid.
     const { data } = await supabase.auth.getSession();
+    console.error('[LOCK-DEBUG] inner: session present=', !!data.session);
     if (!data.session) return;
     // Real race found by /code-review (2026-08-25): this function's own
     // "genuine return" trigger (the warm-resume AppState listener's
@@ -386,10 +392,17 @@ export default function RootLayout() {
     // this backgrounding event is a no-op: the stored timestamp is still
     // consumed above (never leaks into a later, unrelated check), MFA's
     // own screen is simply left exactly as it was.
+    console.error('[LOCK-DEBUG] inner: mfaGateCleared=', mfaGateCleared);
     if (!mfaGateCleared) return;
     const backgroundedAt = parseInt(stored, 10);
     if (!Number.isFinite(backgroundedAt)) return;
     const elapsed = Date.now() - backgroundedAt;
+    console.error(
+      '[LOCK-DEBUG] inner: elapsed ms=',
+      elapsed,
+      'LOCK threshold=',
+      LOCK_AFTER_BACKGROUND_MS
+    );
 
     if (elapsed < LOCK_AFTER_BACKGROUND_MS) return; // short elapsed: no-op
 
@@ -407,8 +420,16 @@ export default function RootLayout() {
       const isEnrolled = hasHardware && (await LocalAuthentication.isEnrolledAsync());
       const lockPref = await getBiometricLockEnabled();
       canLock = hasHardware && isEnrolled && lockPref;
+      console.error(
+        '[LOCK-DEBUG] inner: hasHardware=',
+        hasHardware,
+        'isEnrolled=',
+        isEnrolled,
+        'lockPref=',
+        lockPref
+      );
     } catch (err) {
-      console.error(err);
+      console.error('[LOCK-DEBUG] inner: canLock check threw', err);
       canLock = false;
     }
 
@@ -418,6 +439,7 @@ export default function RootLayout() {
     // instead of a silent no-op, so the timeout policy still means
     // something on a device without biometrics configured.
     if (elapsed >= SIGN_OUT_AFTER_BACKGROUND_MS || !canLock) {
+      console.error('[LOCK-DEBUG] inner: taking sign-out branch instead of lock');
       await AsyncStorage.setItem(SIGNED_OUT_REASON_STORAGE_KEY, 'inactivity');
       await forceSignOut();
       return;
@@ -427,6 +449,7 @@ export default function RootLayout() {
     // own (not-yet-run, on a cold relaunch) detection with the answer just
     // computed above, so it doesn't redundantly re-check hardware/
     // enrollment a moment later and fire a second, stacked prompt.
+    console.error('[LOCK-DEBUG] inner: calling attemptBiometricAuth now');
     setBiometricAvailable(true);
     biometricCheckStartedRef.current = true;
     setBiometricPassed(false);
@@ -480,6 +503,16 @@ export default function RootLayout() {
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
       const wasBackground = backgroundTrackingAppStateRef.current.match(/inactive|background/);
+      console.error(
+        '[LOCK-DEBUG] AppState change: prev=',
+        backgroundTrackingAppStateRef.current,
+        'next=',
+        nextState,
+        'wasBackground=',
+        !!wasBackground,
+        'promptInFlight=',
+        biometricPromptInFlightRef.current
+      );
       // Ignore both directions while our own biometric prompt is up - see
       // biometricPromptInFlightRef's own comment for why this transition
       // isn't a genuine "user left the app" signal.
@@ -495,10 +528,13 @@ export default function RootLayout() {
             pendingResumeCheckRef.current = null;
           }
           resumeChurnStartRef.current = null;
+          console.error('[LOCK-DEBUG] leaving foreground, sessionRef.current=', !!sessionRef.current);
           if (sessionRef.current) {
             AsyncStorage.getItem(BACKGROUNDED_AT_STORAGE_KEY).then((existing) => {
+              console.error('[LOCK-DEBUG] existing stamp on background-write=', existing);
               if (!existing) {
                 AsyncStorage.setItem(BACKGROUNDED_AT_STORAGE_KEY, String(Date.now()));
+                console.error('[LOCK-DEBUG] wrote background timestamp');
               }
             });
           }
@@ -516,6 +552,7 @@ export default function RootLayout() {
           const churnElapsed = now - resumeChurnStartRef.current;
           const delay =
             churnElapsed >= RESUME_MAX_CHURN_WAIT_MS ? 0 : RESUME_SETTLE_DEBOUNCE_MS;
+          console.error('[LOCK-DEBUG] scheduling resume check, delay=', delay);
           pendingResumeCheckRef.current = setTimeout(() => {
             pendingResumeCheckRef.current = null;
             resumeChurnStartRef.current = null;
