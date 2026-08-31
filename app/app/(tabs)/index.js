@@ -975,6 +975,33 @@ export default function Home() {
             </View>
           )}
 
+          {/* Phase 24 "GOAL PROGRESS" - the last remaining piece of the
+              original Home mockup ("$6,380 of $10,000, 64%" + a bar), not
+              already covered by Phases 14-17. The stat-tile row above
+              already shows the bare percentage; this adds the actual
+              dollar fraction and bar the mockup called for. Reuses
+              goalProgress (already fetched for that stat tile) and
+              homeStyles.progressTrack/progressFill (already built for the
+              Financial Health card's month-progress bar above) - no new
+              data, no new styles. */}
+          {goalProgress?.has_target && (
+            <View style={[styles.card, homeStyles.cardMargin]}>
+              <Text style={styles.cardTitle}>Goal progress</Text>
+              <View style={homeStyles.progressTrack}>
+                <View
+                  style={[
+                    homeStyles.progressFill,
+                    { width: `${Math.min(100, Math.max(0, goalProgress.percent_complete))}%` },
+                  ]}
+                />
+              </View>
+              <Text style={styles.smallText}>
+                ${formatDecimal(goalProgress.saved_amount)} of ${formatDecimal(goalProgress.target_amount)} —{' '}
+                {Math.round(goalProgress.percent_complete)}% · {formatGoalType(goalProgress.goal_type)}
+              </Text>
+            </View>
+          )}
+
           {/* Upcoming bills - Bills & Utilities specifically (mortgage/
               phone/electricity-style), not Subscriptions (Netflix-style,
               shown on the Recurring tab only). A non-interactive header
