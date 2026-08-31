@@ -315,7 +315,6 @@ export default function RootLayout() {
   const checkInProgressRef = useRef(false);
 
   async function checkBackgroundElapsedAndAct() {
-    console.error('[LOCK-DEBUG] checkBackgroundElapsedAndAct CALLED, inProgress=', checkInProgressRef.current);
     if (checkInProgressRef.current) return;
     checkInProgressRef.current = true;
     try {
@@ -359,10 +358,6 @@ export default function RootLayout() {
 
   async function checkBackgroundElapsedAndActInner() {
     const stored = await AsyncStorage.getItem(BACKGROUNDED_AT_STORAGE_KEY);
-    // TEMP DIAGNOSTIC (2026-08-31, remove once the missing-biometric-prompt
-    // bug is root-caused) - console.error so it surfaces in the same LogBox
-    // popup already visible on-device, no logcat/adb access this session.
-    console.error('[LOCK-DEBUG] inner: stored=', stored);
     // Consumed either way once we actually reach this point - by now the
     // debounce below has already confirmed this is a genuine, settled
     // return (or this is the cold-start path, which has no such ambiguity
@@ -375,7 +370,6 @@ export default function RootLayout() {
     // which mirrors React state that a spurious RootLayout remount can
     // reset independently of whether a session is actually valid.
     const { data } = await supabase.auth.getSession();
-    console.error('[LOCK-DEBUG] inner: session present=', !!data.session);
     if (!data.session) return;
     // Real race found by /code-review (2026-08-25): this function's own
     // "genuine return" trigger (the warm-resume AppState listener's
@@ -393,46 +387,41 @@ export default function RootLayout() {
     // consumed above (never leaks into a later, unrelated check), MFA's
     // own screen is simply left exactly as it was.
     //
-    // Real bug found on-device via [LOCK-DEBUG] (2026-08-31): `mfaGateCleared`
-    // (`mfaRequired === false || mfaPassed`) treats `mfaRequired === null`
-    // ("not yet checked" - its own real initial value, re-entered any time
-    // this component remounts, e.g. Android recreating the Activity after a
-    // long background period, same as a cold start for React state) exactly
-    // the same as "a real MFA challenge is genuinely still outstanding."
-    // That's correct for this same value's OTHER use (gating whether the
-    // tabs tree renders at all - an undetermined answer should keep the
-    // user waiting there), but wrong here: this code path runs against an
-    // already-fully-rendered, already-in-use app, so "undetermined" silently
-    // abandoning the relock decision is a fail-*open* outcome, not a
-    // fail-closed one - the exact gap `canLock` right below already avoids
-    // for biometric availability by re-checking live instead of trusting
-    // cached state. Only a *confirmed* outstanding challenge
-    // (`mfaRequired === true && !mfaPassed`) should still skip; a genuinely
-    // undetermined value gets resolved live, right here, the same way
-    // checkMfaRequirement() itself resolves it - matching this function's
-    // own established "fail closed on a real detection error" discipline
-    // rather than a third, silent behavior for "don't know yet."
+    // Real bug found and confirmed on-device (2026-08-31, root-caused via
+    // temporary diagnostic logging, then verified end-to-end with real adb
+    // access): `mfaGateCleared` (`mfaRequired === false || mfaPassed`)
+    // treats `mfaRequired === null` ("not yet checked" - its own real
+    // initial value, re-entered any time this component remounts, e.g.
+    // Android recreating the Activity after a long background period, same
+    // as a cold start for React state) exactly the same as "a real MFA
+    // challenge is genuinely still outstanding." That's correct for this
+    // same value's OTHER use (gating whether the tabs tree renders at all -
+    // an undetermined answer should keep the user waiting there), but wrong
+    // here: this code path runs against an already-fully-rendered,
+    // already-in-use app, so "undetermined" silently abandoning the relock
+    // decision is a fail-*open* outcome, not a fail-closed one - the exact
+    // gap `canLock` right below already avoids for biometric availability
+    // by re-checking live instead of trusting cached state. Only a
+    // *confirmed* outstanding challenge (`mfaRequired === true &&
+    // !mfaPassed`) still skips; a genuinely undetermined value gets
+    // resolved live, right here, the same way checkMfaRequirement() itself
+    // resolves it - matching this function's own established "fail closed
+    // on a real detection error" discipline rather than a third, silent
+    // behavior for "don't know yet."
     let mfaCleared = mfaRequired === false || mfaPassed;
     if (mfaRequired === null) {
       try {
         const { currentLevel, nextLevel } = await getAuthenticatorAssuranceLevel();
         mfaCleared = currentLevel === nextLevel;
       } catch (err) {
-        console.error('[LOCK-DEBUG] inner: live MFA re-check threw', err);
+        console.error(err);
         mfaCleared = false;
       }
     }
-    console.error('[LOCK-DEBUG] inner: mfaRequired=', mfaRequired, 'mfaPassed=', mfaPassed, 'mfaCleared=', mfaCleared);
     if (!mfaCleared) return;
     const backgroundedAt = parseInt(stored, 10);
     if (!Number.isFinite(backgroundedAt)) return;
     const elapsed = Date.now() - backgroundedAt;
-    console.error(
-      '[LOCK-DEBUG] inner: elapsed ms=',
-      elapsed,
-      'LOCK threshold=',
-      LOCK_AFTER_BACKGROUND_MS
-    );
 
     if (elapsed < LOCK_AFTER_BACKGROUND_MS) return; // short elapsed: no-op
 
@@ -450,16 +439,8 @@ export default function RootLayout() {
       const isEnrolled = hasHardware && (await LocalAuthentication.isEnrolledAsync());
       const lockPref = await getBiometricLockEnabled();
       canLock = hasHardware && isEnrolled && lockPref;
-      console.error(
-        '[LOCK-DEBUG] inner: hasHardware=',
-        hasHardware,
-        'isEnrolled=',
-        isEnrolled,
-        'lockPref=',
-        lockPref
-      );
     } catch (err) {
-      console.error('[LOCK-DEBUG] inner: canLock check threw', err);
+      console.error(err);
       canLock = false;
     }
 
@@ -469,7 +450,6 @@ export default function RootLayout() {
     // instead of a silent no-op, so the timeout policy still means
     // something on a device without biometrics configured.
     if (elapsed >= SIGN_OUT_AFTER_BACKGROUND_MS || !canLock) {
-      console.error('[LOCK-DEBUG] inner: taking sign-out branch instead of lock');
       await AsyncStorage.setItem(SIGNED_OUT_REASON_STORAGE_KEY, 'inactivity');
       await forceSignOut();
       return;
@@ -479,7 +459,6 @@ export default function RootLayout() {
     // own (not-yet-run, on a cold relaunch) detection with the answer just
     // computed above, so it doesn't redundantly re-check hardware/
     // enrollment a moment later and fire a second, stacked prompt.
-    console.error('[LOCK-DEBUG] inner: calling attemptBiometricAuth now');
     setBiometricAvailable(true);
     biometricCheckStartedRef.current = true;
     setBiometricPassed(false);
@@ -533,16 +512,6 @@ export default function RootLayout() {
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
       const wasBackground = backgroundTrackingAppStateRef.current.match(/inactive|background/);
-      console.error(
-        '[LOCK-DEBUG] AppState change: prev=',
-        backgroundTrackingAppStateRef.current,
-        'next=',
-        nextState,
-        'wasBackground=',
-        !!wasBackground,
-        'promptInFlight=',
-        biometricPromptInFlightRef.current
-      );
       // Ignore both directions while our own biometric prompt is up - see
       // biometricPromptInFlightRef's own comment for why this transition
       // isn't a genuine "user left the app" signal.
@@ -558,13 +527,10 @@ export default function RootLayout() {
             pendingResumeCheckRef.current = null;
           }
           resumeChurnStartRef.current = null;
-          console.error('[LOCK-DEBUG] leaving foreground, sessionRef.current=', !!sessionRef.current);
           if (sessionRef.current) {
             AsyncStorage.getItem(BACKGROUNDED_AT_STORAGE_KEY).then((existing) => {
-              console.error('[LOCK-DEBUG] existing stamp on background-write=', existing);
               if (!existing) {
                 AsyncStorage.setItem(BACKGROUNDED_AT_STORAGE_KEY, String(Date.now()));
-                console.error('[LOCK-DEBUG] wrote background timestamp');
               }
             });
           }
@@ -582,7 +548,6 @@ export default function RootLayout() {
           const churnElapsed = now - resumeChurnStartRef.current;
           const delay =
             churnElapsed >= RESUME_MAX_CHURN_WAIT_MS ? 0 : RESUME_SETTLE_DEBOUNCE_MS;
-          console.error('[LOCK-DEBUG] scheduling resume check, delay=', delay);
           pendingResumeCheckRef.current = setTimeout(() => {
             pendingResumeCheckRef.current = null;
             resumeChurnStartRef.current = null;
