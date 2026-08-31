@@ -218,6 +218,7 @@ module.exports = {
   expandOccurrences,
   upcomingObligations,
   nextExpectedIncome,
+  toDateOnly,
   STALE_INTERVALS_THRESHOLD,
   MIN_INCOME_AMOUNT,
 };

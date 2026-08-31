@@ -7,6 +7,7 @@ const { INTERVALS, AMOUNT_TOLERANCE_RATIO } = require('./recurring');
 // risk drifting apart if either is ever tuned without remembering the other.
 const { AVG_DAYS_PER_MONTH } = require('./goalProgress');
 const { getRecurringMonthComparison } = require('./recurringMonthComparison');
+const { nextExpectedIncome, toDateOnly } = require('./recurringSchedule');
 
 const MS_PER_DAY = 86_400_000;
 
@@ -275,6 +276,40 @@ function computeSubscriptionAudit({ series = [], transactionsBySeriesId = new Ma
 
   const price_jumps = detectForkedPriceJumps(activeById, lapsedById);
 
+  // Phase 24 Home "UP NEXT" glance (2026-08-30): the single soonest expected
+  // event of any kind - a paycheck or a bill, whichever comes first. Reuses
+  // recurringSchedule.js's own nextExpectedIncome (already built for the
+  // affordability chat's payday math, never surfaced to any UI before this)
+  // against the full `series` param (income included - spendSeries above
+  // deliberately excludes it), and the recurring_bills list already computed
+  // above. Zero new Claude cost, zero new I/O - both inputs already exist by
+  // this point in the function.
+  const today = toDateOnly(now);
+  const income = nextExpectedIncome({ series, from: today });
+  const soonestBill = recurring_bills.reduce(
+    (closest, bill) =>
+      !closest || bill.next_expected_date < closest.next_expected_date ? bill : closest,
+    null
+  );
+
+  let up_next = null;
+  if (income && (!soonestBill || income.date <= soonestBill.next_expected_date)) {
+    up_next = {
+      type: 'income',
+      display_name: income.display_name,
+      amount: income.amount,
+      date: income.date,
+    };
+  } else if (soonestBill) {
+    up_next = {
+      type: 'bill',
+      display_name: soonestBill.display_name,
+      amount: soonestBill.typical_amount,
+      date: soonestBill.next_expected_date,
+      account_id: soonestBill.account_id,
+    };
+  }
+
   return {
     subscriptions,
     recurring_bills,
@@ -282,6 +317,7 @@ function computeSubscriptionAudit({ series = [], transactionsBySeriesId = new Ma
     lapsed,
     gradual_increases,
     price_jumps,
+    up_next,
     total_monthly_equivalent: round2(totalMonthlyEquivalent),
     // Recurring tab "This month at a glance" row (2026-08-25) - computed
     // from data already gathered above, no new I/O. Additive field, doesn't

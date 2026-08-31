@@ -78,15 +78,29 @@ const UPCOMING_BILLS_WINDOW_DAYS = 7;
 // convention elsewhere, e.g. alerts.js/subscriptionAudit.js's own
 // UTC-calendar-date comparisons) so a bill due "today" doesn't flicker
 // between today/tomorrow depending on time of day.
-function formatDueText(nextExpectedDate) {
-  const due = new Date(`${nextExpectedDate}T00:00:00Z`);
+function daysUntil(dateOnly) {
+  const due = new Date(`${dateOnly}T00:00:00Z`);
   const today = new Date();
   const todayUtc = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
-  const days = Math.round((due - todayUtc) / (1000 * 60 * 60 * 24));
+  return Math.round((due - todayUtc) / (1000 * 60 * 60 * 24));
+}
+
+function formatDueText(nextExpectedDate) {
+  const days = daysUntil(nextExpectedDate);
   if (days < 0) return 'expected recently';
   if (days === 0) return 'due today';
   if (days === 1) return 'due tomorrow';
   return `due in ${days} days`;
+}
+
+// Phase 24 "UP NEXT" glance - same day-math as formatDueText above (via the
+// shared daysUntil), phrased for "the next thing coming in or going out"
+// rather than specifically a bill that's "due."
+function formatUpNextText(date) {
+  const days = daysUntil(date);
+  if (days <= 0) return 'expected today';
+  if (days === 1) return 'expected tomorrow';
+  return `expected in ${days} days`;
 }
 
 // Groups transactions into the shape SectionList expects, one section per
@@ -938,6 +952,28 @@ export default function Home() {
               </Text>
             </View>
           </View>
+
+          {/* Phase 24 "UP NEXT" - the single soonest expected event of any
+              kind (a paycheck or a bill, whichever is closer), from the
+              original Sorrel Home mockup. Reuses server/subscriptionAudit.js's
+              already-computed up_next (soonest of nextExpectedIncome vs. the
+              recurring_bills list) rather than a third, separate client-side
+              computation. Deliberately a single glanceable line, not a list -
+              "Upcoming bills" right below already covers the fuller due-soon
+              list. */}
+          {subscriptionAudit?.up_next && (
+            <View style={[styles.card, homeStyles.cardMargin]}>
+              <Text style={styles.cardTitle}>Up next</Text>
+              <View style={styles.alertRow}>
+                <Text style={styles.alertText}>
+                  {subscriptionAudit.up_next.display_name} —{' '}
+                  {subscriptionAudit.up_next.type === 'income' ? 'est. ' : ''}
+                  ${formatDecimal(subscriptionAudit.up_next.amount)}
+                </Text>
+                <Text style={styles.smallText}>{formatUpNextText(subscriptionAudit.up_next.date)}</Text>
+              </View>
+            </View>
+          )}
 
           {/* Upcoming bills - Bills & Utilities specifically (mortgage/
               phone/electricity-style), not Subscriptions (Netflix-style,
