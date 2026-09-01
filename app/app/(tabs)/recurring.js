@@ -337,13 +337,23 @@ export default function Recurring() {
                 />
               </View>
               <Pressable
-                style={recurringStyles.filtersButton}
+                style={[
+                  recurringStyles.filtersButton,
+                  onBackdropTextColor && { borderColor: onBackdropTextColor },
+                ]}
                 onPress={() => setShowFilters((v) => !v)}
                 accessibilityRole="button"
                 accessibilityLabel="Filters"
               >
-                <MaterialIcons name="tune" size={16} color={colors.dark} />
-                <Text style={recurringStyles.filtersButtonText}>FILTERS</Text>
+                <MaterialIcons name="tune" size={16} color={onBackdropTextColor || colors.dark} />
+                <Text
+                  style={[
+                    recurringStyles.filtersButtonText,
+                    onBackdropTextColor && { color: onBackdropTextColor },
+                  ]}
+                >
+                  FILTERS
+                </Text>
               </Pressable>
             </View>
 

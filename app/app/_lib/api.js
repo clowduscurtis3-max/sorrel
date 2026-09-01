@@ -27,6 +27,7 @@ export const CATEGORIES = [
   'Groceries',
   'Dining',
   'Transportation',
+  'Gas',
   'Bills & Utilities',
   'Subscriptions',
   'Shopping',

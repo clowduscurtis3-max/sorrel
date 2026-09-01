@@ -8,6 +8,7 @@ const CATEGORY_ICONS = {
   Groceries: 'shopping-cart',
   Dining: 'restaurant',
   Transportation: 'directions-car',
+  Gas: 'local-gas-station',
   'Bills & Utilities': 'home',
   Subscriptions: 'subscriptions',
   Shopping: 'shopping-bag',

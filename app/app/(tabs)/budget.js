@@ -668,6 +668,7 @@ export default function Budget() {
                           style={styles.input}
                           keyboardType="numeric"
                           placeholder="New budgeted amount"
+                          placeholderTextColor={colors.placeholder}
                           value={budgetEditAmount}
                           onChangeText={setBudgetEditAmount}
                         />

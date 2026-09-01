@@ -26,10 +26,13 @@ export const colors = {
   // 2026-08-20) - found on-device: TextInput's platform-default
   // placeholder color was unreadable against the restyle's light card
   // background, close enough to white to be effectively invisible.
-  // Bumped 0.35 -> 0.7 (2026-09-01) - still unreadable on Recurring's
-  // search box at 0.35 (~1.8:1 contrast against the card color); 0.7
-  // gets it to ~4.2:1 while staying visually lighter than real text.
-  placeholder: 'rgba(30, 67, 53, 0.7)',
+  // Bumped 0.35 -> 0.7 (2026-09-01), still a dark-green tint - swapped to
+  // a true neutral grey the same day per direct user request ("translucent
+  // grey, but not too translucent - clear enough to read easily but still
+  // be able to tell its not text in the box"), ~3.7:1 contrast against the
+  // card color, clearly lighter than real text (colors.darkest) without
+  // being unreadable.
+  placeholder: 'rgba(100, 100, 100, 0.8)',
 };
 
 // Shared subset of the old app/App.js styles object, copied verbatim

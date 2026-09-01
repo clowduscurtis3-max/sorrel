@@ -1,6 +1,6 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const supabaseAdmin = require('./supabaseAdmin');
-const { SPEND_CATEGORIES } = require('./categorize');
+const { SPEND_CATEGORIES, ESSENTIAL_CATEGORIES } = require('./categorize');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -227,8 +227,8 @@ async function generateBudget(userId, target = {}) {
       `to plausibly work toward that, without proposing anything under 70% of a ` +
       `category's actual average (drastic cuts don't stick). If no specific goal ` +
       `was given, trim obvious waste modestly (5-15% below average on discretionary ` +
-      `categories) and leave necessities (Groceries, Bills & Utilities, ` +
-      `Transportation, Health & Personal Care) close to their average. Some ` +
+      `categories) and leave necessities (${ESSENTIAL_CATEGORIES.join(', ')}) close ` +
+      `to their average. Some ` +
       `categories may already be fixed by the user (see user_fixed_budgets) - ` +
       `you do not propose numbers for those, they're already decided and not ` +
       `in the category list below, but you can mention them in a category's ` +
@@ -654,9 +654,25 @@ async function proposeRebalance(userId, category, newAmount) {
   // Only categories the AI still controls are candidates - a category the
   // user already fixed (directly, or by accepting an earlier rebalance)
   // represents a deliberate prior decision the AI shouldn't silently
-  // propose touching again.
+  // propose touching again. Necessities (ESSENTIAL_CATEGORIES - the same
+  // list budgetInsight.js/emergencyFund.js/scenario.js already treat as
+  // authoritative, not a second copy of this split) are excluded from the
+  // candidate pool entirely, not just deprioritized in the prompt - a real
+  // bug found on-device, 2026-09-01: raising Bills & Utilities by $5,100
+  // got Claude to zero out Groceries, Transportation, and two other
+  // categories to cover it, since the old prompt only said to *prefer*
+  // discretionary categories, with "never go below $0" as the only hard
+  // floor. That's mathematically valid and logically wrong - a rebalance
+  // proposal should never be able to suggest draining real necessities to
+  // nothing just because covering the number was possible. Only genuinely
+  // discretionary categories can ever be proposed now; if that's not
+  // enough room, the honest answer is "apply without rebalancing," not a
+  // proposal that empties your grocery budget.
   const candidateCategories = SPEND_CATEGORIES.filter(
-    (c) => c !== category && !budgets?.find((b) => b.category === c)?.is_user_set
+    (c) =>
+      c !== category &&
+      !ESSENTIAL_CATEGORIES.includes(c) &&
+      !budgets?.find((b) => b.category === c)?.is_user_set
   );
   const candidateBudgets = Object.fromEntries(
     candidateCategories.map((c) => [c, budgets?.find((b) => b.category === c)?.budgeted_amount ?? 0])
@@ -671,7 +687,9 @@ async function proposeRebalance(userId, category, newAmount) {
       adjustments: [],
       summary:
         `I couldn't find room elsewhere to cover the extra $${delta.toFixed(2)} - ` +
-        `every other category is either already set by you or has nothing budgeted to trim.`,
+        `every other discretionary category is either already set by you or has ` +
+        `nothing budgeted to trim (necessities like Groceries and Transportation ` +
+        `are never touched here).`,
     };
   }
 

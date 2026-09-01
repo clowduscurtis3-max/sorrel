@@ -4,14 +4,28 @@ const { logError } = require('./safeLog');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// A fixed, budget-sized category list (10 spend categories + 2 non-budgeted
+// A fixed, budget-sized category list (11 spend categories + 2 non-budgeted
 // "flow" categories for money moving in/around rather than being spent).
 // Kept small deliberately so Step 4's per-category budget stays readable —
 // Plaid's own ~18-value taxonomy is too granular for that.
+//
+// 'Gas' split out from 'Transportation' 2026-09-01, per direct user
+// request - real data showed rebalance proposals treating "Transportation"
+// as fair game to drain, which conflated rideshares/parking/transit
+// (genuinely more discretionary) with gas (a true necessity for anyone who
+// drives). Plaid's own taxonomy already distinguishes this at the
+// `detailed` level (`TRANSPORTATION_GAS` vs `TRANSPORTATION_TAXIS_AND_RIDE_SHARES`/
+// `_PARKING`/`_PUBLIC_TRANSIT`/`_TOLLS`/`_BIKES_AND_SCOOTERS`/
+// `_OTHER_TRANSPORTATION`, verified against Plaid's own published taxonomy
+// CSV, not guessed) - `DETAILED_LABELS` below splits it out the same way
+// `FOOD_AND_DRINK_GROCERIES` already splits 'Groceries' out from 'Dining'.
+// 'Transportation' itself is unchanged/still exists for everything else
+// under that primary.
 const SPEND_CATEGORIES = [
   'Groceries',
   'Dining',
   'Transportation',
+  'Gas',
   'Bills & Utilities',
   'Subscriptions',
   'Shopping',
@@ -28,7 +42,9 @@ const FRIENDLY_CATEGORIES = [...SPEND_CATEGORIES, ...FLOW_CATEGORIES];
 // other deterministic logic (emergencyFund.js) can reuse the exact same split
 // instead of re-typing it. 'Other' is deliberately excluded from both sides -
 // it's a catch-all with no reliable essential/discretionary signal either way.
-const ESSENTIAL_CATEGORIES = ['Groceries', 'Bills & Utilities', 'Transportation', 'Health & Personal Care'];
+// 'Gas' added 2026-09-01 alongside the split above, per direct user request
+// ("gas should be treated as a necessity as well").
+const ESSENTIAL_CATEGORIES = ['Groceries', 'Bills & Utilities', 'Transportation', 'Gas', 'Health & Personal Care'];
 
 // Maps Plaid's `personal_finance_category.primary` onto our smaller list.
 // Deliberately does NOT include GENERAL_SERVICES - leaving it unmapped
@@ -59,6 +75,7 @@ const PRIMARY_LABELS = {
 // A few detailed-category overrides where the broad bucket is too coarse.
 const DETAILED_LABELS = {
   FOOD_AND_DRINK_GROCERIES: 'Groceries',
+  TRANSPORTATION_GAS: 'Gas',
 };
 
 const LOW_CONFIDENCE = new Set(['LOW', 'UNKNOWN']);
@@ -177,6 +194,7 @@ async function categorizeAmbiguous(transactions) {
         `Choose exactly one category per transaction from this fixed list: ` +
         `${FRIENDLY_CATEGORIES.join(', ')}. ` +
         `"Subscriptions" is for recurring memberships/services (streaming, software, gym, etc) - use merchant name to judge whether something looks recurring. ` +
+        `"Gas" is only for purchases at a gas station (Shell, Chevron, Exxon, Speedway, and similar chains) - other transportation costs like rideshares, parking, tolls, or public transit stay under "Transportation". ` +
         `"Income" and "Transfers" are for money coming in or moving between the user's own accounts, not spending. ` +
         `For each transaction also give a brief reasoning (under 12 words, mention the merchant name) and a confidence of "high", "medium", or "low". ` +
         `Respond with ONLY a JSON object mapping each transaction id to {"category": "...", "reasoning": "...", "confidence": "..."}, no other text.`,
@@ -279,4 +297,5 @@ module.exports = {
   normalizeMerchantKey,
   debtTypeFromPlaid,
   DEBT_TYPE_LABELS,
+  plaidCategorization,
 };
