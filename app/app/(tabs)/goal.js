@@ -3,6 +3,7 @@ import { View, Text, Pressable, TextInput, ActivityIndicator, Alert, AppState, S
 import { StatusBar } from 'expo-status-bar';
 import { MaterialIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { Picker } from '@react-native-picker/picker';
 import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
 import {
   useAudioRecorder,
@@ -40,6 +41,39 @@ const GOAL_TYPE_TAGLINE = {
   debt: 'One step closer to being debt-free.',
   emergency_fund: 'A cushion for whatever comes next.',
   general: 'Building smarter money habits.',
+};
+
+// Phase 25 ("Can I afford to buy a house?", 2026-08-31): the same 51
+// codes server/stateHousingCosts.js has real reference data for - kept in
+// sync by hand (no shared module between client/server in this project),
+// so an edit to one must be mirrored in the other.
+const US_STATES = [
+  ['AL', 'Alabama'], ['AK', 'Alaska'], ['AZ', 'Arizona'], ['AR', 'Arkansas'],
+  ['CA', 'California'], ['CO', 'Colorado'], ['CT', 'Connecticut'], ['DE', 'Delaware'],
+  ['DC', 'District of Columbia'], ['FL', 'Florida'], ['GA', 'Georgia'], ['HI', 'Hawaii'],
+  ['ID', 'Idaho'], ['IL', 'Illinois'], ['IN', 'Indiana'], ['IA', 'Iowa'],
+  ['KS', 'Kansas'], ['KY', 'Kentucky'], ['LA', 'Louisiana'], ['ME', 'Maine'],
+  ['MD', 'Maryland'], ['MA', 'Massachusetts'], ['MI', 'Michigan'], ['MN', 'Minnesota'],
+  ['MS', 'Mississippi'], ['MO', 'Missouri'], ['MT', 'Montana'], ['NE', 'Nebraska'],
+  ['NV', 'Nevada'], ['NH', 'New Hampshire'], ['NJ', 'New Jersey'], ['NM', 'New Mexico'],
+  ['NY', 'New York'], ['NC', 'North Carolina'], ['ND', 'North Dakota'], ['OH', 'Ohio'],
+  ['OK', 'Oklahoma'], ['OR', 'Oregon'], ['PA', 'Pennsylvania'], ['RI', 'Rhode Island'],
+  ['SC', 'South Carolina'], ['SD', 'South Dakota'], ['TN', 'Tennessee'], ['TX', 'Texas'],
+  ['UT', 'Utah'], ['VT', 'Vermont'], ['VA', 'Virginia'], ['WA', 'Washington'],
+  ['WV', 'West Virginia'], ['WI', 'Wisconsin'], ['WY', 'Wyoming'],
+];
+
+// Plain-language read of the back-end DTI tier (server/homeAffordability.js's
+// classifyBackEndDti) - explicitly a general guideline, never a lending
+// decision, matching this app's "advisor, not accountant documents" voice
+// (explains, doesn't announce) and standing caution against false
+// precision on anything this app can't actually verify (real approval
+// depends on credit/compensating factors this app has no visibility into).
+const DTI_TIER_COPY = {
+  comfortable: 'comfortably within typical lending guidelines',
+  workable: 'within typical lending guidelines, on the higher side',
+  tight: 'tight against typical lending guidelines',
+  over_typical_guidelines: 'above typical lending guidelines for this loan amount',
 };
 
 // The goal's own display name - GOAL_TYPES' label for every type except
@@ -494,6 +528,69 @@ export default function Goal() {
       setCalculatorError(apiErrorMessage(err));
     } finally {
       setCalculatingGoal(false);
+    }
+  }
+
+  // Phase 25 ("Can I afford to buy a house?", 2026-08-31): its own card in
+  // this same Planning Tools row, matching the Calculator/Savings Planner/
+  // Emergency Fund cards' established toggle-then-fetch pattern - not a
+  // 6th tab, not folded into the "Can I afford this?" chat, per the phase
+  // brief's own explicit scoping. All the real math (mortgage P&I,
+  // state-sourced property tax/insurance, PMI, DTI against real detected
+  // debt) already lives server-side (server/homeAffordability.js); this is
+  // a thin client for it. No voice input for the two dollar fields here
+  // (unlike the Calculator/Goal-amount fields) - a deliberate first-pass
+  // scoping call given how much this feature already carries, not an
+  // oversight; can follow the same record->transcribe pattern later if
+  // it's wanted.
+  const [showHomeAffordability, setShowHomeAffordability] = useState(false);
+  const [homePriceText, setHomePriceText] = useState('');
+  const [downPaymentText, setDownPaymentText] = useState('');
+  const [homeState, setHomeState] = useState('');
+  const [homeAffordabilityResult, setHomeAffordabilityResult] = useState(null);
+  const [calculatingHomeAffordability, setCalculatingHomeAffordability] = useState(false);
+  const [homeAffordabilityError, setHomeAffordabilityError] = useState(null);
+
+  async function runHomeAffordability() {
+    const homePrice = parseDollarAmount(homePriceText);
+    if (!homePrice) {
+      setHomeAffordabilityError('Enter a valid home price, like $350,000.');
+      return;
+    }
+    // parseDollarAmount rejects 0 (treats it as "not a real amount," same
+    // as every other dollar field in this app) - a literal $0 down
+    // payment isn't supported in this first pass, a known simplification,
+    // not an oversight.
+    const downPayment = parseDollarAmount(downPaymentText);
+    if (!downPayment) {
+      setHomeAffordabilityError('Enter a valid down payment, like $35,000.');
+      return;
+    }
+    if (downPayment >= homePrice) {
+      setHomeAffordabilityError('Down payment must be less than the home price.');
+      return;
+    }
+    if (!homeState) {
+      setHomeAffordabilityError('Choose a state.');
+      return;
+    }
+    setCalculatingHomeAffordability(true);
+    setHomeAffordabilityError(null);
+    setHomeAffordabilityResult(null);
+    try {
+      const res = await apiFetch('/home-affordability', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ home_price: homePrice, down_payment: downPayment, state: homeState }),
+      });
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const data = await res.json();
+      setHomeAffordabilityResult(data.result);
+    } catch (err) {
+      console.error(err);
+      setHomeAffordabilityError(apiErrorMessage(err));
+    } finally {
+      setCalculatingHomeAffordability(false);
     }
   }
 
@@ -1428,6 +1525,152 @@ export default function Goal() {
                 </View>
               </View>
             ))}
+
+            <View style={[styles.card, goalStyles.cardMargin]}>
+              <View style={goalStyles.projectionsHeaderRow}>
+                <MaterialIcons name="home" size={18} color={colors.dark} />
+                <Text style={goalStyles.cardTitle}>Home Affordability</Text>
+              </View>
+              {!showHomeAffordability ? (
+                <Pressable
+                  style={[goalStyles.estimateOutlineButton, goalStyles.estimateSpacing]}
+                  onPress={() => setShowHomeAffordability(true)}
+                  accessibilityRole="button"
+                >
+                  <Text style={goalStyles.estimateOutlineButtonText}>
+                    SEE IF YOU CAN AFFORD A HOME
+                  </Text>
+                </Pressable>
+              ) : (
+                <>
+                  <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
+                    Enter a home price, down payment, and state to see an estimated monthly
+                    cost and how it stacks up against your real income and debt.
+                  </Text>
+                  <TextInput
+                    style={[styles.input, goalStyles.estimateSpacing]}
+                    value={homePriceText}
+                    onChangeText={setHomePriceText}
+                    placeholder="Home price, e.g. $350,000"
+                    placeholderTextColor={colors.placeholder}
+                    keyboardType="numeric"
+                    editable={!calculatingHomeAffordability}
+                  />
+                  <TextInput
+                    style={[styles.input, goalStyles.estimateSpacing]}
+                    value={downPaymentText}
+                    onChangeText={setDownPaymentText}
+                    placeholder="Down payment, e.g. $35,000"
+                    placeholderTextColor={colors.placeholder}
+                    keyboardType="numeric"
+                    editable={!calculatingHomeAffordability}
+                  />
+                  <View style={[styles.picker, goalStyles.estimateSpacing]}>
+                    <Picker
+                      selectedValue={homeState}
+                      onValueChange={setHomeState}
+                      enabled={!calculatingHomeAffordability}
+                    >
+                      <Picker.Item label="Choose a state..." value="" />
+                      {US_STATES.map(([code, name]) => (
+                        <Picker.Item key={code} label={name} value={code} />
+                      ))}
+                    </Picker>
+                  </View>
+                  {homeAffordabilityError && (
+                    <Text style={styles.errorText}>{homeAffordabilityError}</Text>
+                  )}
+                  {calculatingHomeAffordability ? (
+                    <ActivityIndicator style={goalStyles.estimateSpacing} />
+                  ) : (
+                    <View style={goalStyles.estimateSpacing}>
+                      <PrimaryButton title="ESTIMATE MONTHLY COST" onPress={runHomeAffordability} />
+                    </View>
+                  )}
+
+                  {homeAffordabilityResult && (
+                    <View style={goalStyles.estimateSpacing}>
+                      <View style={styles.card}>
+                        <Text style={styles.cardTitle}>Estimated monthly cost</Text>
+                        <View style={styles.comparisonTableRow}>
+                          <Text style={styles.comparisonTableLabel}>Loan amount</Text>
+                          <Text style={styles.comparisonTableValue}>
+                            ${formatDecimal(homeAffordabilityResult.loan_amount)}
+                          </Text>
+                        </View>
+                        <View style={styles.comparisonTableRow}>
+                          <Text style={styles.comparisonTableLabel}>Down payment</Text>
+                          <Text style={styles.comparisonTableValue}>
+                            {homeAffordabilityResult.down_payment_percent}%
+                          </Text>
+                        </View>
+                        <View style={styles.comparisonTableRow}>
+                          <Text style={styles.comparisonTableLabel}>Principal & interest</Text>
+                          <Text style={styles.comparisonTableValue}>
+                            ${formatDecimal(homeAffordabilityResult.monthly_principal_and_interest)}/mo
+                          </Text>
+                        </View>
+                        {homeAffordabilityResult.has_state_cost_data && (
+                          <>
+                            <View style={styles.comparisonTableRow}>
+                              <Text style={styles.comparisonTableLabel}>Property tax (est.)</Text>
+                              <Text style={styles.comparisonTableValue}>
+                                ${formatDecimal(homeAffordabilityResult.monthly_property_tax)}/mo
+                              </Text>
+                            </View>
+                            <View style={styles.comparisonTableRow}>
+                              <Text style={styles.comparisonTableLabel}>Home insurance (est.)</Text>
+                              <Text style={styles.comparisonTableValue}>
+                                ${formatDecimal(homeAffordabilityResult.monthly_insurance)}/mo
+                              </Text>
+                            </View>
+                          </>
+                        )}
+                        {homeAffordabilityResult.pmi_applies && (
+                          <View style={styles.comparisonTableRow}>
+                            <Text style={styles.comparisonTableLabel}>PMI (est., under 20% down)</Text>
+                            <Text style={styles.comparisonTableValue}>
+                              ${formatDecimal(homeAffordabilityResult.monthly_pmi)}/mo
+                            </Text>
+                          </View>
+                        )}
+                        <View style={[styles.comparisonTableRow, { borderBottomWidth: 0 }]}>
+                          <Text style={styles.comparisonTableLabel}>Total monthly housing cost</Text>
+                          <Text style={styles.comparisonTableValue}>
+                            {homeAffordabilityResult.total_monthly_housing_cost != null
+                              ? `$${formatDecimal(homeAffordabilityResult.total_monthly_housing_cost)}/mo`
+                              : 'Unavailable'}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {homeAffordabilityResult.back_end_dti_tier ? (
+                        <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
+                          {homeAffordabilityResult.back_end_dti_exceeds_display_cap
+                            ? `Including this and your other recurring debt ($${formatDecimal(homeAffordabilityResult.existing_monthly_debt)}/month), your total monthly debt would come to well more than your detected income covers.`
+                            : `Including this and your other recurring debt ($${formatDecimal(homeAffordabilityResult.existing_monthly_debt)}/month), your total monthly debt would be about ${homeAffordabilityResult.back_end_dti_percent}% of your income — ${DTI_TIER_COPY[homeAffordabilityResult.back_end_dti_tier]}.`}
+                          {' '}This is a general guideline, not a lending decision — actual
+                          approval depends on credit and other factors this app can't see.
+                        </Text>
+                      ) : (
+                        <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
+                          Not enough income history is detected yet to estimate how this
+                          would compare to your income.
+                        </Text>
+                      )}
+
+                      {!homeAffordabilityResult.has_state_cost_data && (
+                        <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
+                          Property tax and insurance estimates aren't available for this state
+                          yet, so the total above only includes principal, interest
+                          {homeAffordabilityResult.pmi_applies ? ', and PMI' : ''}.
+                        </Text>
+                      )}
+                    </View>
+                  )}
+                </>
+              )}
+            </View>
           </Animated.ScrollView>
           </TopEdgeFade>
         </>
