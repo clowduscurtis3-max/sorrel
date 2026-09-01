@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { View, Text, Modal, Pressable, ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { apiFetch, apiErrorMessage, formatDecimal } from '../_lib/api';
+import { apiFetch, apiErrorMessage, formatDecimal, logRecommendationEvent } from '../_lib/api';
 import { styles, colors } from '../_lib/styles';
 import PrimaryButton from './PrimaryButton';
 
@@ -94,6 +94,9 @@ export default function BudgetInsightModal({ visible, onClose, insight, onBudget
         }),
       });
       if (!res.ok) throw new Error('SERVER_ERROR');
+      logRecommendationEvent('budget_insight_cuts', 'accepted', {
+        categories: cutsProposal.adjustments.map((a) => a.category),
+      });
       await onBudgetChanged?.();
       handleClose();
     } catch (err) {

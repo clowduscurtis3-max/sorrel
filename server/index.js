@@ -86,6 +86,7 @@ const {
 } = require('./financeRate');
 const { runAffordabilityChatTurn } = require('./affordabilityChat');
 const { getHomeAffordability } = require('./homeAffordability');
+const { logRecommendationEvent, VALID_TYPES, VALID_STATUSES } = require('./recommendationEvents');
 const {
   signup,
   linkUsernamePassword,
@@ -1504,6 +1505,39 @@ app.post('/home-affordability', requireUser, async (req, res) => {
     console.error(err);
     res.status(500).json({ error: 'Failed to compute home affordability' });
   }
+});
+
+// Foundation step for "getting smarter about the user specifically" (see
+// CLAUDE.md, 2026-08-31/09-01) - records that a specific suggestion was
+// explicitly accepted or rejected, purely for later analysis, no
+// adaptive behavior yet. Called by the client immediately after the real
+// accept/reject action already resolved (applying a rebalance
+// with/without the AI's numbers, applying proposed cuts, setting an
+// emergency fund target) - a logging failure here must never block or
+// surface as an error for an action the user already completed, so this
+// always returns 200 even if the write itself fails (logged server-side
+// for visibility instead). Both statuses are accepted at this endpoint
+// even though only budget_rebalance can currently produce a real
+// 'rejected' event ("Apply without rebalancing" is an explicit reject,
+// not just closing the screen) - budget_insight_cuts and
+// emergency_fund_target have no reject action in the UI yet, so those
+// two will only ever send 'accepted' in practice.
+app.post('/recommendations/log', requireUser, async (req, res) => {
+  const { recommendation_type, status, context } = req.body || {};
+  if (!VALID_TYPES.has(recommendation_type) || !VALID_STATUSES.has(status)) {
+    return res.status(400).json({ error: 'Invalid recommendation_type or status' });
+  }
+  try {
+    await logRecommendationEvent({
+      userId: req.userId,
+      recommendationType: recommendation_type,
+      status,
+      context: context || {},
+    });
+  } catch (err) {
+    console.error(err);
+  }
+  res.json({ ok: true });
 });
 
 // "Buy now" vs. "wait until your next detected paycheck," built on the same

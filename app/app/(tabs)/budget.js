@@ -21,7 +21,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
 import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
-import { apiFetch, apiErrorMessage, formatDecimal } from '../_lib/api';
+import { apiFetch, apiErrorMessage, formatDecimal, logRecommendationEvent } from '../_lib/api';
 import { styles, colors } from '../_lib/styles';
 import { useAppData } from '../_lib/appData';
 import { iconForCategory } from '../_lib/categoryIcons';
@@ -276,6 +276,16 @@ export default function Budget() {
         }),
       });
       if (!res.ok) throw new Error('SERVER_ERROR');
+      // Only a real accept/reject of an actual AI proposal, not every
+      // plain budget edit - this button row only renders when
+      // budgetProposal exists (see its own render guard above), so this
+      // is always true in practice; guarded anyway rather than assumed.
+      if (budgetProposal) {
+        logRecommendationEvent('budget_rebalance', withAdjustments ? 'accepted' : 'rejected', {
+          category: editingBudgetCategory,
+          budgeted_amount: amount,
+        });
+      }
       cancelEditBudget();
       await fetchBudgetStatus();
       await refetchAlerts();

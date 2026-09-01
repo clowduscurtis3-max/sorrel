@@ -12,7 +12,15 @@ import {
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
 } from 'expo-audio';
-import { apiFetch, apiErrorMessage, GOAL_TYPES, parseDollarAmount, formatDecimal, formatWhole } from '../_lib/api';
+import {
+  apiFetch,
+  apiErrorMessage,
+  GOAL_TYPES,
+  parseDollarAmount,
+  formatDecimal,
+  formatWhole,
+  logRecommendationEvent,
+} from '../_lib/api';
 import { styles, colors } from '../_lib/styles';
 import { useSessionContext } from '../_lib/session';
 import { useAppData } from '../_lib/appData';
@@ -412,6 +420,7 @@ export default function Goal() {
         }),
       });
       if (!res.ok) throw new Error('SERVER_ERROR');
+      logRecommendationEvent('emergency_fund_target', 'accepted', { target_amount: targetAmount });
       await refetchGoal();
       await refetchGoalProgress();
       resetGoalDependentTools();

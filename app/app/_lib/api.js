@@ -256,3 +256,23 @@ export function parseDollarAmount(text) {
   if (!Number.isFinite(value) || value <= 0) return null;
   return value;
 }
+
+// "Getting smarter about the user specifically" foundation step
+// (2026-08-31/09-01) - records that a specific suggestion was explicitly
+// accepted or rejected, purely for later analysis, no adaptive behavior
+// yet. Shared by every screen with a real propose-then-act action
+// (Budget tab's rebalance flow, the Budget Insight pill's propose-cuts
+// flow, Goal tab's emergency fund target buttons) rather than each
+// re-implementing the same fetch call. Deliberately fire-and-forget -
+// call this AFTER the real accept/reject action has already succeeded,
+// never await it in a way that blocks or shows an error for something
+// the user already completed; a logging failure here is invisible to
+// the user by design (server-side already logs it, see
+// POST /recommendations/log).
+export function logRecommendationEvent(recommendationType, status, context = {}) {
+  apiFetch('/recommendations/log', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ recommendation_type: recommendationType, status, context }),
+  }).catch((err) => console.error(err));
+}
