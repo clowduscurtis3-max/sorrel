@@ -26,7 +26,10 @@ export const colors = {
   // 2026-08-20) - found on-device: TextInput's platform-default
   // placeholder color was unreadable against the restyle's light card
   // background, close enough to white to be effectively invisible.
-  placeholder: 'rgba(30, 67, 53, 0.35)',
+  // Bumped 0.35 -> 0.7 (2026-09-01) - still unreadable on Recurring's
+  // search box at 0.35 (~1.8:1 contrast against the card color); 0.7
+  // gets it to ~4.2:1 while staying visually lighter than real text.
+  placeholder: 'rgba(30, 67, 53, 0.7)',
 };
 
 // Shared subset of the old app/App.js styles object, copied verbatim
@@ -59,9 +62,6 @@ export const styles = StyleSheet.create({
     // untested. Revisit with real insets if this proves too much/little on
     // other devices.
     paddingBottom: 72,
-  },
-  goalTypeRow: {
-    gap: 8,
   },
   // Cancel/Skip corner slots - one row, two ends. `justifyContent:
   // 'space-between'` plus two always-present child Views (one per corner)

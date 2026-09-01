@@ -594,25 +594,28 @@ app.get('/plaid-items', requireUser, async (req, res) => {
   }
 });
 
-// Fixed set the app's goal-intake screen picks from, plus 'other' for a
-// freeform goal typed into `notes`. Kept as a plain string column (not a DB
-// enum) since Step 4's budget prompt just reads it as context for Claude,
-// not as a value anything branches on in code.
+// Kept as a plain string column (not a DB enum) since the only thing
+// anything ever branches on is 'debt' vs not (goalProgress.js/scenario.js's
+// "freed up" vs "saved" verb, budget.js's Claude context) - everything
+// else is freeform, always-visible `notes` (what the goal is actually for).
 //
-// 'emergency_fund' removed 2026-09-01 (was: 'house', 'debt',
-// 'emergency_fund', 'general', 'other') - promoted to its own
-// independent, always-on tracker (emergency_funds table,
-// GET/POST /emergency-fund) instead of competing with the user's actual
-// primary goal for this one slot, per direct user request. A user whose
-// goal_type happens to still be the old 'emergency_fund' value (none as
-// of this change, confirmed against the real account) simply can't set
-// it again going forward - existing rows are left as historical data,
-// not migrated, since GET /goal doesn't validate goal_type on read.
+// Collapsed 2026-09-01 (was: 'house', 'debt', 'general', 'other') - direct
+// user feedback that "house" and "something else" sitting side by side as
+// peer options looked arbitrary, since 'house' was never actually special
+// in code, just a label. The real functional fork was always debt vs.
+// everything else, so that's now the only choice offered; what the
+// savings goal is *for* lives in `notes`, which used to only appear for
+// 'other' and is now always shown (see GoalForm.js/GoalFormFields).
+// Existing 'general'/'house'/'other' rows are backfilled to 'savings' by
+// migration 20260901000003_goal_type_collapse.sql, since the client's type
+// picker only ever sends 'debt' or 'savings' now and a stale value here
+// would leave neither card selected on Edit Goal. The "no specific goal"
+// case is now detected by budget.js's describeGoal() checking for a
+// missing target_amount/notes rather than by a dedicated 'general' type
+// value, so backfilled rows still degrade correctly.
 const GOAL_TYPES = [
-  'house',
   'debt',
-  'general',
-  'other',
+  'savings',
 ];
 
 app.get('/goal', requireUser, async (req, res) => {
@@ -648,7 +651,7 @@ app.post('/goal', requireUser, async (req, res) => {
     const { error } = await supabaseAdmin.from('user_goals').upsert(
       {
         user_id: req.userId,
-        goal_type: goal_type || 'general',
+        goal_type: goal_type || 'savings',
         target_amount: target_amount ?? null,
         target_timeframe_months: target_timeframe_months ?? null,
         notes: notes ?? null,

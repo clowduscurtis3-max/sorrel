@@ -128,7 +128,11 @@ function summarizeSpending(transactions, anchorDate = new Date()) {
 }
 
 function describeGoal(goal) {
-  if (!goal || goal.goal_type === 'general') {
+  // No dedicated 'general'/sentinel type anymore (goal_type collapse,
+  // 2026-09-01) - "nothing specific to tell Claude" is now detected
+  // directly from the absence of the only two things that would actually
+  // be worth mentioning, regardless of which of the two types it is.
+  if (!goal || (!goal.target_amount && !goal.notes)) {
     return (
       'No specific goal was set - optimize for general smarter spending: ' +
       'trim obvious discretionary waste and build a reasonable savings buffer.'

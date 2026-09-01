@@ -47,19 +47,18 @@ import PrimaryButton from '../_components/PrimaryButton';
 // progress." just below it in the existing Primary Goal card) - never a
 // financial figure, so it's fine as static per-type text rather than
 // something that needs to come from goal data.
-// 'emergency_fund' removed from both maps 2026-09-01 - no longer a
-// selectable primary goal_type, see server/index.js's own GOAL_TYPES
-// comment for why (promoted to its own independent tracker instead).
+// Collapsed to just debt/savings 2026-09-01 (was: house/debt/general/
+// other, before that also emergency_fund) - see server/index.js's own
+// GOAL_TYPES comment for the full "why". 'savings' covers every non-debt
+// goal now; what it's actually for comes from the always-visible `notes`
+// field via goalDisplayName() below, not a per-type label.
 const GOAL_TYPE_ICON = {
-  house: 'home',
   debt: 'money-off',
-  general: 'track-changes',
-  other: 'flag',
+  savings: 'savings',
 };
 const GOAL_TYPE_TAGLINE = {
-  house: 'A home of your own, on your terms.',
   debt: 'One step closer to being debt-free.',
-  general: 'Building smarter money habits.',
+  savings: 'One deposit at a time.',
 };
 
 // Phase 25 ("Can I afford to buy a house?", 2026-08-31): the same 51
@@ -95,12 +94,12 @@ const DTI_TIER_COPY = {
   over_typical_guidelines: 'above typical lending guidelines for this loan amount',
 };
 
-// The goal's own display name - GOAL_TYPES' label for every type except
-// 'other', where the user's own typed description (goal.notes) is the real
-// name (matches how goal-intake.js/GoalFormFields already treat notes for
-// this type) rather than the generic "Something else" menu-item label.
+// The goal's own display name - `notes` (the always-visible "what's this
+// for?" field, since the goal_type collapse 2026-09-01) whenever the user
+// has typed one, falling back to the generic per-type GOAL_TYPES label
+// only when they haven't.
 function goalDisplayName(goalType, notes) {
-  if (goalType === 'other' && notes) return notes;
+  if (notes) return notes;
   return GOAL_TYPES.find((g) => g.value === goalType)?.label || 'Your goal';
 }
 
@@ -829,7 +828,7 @@ export default function Goal() {
     ? editTargetDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     : 'No target date set';
   const editAmountLabel = form.goalAmount ? formatAmountLabel(form.goalAmount) : 'No target amount set';
-  const editGoalTypeLabel = GOAL_TYPES.find((g) => g.value === form.goalType)?.label || 'Something else';
+  const editGoalTypeLabel = GOAL_TYPES.find((g) => g.value === form.goalType)?.label || 'Goal type';
   const tomorrow = new Date(Date.now() + 86400000);
 
   return (
@@ -1067,30 +1066,56 @@ export default function Goal() {
               </Pressable>
               {activeEditor === 'type' && (
                 <View style={goalStyles.inlineEditor}>
-                  {GOAL_TYPES.filter((g) => g.value !== 'general').map((g) => (
-                    <Pressable
-                      key={g.value}
-                      style={goalStyles.typeOptionRow}
-                      onPress={() => form.setGoalType(g.value)}
-                      accessibilityRole="button"
-                      accessibilityLabel={g.label}
-                    >
-                      <MaterialIcons
-                        name={form.goalType === g.value ? 'radio-button-checked' : 'radio-button-unchecked'}
-                        size={18}
-                        color={form.goalType === g.value ? colors.primary : colors.muted}
-                      />
-                      <Text style={goalStyles.typeOptionText}>{g.label}</Text>
-                    </Pressable>
-                  ))}
-                  {form.goalType === 'other' && (
-                    <TextInput
-                      style={[styles.input, goalStyles.notesInput]}
-                      placeholder="Describe your goal"
-                      value={form.goalNotes}
-                      onChangeText={form.setGoalNotes}
-                    />
-                  )}
+                  {GOAL_TYPES.map((g) => {
+                    const selected = form.goalType === g.value;
+                    return (
+                      <Pressable
+                        key={g.value}
+                        style={[goalStyles.typeOptionCard, selected && goalStyles.typeOptionCardSelected]}
+                        onPress={() => form.setGoalType(g.value)}
+                        accessibilityRole="radio"
+                        accessibilityState={{ checked: selected }}
+                        accessibilityLabel={g.label}
+                      >
+                        <View
+                          style={[
+                            goalStyles.settingsIconCircle,
+                            selected && goalStyles.settingsIconCircleSelected,
+                          ]}
+                        >
+                          <MaterialIcons
+                            name={GOAL_TYPE_ICON[g.value] || 'flag'}
+                            size={18}
+                            color={selected ? colors.card : colors.dark}
+                          />
+                        </View>
+                        <View style={goalStyles.typeOptionTextGroup}>
+                          <Text style={goalStyles.typeOptionTitle}>{g.label}</Text>
+                          {!!GOAL_TYPE_TAGLINE[g.value] && (
+                            <Text style={goalStyles.typeOptionSubtitle}>{GOAL_TYPE_TAGLINE[g.value]}</Text>
+                          )}
+                        </View>
+                        <MaterialIcons
+                          name={selected ? 'check-circle' : 'radio-button-unchecked'}
+                          size={20}
+                          color={selected ? colors.primary : colors.muted}
+                        />
+                      </Pressable>
+                    );
+                  })}
+                  {/* Always shown, not gated behind a specific type
+                      (2026-09-01) - this is what actually names the goal
+                      (see goalDisplayName above), whether it's debt or
+                      savings, so it shouldn't be hidden behind a menu
+                      choice. */}
+                  <Text style={goalStyles.settingsRowLabel}>What's this for? (optional)</Text>
+                  <TextInput
+                    style={[styles.input, goalStyles.notesInput]}
+                    placeholder="e.g. a house, a wedding, the Chase card"
+                    placeholderTextColor={colors.placeholder}
+                    value={form.goalNotes}
+                    onChangeText={form.setGoalNotes}
+                  />
                   <View style={goalStyles.inlineEditorActions}>
                     <Pressable onPress={() => setActiveEditor(null)} accessibilityRole="button">
                       <Text style={goalStyles.inlineEditorLinkDone}>Done</Text>
@@ -2038,15 +2063,35 @@ const goalStyles = StyleSheet.create({
     fontWeight: '700',
     color: colors.primary,
   },
-  typeOptionRow: {
+  typeOptionCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 8,
+    gap: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'transparent',
   },
-  typeOptionText: {
+  typeOptionCardSelected: {
+    backgroundColor: colors.background,
+    borderColor: colors.sage,
+  },
+  typeOptionTextGroup: {
+    flex: 1,
+    gap: 2,
+  },
+  typeOptionTitle: {
     fontSize: 15,
+    fontWeight: '700',
     color: colors.darkest,
+  },
+  typeOptionSubtitle: {
+    fontSize: 12,
+    color: colors.muted,
+  },
+  settingsIconCircleSelected: {
+    backgroundColor: colors.primary,
   },
   notesInput: {
     marginTop: 4,

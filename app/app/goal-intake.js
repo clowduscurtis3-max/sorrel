@@ -1,4 +1,4 @@
-import { View, Button, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { useSharedValue } from 'react-native-reanimated';
@@ -6,6 +6,7 @@ import { styles, colors } from './_lib/styles';
 import { useSessionContext } from './_lib/session';
 import { useGoalForm, GoalFormFields } from './_components/GoalForm';
 import { AppBackdrop, isNightBackdrop } from './_components/Illustrations';
+import PrimaryButton from './_components/PrimaryButton';
 
 // Ported from the old app/App.js's `editingGoal` branch (Phase 7 Step 1
 // sub-step 1.2), refactored in sub-step 1.6 to use the shared GoalForm
@@ -44,11 +45,21 @@ export default function GoalIntake() {
       <View style={styles.topBar}>
         <View>
           {goal && !form.saving && (
-            <Button title="Cancel" onPress={() => router.replace('/')} />
+            <Pressable onPress={() => router.replace('/')} accessibilityRole="button" hitSlop={8}>
+              <Text style={[intakeStyles.cornerLink, onBackdropTextColor && { color: onBackdropTextColor }]}>
+                Cancel
+              </Text>
+            </Pressable>
           )}
         </View>
         <View>
-          {!goal && !form.saving && <Button title="Skip" onPress={form.skip} />}
+          {!goal && !form.saving && (
+            <Pressable onPress={form.skip} accessibilityRole="button" hitSlop={8}>
+              <Text style={[intakeStyles.cornerLink, onBackdropTextColor && { color: onBackdropTextColor }]}>
+                Skip
+              </Text>
+            </Pressable>
+          )}
         </View>
       </View>
       <View style={styles.goalScreen}>
@@ -64,7 +75,7 @@ export default function GoalIntake() {
         {form.saving ? (
           <ActivityIndicator />
         ) : (
-          <Button title="Save goal" onPress={form.save} />
+          <PrimaryButton title="Save goal" onPress={form.save} />
         )}
       </View>
       <StatusBar style="auto" />
@@ -81,5 +92,10 @@ const intakeStyles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
+  },
+  cornerLink: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.darkest,
   },
 });

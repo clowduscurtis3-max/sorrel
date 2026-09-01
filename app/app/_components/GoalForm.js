@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { View, Text, Button, TextInput, ActivityIndicator, Pressable, StyleSheet } from 'react-native';
+import { View, Text, TextInput, ActivityIndicator, Pressable, StyleSheet } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import {
   useAudioRecorder,
@@ -56,7 +56,7 @@ export function computeTargetDateFromTimeframe(goalTimeframe) {
 export function useGoalForm(initialGoal, { onSaved, onGoalProgressChanged } = {}) {
   const { refetchGoal } = useSessionContext();
 
-  const [goalType, setGoalType] = useState(initialGoal?.goal_type ?? 'house');
+  const [goalType, setGoalType] = useState(initialGoal?.goal_type ?? 'savings');
   const [goalAmount, setGoalAmount] = useState(
     initialGoal?.target_amount != null ? String(initialGoal.target_amount) : ''
   );
@@ -105,7 +105,7 @@ export function useGoalForm(initialGoal, { onSaved, onGoalProgressChanged } = {}
     if (initialGoal) {
       applyInitialGoal(initialGoal);
     } else {
-      setGoalType('house');
+      setGoalType('savings');
       setGoalAmount('');
       setGoalTimeframe('');
       setGoalNotes('');
@@ -168,14 +168,18 @@ export function useGoalForm(initialGoal, { onSaved, onGoalProgressChanged } = {}
     persist();
   }
 
-  // The spec's "no specific goal" default path - 'general' plus no
-  // target/timeframe, so budget generation later just optimizes for
-  // smarter spending instead of a concrete savings number.
+  // The "no specific goal" default path - no target/timeframe/notes, so
+  // budget generation later just optimizes for smarter spending instead
+  // of a concrete number (server/budget.js's describeGoal() detects this
+  // by the missing target_amount/notes, not by a dedicated type value -
+  // see server/index.js's GOAL_TYPES comment). goal_type is set to
+  // 'savings' here only because the column is non-nullable; it carries no
+  // meaning while target_amount/notes are both empty.
   function skip() {
     setGoalAmount('');
     setGoalTimeframe('');
     setGoalNotes('');
-    persist({ goal_type: 'general', target_amount: null, target_timeframe_months: null, notes: null });
+    persist({ goal_type: 'savings', target_amount: null, target_timeframe_months: null, notes: null });
   }
 
   return {
@@ -288,34 +292,57 @@ export function GoalFormFields({ form, textColor }) {
       <Text style={[styles.text, textColor && { color: textColor }]}>
         What are you hoping to achieve financially?
       </Text>
-      <View style={styles.goalTypeRow}>
-        {/* 'general' ("Just be smarter with money") is deliberately not
-            offered as its own type button here (removed per direct user
-            feedback, 2026-08-12) - "Skip" already produces the exact same
-            goal_type: 'general' with no target/timeframe, so it's not a
-            lost option, just one less redundant-sounding button. The value
-            itself stays in GOAL_TYPES (server/index.js's own GOAL_TYPES
-            still validates it, and Skip still posts it). */}
-        {GOAL_TYPES.filter((g) => g.value !== 'general').map((g) => (
-          <Button
-            key={g.value}
-            title={form.goalType === g.value ? `> ${g.label}` : g.label}
-            onPress={() => form.setGoalType(g.value)}
-          />
-        ))}
+      {/* Two-segment toggle (2026-09-01, replaced a 3-item Button row of
+          "Save for a house / Pay off debt / Something else") - per direct
+          user feedback, 'house' sitting next to 'other' as if they were
+          peer categories looked arbitrary, since 'house' was never
+          functionally distinct from 'other'. Debt vs. savings is the only
+          real fork (see server/index.js's GOAL_TYPES comment); what a
+          savings goal is actually for is the always-visible field below.
+          Unselected: hollow, outlined in `textColor` (matches whatever
+          this screen's other labels are using for the current backdrop -
+          cream at night, dark by day) so it stays legible either way, per
+          further direct user feedback. Selected: green fill, outline/text
+          fixed to colors.background regardless of backdrop, since that
+          combination reads fine against the green either way. */}
+      <View style={localStyles.typeToggleRow}>
+        {GOAL_TYPES.map((g) => {
+          const selected = form.goalType === g.value;
+          const outlineColor = textColor || colors.darkest;
+          return (
+            <Pressable
+              key={g.value}
+              style={[
+                localStyles.typeToggleOption,
+                !selected && { borderColor: outlineColor },
+                selected && localStyles.typeToggleOptionSelected,
+              ]}
+              onPress={() => form.setGoalType(g.value)}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: selected }}
+            >
+              <Text
+                style={[
+                  localStyles.typeToggleText,
+                  !selected && { color: outlineColor },
+                  selected && localStyles.typeToggleTextSelected,
+                ]}
+              >
+                {g.label}
+              </Text>
+            </Pressable>
+          );
+        })}
       </View>
 
-      {form.goalType === 'other' && (
-        <>
-          <Text style={[styles.smallText, textColor && { color: textColor }]}>Describe your goal</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="e.g. Save for a wedding"
-            value={form.goalNotes}
-            onChangeText={form.setGoalNotes}
-          />
-        </>
-      )}
+      <Text style={[styles.smallText, textColor && { color: textColor }]}>What's this for? (optional)</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="e.g. a house, a wedding, the Chase card"
+        placeholderTextColor={colors.placeholder}
+        value={form.goalNotes}
+        onChangeText={form.setGoalNotes}
+      />
 
       <Text style={[styles.smallText, textColor && { color: textColor }]}>Target amount (optional)</Text>
       <View style={localStyles.amountInputRow}>
@@ -350,14 +377,25 @@ export function GoalFormFields({ form, textColor }) {
       </View>
       {voiceError && <Text style={styles.errorText}>{voiceError}</Text>}
       {form.goalAmount && (
-        <Button title="Clear target amount" onPress={() => form.setGoalAmount('')} />
+        <Pressable onPress={() => form.setGoalAmount('')} accessibilityRole="button">
+          <Text style={localStyles.clearLink}>Clear target amount</Text>
+        </Pressable>
       )}
       <Text style={[styles.smallText, textColor && { color: textColor }]}>Target date (optional)</Text>
-      <Button
-        title={targetDate ? targetDate.toLocaleDateString() : 'Pick a target date'}
+      <Pressable
+        style={[localStyles.dateButton, { borderColor: textColor || colors.darkest }]}
         onPress={() => setShowDatePicker(true)}
-      />
-      {targetDate && <Button title="Clear target date" onPress={() => form.setGoalTimeframe('')} />}
+        accessibilityRole="button"
+      >
+        <Text style={[localStyles.dateButtonText, textColor && { color: textColor }]}>
+          {targetDate ? targetDate.toLocaleDateString() : 'Pick a target date'}
+        </Text>
+      </Pressable>
+      {targetDate && (
+        <Pressable onPress={() => form.setGoalTimeframe('')} accessibilityRole="button">
+          <Text style={localStyles.clearLink}>Clear target date</Text>
+        </Pressable>
+      )}
       {showDatePicker && (
         <DateTimePicker
           value={targetDate ?? tomorrow}
@@ -405,5 +443,51 @@ const localStyles = StyleSheet.create({
   },
   micButtonRecording: {
     backgroundColor: colors.error,
+  },
+  typeToggleRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  typeToggleOption: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+  },
+  typeToggleOptionSelected: {
+    backgroundColor: colors.primary,
+    borderColor: colors.background,
+  },
+  typeToggleText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  typeToggleTextSelected: {
+    color: colors.background,
+  },
+  // Matches (tabs)/goal.js's own inlineEditorLink ("Remove date"/"Clear
+  // amount") - same destructive-ish text-link treatment for the same kind
+  // of action, just duplicated locally rather than shared (this file's own
+  // established convention, see the header comment on this StyleSheet).
+  clearLink: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.error,
+    textDecorationLine: 'underline',
+  },
+  dateButton: {
+    borderWidth: 1.5,
+    borderRadius: 22,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dateButtonText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.darkest,
   },
 });

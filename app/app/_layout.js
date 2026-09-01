@@ -11,6 +11,7 @@ import { apiFetch, forceSignOut } from './_lib/api';
 import { SessionContext } from './_lib/session';
 import BiometricLock from './_components/BiometricLock';
 import MfaChallenge from './_components/MfaChallenge';
+import GoalCheckError from './_components/GoalCheckError';
 import { getBiometricLockEnabled } from './_lib/biometricPreference';
 import { getAuthenticatorAssuranceLevel } from './_lib/mfa';
 import {
@@ -140,6 +141,12 @@ export default function RootLayout() {
   // `requiredRoute`'s own comment for why these must never be conflated.
   const [goal, setGoal] = useState(undefined);
   const [checkingGoal, setCheckingGoal] = useState(true);
+  // Set only when the *initial* goal check fails outright (network error,
+  // backend down, a non-404 error status) - see fetchGoal()'s own comment
+  // for why this must never be conflated with `goal === null` (a real,
+  // backend-confirmed "no goal set"). Reset on every fresh sign-in and at
+  // the start of every initial-check attempt (including a manual retry).
+  const [goalCheckFailed, setGoalCheckFailed] = useState(false);
   const router = useRouter();
   const segments = useSegments();
 
@@ -210,23 +217,47 @@ export default function RootLayout() {
   //    already-known-good `goal` value alone, matching this app's
   //    existing "stale data stays visible until the next successful sync"
   //    pattern used elsewhere (e.g. Home's fetchTransactions).
+  //
+  // Real bug found on-device, 2026-09-01: even after the above fix, the
+  // *initial* check's catch block still set `goal = null` on ANY error,
+  // not just a real 404 - meaning "the backend was unreachable at cold
+  // launch" and "you've genuinely never set a goal" looked identical to
+  // `requiredRoute`, and an existing user got silently routed to
+  // /goal-intake with no indication anything had gone wrong (surfaced by
+  // an unrelated backend outage during testing). Worse than a wrong
+  // screen: if that user hadn't noticed and had tapped Skip or Save, it
+  // would have overwritten their real saved goal with empty values.
+  // `goal` is now never guessed at on a failure - it's left exactly as it
+  // was (`undefined` on a first attempt, so `ready` below stays false
+  // rather than resolving to the wrong route) - and `goalCheckFailed`
+  // drives a dedicated retry screen (GoalCheckError) instead.
+  // `initialGoalCheckedRef` is deliberately only flipped true on a
+  // *resolved* outcome (a real answer or a real 404) here, not in a
+  // `finally` - so a failed attempt leaves the next call (an automatic
+  // retry or the retry screen's own button) still treated as the same
+  // unresolved initial check, not mistaken for a background refetch of an
+  // already-known value.
   const initialGoalCheckedRef = useRef(false);
   async function fetchGoal() {
     const isInitialCheck = !initialGoalCheckedRef.current;
-    if (isInitialCheck) setCheckingGoal(true);
+    if (isInitialCheck) {
+      setCheckingGoal(true);
+      setGoalCheckFailed(false);
+    }
     try {
       const res = await apiFetch('/goal');
       if (res.status === 404) {
         setGoal(null);
+        initialGoalCheckedRef.current = true;
         return;
       }
       if (!res.ok) throw new Error('SERVER_ERROR');
       setGoal(await res.json());
+      initialGoalCheckedRef.current = true;
     } catch (err) {
       console.error(err);
-      if (isInitialCheck) setGoal(null);
+      if (isInitialCheck) setGoalCheckFailed(true);
     } finally {
-      initialGoalCheckedRef.current = true;
       if (isInitialCheck) setCheckingGoal(false);
     }
   }
@@ -243,6 +274,7 @@ export default function RootLayout() {
       initialGoalCheckedRef.current = false;
       setGoal(undefined);
       setCheckingGoal(false);
+      setGoalCheckFailed(false);
       // Phase 20: also reset the biometric-unlock gate on sign-out, so the
       // *next* sign-in gets its own fresh "cold app-open" check rather than
       // silently inheriting whatever the previous session's user already
@@ -934,7 +966,15 @@ export default function RootLayout() {
     // what actually reads that value now.
     <SafeAreaProvider>
       <GestureHandlerRootView style={{ flex: 1 }}>
-        {!tabsReady && !mfaLocked && !biometricLocked ? (
+        {goalCheckFailed ? (
+          // Sits ahead of the Splash check below on purpose: `ready`
+          // (and therefore `tabsReady`) can never become true while
+          // `goal` is stuck at `undefined` after a failed initial check
+          // (see fetchGoal()'s own comment) - without this branch the app
+          // would spin on Splash forever instead of giving the user a way
+          // to retry or bail out.
+          <GoalCheckError onRetry={fetchGoal} onSignOut={forceSignOut} />
+        ) : !tabsReady && !mfaLocked && !biometricLocked ? (
           <Splash />
         ) : mfaLocked ? (
           // forceSignOut, not the local `signOut` above - this screen renders

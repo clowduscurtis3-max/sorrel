@@ -38,15 +38,14 @@ export const CATEGORIES = [
   'Transfers',
 ];
 
-// Must match GOAL_TYPES in server/index.js. 'emergency_fund' removed
-// 2026-09-01 - promoted to its own independent Goal-tab tracker instead
-// of one of several primary goal types (see server/index.js's own
-// GOAL_TYPES comment for the full "why").
+// Must match GOAL_TYPES in server/index.js. Collapsed to just debt vs.
+// savings 2026-09-01 (was: 'house', 'debt', 'general', 'other') - see
+// server/index.js's own GOAL_TYPES comment for the full "why". What a
+// savings goal is *for* is always-visible freeform `notes` now, not a
+// type value.
 export const GOAL_TYPES = [
-  { value: 'house', label: 'Save for a house' },
-  { value: 'debt', label: 'Pay off debt' },
-  { value: 'general', label: 'Just be smarter with money' },
-  { value: 'other', label: 'Something else' },
+  { value: 'debt', label: 'Paying off debt' },
+  { value: 'savings', label: 'Saving toward something' },
 ];
 
 // Split from the old single-step createSessionFromUrl (still below, for
