@@ -48,16 +48,15 @@ function upcomingBillsTotal(subscriptionAudit, now = new Date()) {
   return Math.round(total * 100) / 100;
 }
 
-// Pure, deterministic - "months of expenses" is just saved ÷ essential
-// average, both real numbers already on goalProgress. Not a new financial
-// calculation, just display-side arithmetic over two values the backend
-// already computed (getGoalProgress's saved_amount, emergencyFund.js's
-// averageMonthlyEssential).
-function monthsOfExpenses(goalProgress) {
-  const essential = goalProgress?.essential_expense_estimate?.averageMonthlyEssential;
-  if (!essential || essential <= 0) return null;
-  return goalProgress.saved_amount / essential;
-}
+// monthsOfExpenses() and the "Emergency fund" card that used it were
+// removed 2026-09-01 - emergency fund is no longer a primary goal_type
+// (see server/index.js's GOAL_TYPES comment), so goalProgress.goal_type
+// can never be 'emergency_fund' again and goalProgress.essential_expense_
+// estimate is no longer attached server-side either. The underlying
+// insight (how many months of expenses does the tracked balance cover)
+// is still real and could be rebuilt against the new independent
+// emergency-fund tracker (GET /emergency-fund) as a follow-up - not done
+// in this pass, which was scoped to the Goal-tab redesign itself.
 
 // Phase 9 Step 4, moved to the Budget tab in Phase 13: the "can I afford
 // this?" entry point - one text field, one submit action, one structured
@@ -967,38 +966,6 @@ export default function AffordabilityQuery() {
                     {(goalProgress || subscriptionAudit) && (
                       <View style={{ gap: 8 }}>
                         <Text style={styles.cardTitle}>A few things to consider</Text>
-
-                        {goalProgress?.goal_type === 'emergency_fund' && (
-                          <View style={styles.card}>
-                            <Text style={styles.cardTitle}>Emergency fund</Text>
-                            {goalProgress.essential_expense_estimate?.insufficient_history ? (
-                              <Text style={styles.smallText}>
-                                Not enough spending history yet to estimate how many months of
-                                expenses you have covered.
-                              </Text>
-                            ) : goalProgress.essential_expense_estimate?.uncategorized_ratio_too_high ? (
-                              <Text style={styles.smallText}>
-                                Too much unreviewed spending right now to estimate this
-                                confidently.
-                              </Text>
-                            ) : goalProgress.essential_expense_estimate?.non_positive_essential_spend ? (
-                              <Text style={styles.smallText}>
-                                A recent refund or credit is throwing off this estimate right now -
-                                check back once your next few essential bills have posted.
-                              </Text>
-                            ) : monthsOfExpenses(goalProgress) != null ? (
-                              <Text style={styles.smallText}>
-                                You have ${formatDecimal(goalProgress.saved_amount)} set aside — about{' '}
-                                {monthsOfExpenses(goalProgress).toFixed(1)} months of essential
-                                expenses.
-                              </Text>
-                            ) : (
-                              <Text style={styles.smallText}>
-                                You have ${formatDecimal(goalProgress.saved_amount)} set aside.
-                              </Text>
-                            )}
-                          </View>
-                        )}
 
                         {goalProgress && (
                           <View style={styles.card}>

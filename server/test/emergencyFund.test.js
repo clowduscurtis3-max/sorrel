@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 
 const {
   estimateEssentialMonthlyExpenses,
+  computeEmergencyFundProgress,
   MIN_MONTHS_OF_HISTORY,
   MAX_UNCATEGORIZED_RATIO,
 } = require('../emergencyFund');
@@ -112,4 +113,71 @@ test('#8 exactly zero essential spend also refuses, not just negative', () => {
     NOW
   );
   assert.deepEqual(result, { non_positive_essential_spend: true, monthsOfHistory: 2 });
+});
+
+function account(overrides) {
+  return { id: 'acc-1', available_balance: 1000, current_balance: 1000, ...overrides };
+}
+
+test('computeEmergencyFundProgress returns { enabled: false } when disabled, regardless of config', () => {
+  assert.deepEqual(computeEmergencyFundProgress({ config: { enabled: false }, accounts: [] }), {
+    enabled: false,
+  });
+  assert.deepEqual(computeEmergencyFundProgress({ config: null, accounts: [account()] }), {
+    enabled: false,
+  });
+});
+
+test('computeEmergencyFundProgress sums only the selected accounts, preferring available_balance', () => {
+  const accounts = [
+    account({ id: 'acc-1', available_balance: 1000, current_balance: 1100 }),
+    account({ id: 'acc-2', available_balance: 500, current_balance: 500 }),
+    account({ id: 'acc-3', available_balance: 9999, current_balance: 9999 }), // not selected
+  ];
+  const result = computeEmergencyFundProgress({
+    config: { enabled: true, target_amount: 3000, account_ids: ['acc-1', 'acc-2'] },
+    accounts,
+  });
+  assert.equal(result.current_amount, 1500);
+  assert.equal(result.percent_complete, 50);
+  assert.deepEqual(result.missing_account_ids, []);
+});
+
+test('computeEmergencyFundProgress falls back to current_balance when available_balance is null', () => {
+  const accounts = [account({ id: 'acc-1', available_balance: null, current_balance: 250 })];
+  const result = computeEmergencyFundProgress({
+    config: { enabled: true, target_amount: 500, account_ids: ['acc-1'] },
+    accounts,
+  });
+  assert.equal(result.current_amount, 250);
+});
+
+test('computeEmergencyFundProgress reports a selected account that no longer exists, without crashing or under-counting silently', () => {
+  const accounts = [account({ id: 'acc-1', available_balance: 200, current_balance: 200 })];
+  const result = computeEmergencyFundProgress({
+    config: { enabled: true, target_amount: 1000, account_ids: ['acc-1', 'acc-gone'] },
+    accounts,
+  });
+  assert.equal(result.current_amount, 200);
+  assert.deepEqual(result.missing_account_ids, ['acc-gone']);
+});
+
+test('computeEmergencyFundProgress returns a null percent (not a divide-by-zero) when no target is set', () => {
+  const accounts = [account({ id: 'acc-1' })];
+  const result = computeEmergencyFundProgress({
+    config: { enabled: true, target_amount: null, account_ids: ['acc-1'] },
+    accounts,
+  });
+  assert.equal(result.target_amount, null);
+  assert.equal(result.percent_complete, null);
+  assert.equal(result.current_amount, 1000);
+});
+
+test('computeEmergencyFundProgress caps percent_complete at 100 once the target is exceeded', () => {
+  const accounts = [account({ id: 'acc-1', available_balance: 5000, current_balance: 5000 })];
+  const result = computeEmergencyFundProgress({
+    config: { enabled: true, target_amount: 1000, account_ids: ['acc-1'] },
+    accounts,
+  });
+  assert.equal(result.percent_complete, 100);
 });

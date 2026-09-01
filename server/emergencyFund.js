@@ -122,9 +122,121 @@ async function getEssentialExpenseEstimate(userId) {
   return estimateEssentialMonthlyExpenses(transactions || [], now);
 }
 
+// Emergency fund redesign (2026-09-01) - promoted out of the single-goal
+// model into its own independent, always-available tracker tied to real
+// account(s), per direct user request. Everything below is new; the
+// estimate function above is unchanged and still reused as the
+// suggested-target starting point.
+
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}
+
+// Pure, no I/O - same isolation style as every other compute function in
+// this app. Sums the current balance (available_balance ?? current_balance,
+// same fallback Home's own bank-total math already uses) of whichever
+// selected accounts still exist - a selected account that's since been
+// unlinked/removed is silently excluded from the sum (not an error, not
+// treated as $0 "missing" money) but its id is still reported back via
+// `missing_account_ids` so the UI can tell the user honestly rather than
+// just quietly under-counting.
+function computeEmergencyFundProgress({ config, accounts }) {
+  if (!config || !config.enabled) {
+    return { enabled: false };
+  }
+
+  const accountsById = new Map((accounts || []).map((a) => [a.id, a]));
+  const selectedIds = config.account_ids || [];
+  const missingAccountIds = selectedIds.filter((id) => !accountsById.has(id));
+  const currentAmount = round2(
+    selectedIds.reduce((sum, id) => {
+      const a = accountsById.get(id);
+      if (!a) return sum;
+      const balance = a.available_balance ?? a.current_balance;
+      return sum + (Number.isFinite(balance) ? balance : 0);
+    }, 0)
+  );
+
+  const hasTarget = Number.isFinite(config.target_amount) && config.target_amount > 0;
+  const percentComplete = hasTarget
+    ? round2(Math.min(100, Math.max(0, (currentAmount / config.target_amount) * 100)))
+    : null;
+
+  return {
+    enabled: true,
+    target_amount: hasTarget ? config.target_amount : null,
+    current_amount: currentAmount,
+    percent_complete: percentComplete,
+    account_ids: selectedIds,
+    missing_account_ids: missingAccountIds,
+  };
+}
+
+// DB-touching wrapper - all I/O lives here, no business logic. Returns the
+// config, its computed progress, and the suggested-target estimate
+// together (one round trip for the client, same "one combined view"
+// pattern getSubscriptionAudit's own glance field already uses) - the
+// estimate is cheap to compute (same 90-day transaction query every
+// other budget-adjacent read already does) and is what the "suggest a
+// target" buttons need regardless of whether the tracker is enabled yet.
+async function getEmergencyFundStatus(userId) {
+  const [{ data: config, error: configError }, { data: accounts, error: accountsError }, estimate] =
+    await Promise.all([
+      supabaseAdmin.from('emergency_funds').select('enabled, target_amount, account_ids').eq('user_id', userId).maybeSingle(),
+      supabaseAdmin.from('accounts').select('id, available_balance, current_balance').eq('user_id', userId),
+      getEssentialExpenseEstimate(userId),
+    ]);
+  if (configError) throw configError;
+  if (accountsError) throw accountsError;
+
+  const resolvedConfig = config || { enabled: false, target_amount: null, account_ids: [] };
+  return {
+    ...computeEmergencyFundProgress({ config: resolvedConfig, accounts: accounts || [] }),
+    essential_expense_estimate: estimate,
+  };
+}
+
+// Validates account_ids actually belong to this user before persisting -
+// a real security boundary, not just data hygiene: without this check, a
+// malicious/buggy client could reference another user's account row id
+// and this table would silently accept it, since account_ids is a plain
+// array column with no DB-level foreign-key/ownership constraint of its
+// own (a uuid[] can't carry a per-element FK in Postgres).
+async function setEmergencyFundConfig(userId, { enabled, targetAmount, accountIds }) {
+  const ids = accountIds || [];
+  if (ids.length > 0) {
+    const { data: owned, error } = await supabaseAdmin
+      .from('accounts')
+      .select('id')
+      .eq('user_id', userId)
+      .in('id', ids);
+    if (error) throw error;
+    const ownedIds = new Set((owned || []).map((a) => a.id));
+    const notOwned = ids.filter((id) => !ownedIds.has(id));
+    if (notOwned.length > 0) {
+      throw new Error('One or more selected accounts do not belong to this user');
+    }
+  }
+
+  const { error } = await supabaseAdmin.from('emergency_funds').upsert(
+    {
+      user_id: userId,
+      enabled: !!enabled,
+      target_amount: Number.isFinite(targetAmount) && targetAmount > 0 ? targetAmount : null,
+      account_ids: ids,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'user_id' }
+  );
+  if (error) throw error;
+}
+
 module.exports = {
   estimateEssentialMonthlyExpenses,
   getEssentialExpenseEstimate,
+  computeEmergencyFundProgress,
+  getEmergencyFundStatus,
+  setEmergencyFundConfig,
   MIN_MONTHS_OF_HISTORY,
   MAX_UNCATEGORIZED_RATIO,
 };

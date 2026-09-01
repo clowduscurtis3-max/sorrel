@@ -1,5 +1,15 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, TextInput, ActivityIndicator, Alert, AppState, StyleSheet } from 'react-native';
+import {
+  View,
+  Text,
+  Pressable,
+  TextInput,
+  ActivityIndicator,
+  Alert,
+  AppState,
+  StyleSheet,
+  Switch,
+} from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { MaterialIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -37,17 +47,18 @@ import PrimaryButton from '../_components/PrimaryButton';
 // progress." just below it in the existing Primary Goal card) - never a
 // financial figure, so it's fine as static per-type text rather than
 // something that needs to come from goal data.
+// 'emergency_fund' removed from both maps 2026-09-01 - no longer a
+// selectable primary goal_type, see server/index.js's own GOAL_TYPES
+// comment for why (promoted to its own independent tracker instead).
 const GOAL_TYPE_ICON = {
   house: 'home',
   debt: 'money-off',
-  emergency_fund: 'shield',
   general: 'track-changes',
   other: 'flag',
 };
 const GOAL_TYPE_TAGLINE = {
   house: 'A home of your own, on your terms.',
   debt: 'One step closer to being debt-free.',
-  emergency_fund: 'A cushion for whatever comes next.',
   general: 'Building smarter money habits.',
 };
 
@@ -253,7 +264,7 @@ function computeGoalAdvisorTip({ goalProgress, subscriptionAudit, budgetStatus }
 // place.
 export default function Goal() {
   const { goal, refetchGoal } = useSessionContext();
-  const { goalProgress, refetchGoalProgress, subscriptionAudit, budgetStatus } = useAppData();
+  const { goalProgress, refetchGoalProgress, subscriptionAudit, budgetStatus, accounts } = useAppData();
   const [editing, setEditing] = useState(false);
   const form = useGoalForm(goal, {
     onSaved: () => {
@@ -397,49 +408,135 @@ export default function Goal() {
     );
   }
 
-  // Phase 29 (Emergency Fund surfacing, 2026-08-25): "set target" writes
-  // through the same POST /goal every other save already uses (an upsert
-  // needing the full goal object, not a partial patch) - goal_type/
-  // target_timeframe_months/notes are carried over unchanged from the
-  // already-persisted `goal`, only target_amount changes. No new endpoint.
-  const [settingEmergencyTarget, setSettingEmergencyTarget] = useState(false);
-  const [emergencyTargetError, setEmergencyTargetError] = useState(null);
+  // Emergency fund (2026-09-01, redesigned per direct user request): its
+  // own independent, always-available tracker (GET/POST /emergency-fund,
+  // server/emergencyFund.js) rather than one of several primary
+  // goal_types competing for the app's single goal slot - see that
+  // server module's own header for the full "why". Fetched locally (not
+  // via AppDataProvider's shared context) since only this screen needs
+  // it, same reasoning showMilestones/calculatorResult already fetch
+  // locally rather than being globally shared.
+  const [emergencyFundStatus, setEmergencyFundStatus] = useState(null);
+  const [emergencyFundError, setEmergencyFundError] = useState(null);
+  const [efEditing, setEfEditing] = useState(false);
+  const [efSelectedAccountIds, setEfSelectedAccountIds] = useState([]);
+  const [efTargetText, setEfTargetText] = useState('');
+  // Tracks whether the current efTargetText came from tapping a suggested
+  // 3mo/6mo amount, not typed by hand - cleared the moment the user edits
+  // the field afterward. Only used to decide whether a successful save
+  // logs a real recommendation-accepted event (Phase 33) - typing your
+  // own number isn't "accepting a suggestion," even if it happens to
+  // match one, so this tracks the actual interaction, not just the
+  // resulting value.
+  const [efUsedSuggestedAmount, setEfUsedSuggestedAmount] = useState(null);
+  const [savingEmergencyFund, setSavingEmergencyFund] = useState(false);
 
-  async function applyEmergencyFundTarget(targetAmount) {
-    setSettingEmergencyTarget(true);
-    setEmergencyTargetError(null);
+  async function fetchEmergencyFundStatus() {
     try {
-      const res = await apiFetch('/goal', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          goal_type: 'emergency_fund',
-          target_amount: targetAmount,
-          target_timeframe_months: goal?.target_timeframe_months ?? null,
-          notes: goal?.notes ?? null,
-        }),
-      });
+      const res = await apiFetch('/emergency-fund');
       if (!res.ok) throw new Error('SERVER_ERROR');
-      logRecommendationEvent('emergency_fund_target', 'accepted', { target_amount: targetAmount });
-      await refetchGoal();
-      await refetchGoalProgress();
-      resetGoalDependentTools();
+      const { status } = await res.json();
+      setEmergencyFundStatus(status);
     } catch (err) {
       console.error(err);
-      setEmergencyTargetError(apiErrorMessage(err));
-    } finally {
-      setSettingEmergencyTarget(false);
     }
   }
 
-  // Switches the Primary Goal to Emergency Fund via the existing edit form
-  // (form.setGoalType is already exposed by useGoalForm) rather than a
-  // second goal-creation UI - per Phase 29's own resolved open question,
-  // this schema only supports one goal at a time, so this is a real
-  // overwrite of whatever goal was previously set, not a parallel one.
-  function switchToEmergencyFundGoal() {
-    form.setGoalType('emergency_fund');
-    setEditing(true);
+  useEffect(() => {
+    fetchEmergencyFundStatus();
+  }, []);
+
+  // Opens the settings panel seeded from whatever's already saved (or a
+  // sensible empty state for first-time setup) - never starts from a
+  // blank slate if the user is just coming back to adjust an existing
+  // configuration.
+  function openEmergencyFundEditor() {
+    setEfSelectedAccountIds(emergencyFundStatus?.account_ids || []);
+    setEfTargetText(
+      emergencyFundStatus?.target_amount ? String(emergencyFundStatus.target_amount) : ''
+    );
+    setEfUsedSuggestedAmount(null);
+    setEmergencyFundError(null);
+    setEfEditing(true);
+  }
+
+  function toggleEfAccount(accountId) {
+    setEfUsedSuggestedAmount(null);
+    setEfSelectedAccountIds((prev) =>
+      prev.includes(accountId) ? prev.filter((id) => id !== accountId) : [...prev, accountId]
+    );
+  }
+
+  function applySuggestedTarget(amount) {
+    setEfTargetText(String(amount));
+    setEfUsedSuggestedAmount(amount);
+  }
+
+  async function saveEmergencyFundConfig({ enabled, targetAmount, accountIds }) {
+    setSavingEmergencyFund(true);
+    setEmergencyFundError(null);
+    try {
+      const res = await apiFetch('/emergency-fund', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled, target_amount: targetAmount, account_ids: accountIds }),
+      });
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const { status } = await res.json();
+      setEmergencyFundStatus(status);
+      return true;
+    } catch (err) {
+      console.error(err);
+      setEmergencyFundError(apiErrorMessage(err));
+      return false;
+    } finally {
+      setSavingEmergencyFund(false);
+    }
+  }
+
+  // Quick on/off from the card header - preserves whatever's already
+  // configured exactly as-is (a pause, not a reset), so turning it back
+  // on later doesn't need re-entering accounts/target. Turning ON with
+  // nothing meaningfully configured yet opens the setup editor instead,
+  // since there's nothing real to enable.
+  function handleEmergencyFundToggle(nextEnabled) {
+    const hasRealConfig =
+      (emergencyFundStatus?.account_ids?.length || 0) > 0 && emergencyFundStatus?.target_amount;
+    if (nextEnabled && !hasRealConfig) {
+      openEmergencyFundEditor();
+      return;
+    }
+    saveEmergencyFundConfig({
+      enabled: nextEnabled,
+      targetAmount: emergencyFundStatus?.target_amount ?? null,
+      accountIds: emergencyFundStatus?.account_ids ?? [],
+    });
+  }
+
+  async function submitEmergencyFundEditor() {
+    const targetAmount = parseDollarAmount(efTargetText);
+    if (efSelectedAccountIds.length === 0) {
+      setEmergencyFundError('Choose at least one account.');
+      return;
+    }
+    if (!targetAmount) {
+      setEmergencyFundError('Enter a valid target amount, like $10,000.');
+      return;
+    }
+    const ok = await saveEmergencyFundConfig({
+      enabled: true,
+      targetAmount,
+      accountIds: efSelectedAccountIds,
+    });
+    if (ok) {
+      // Only a real "accepted this suggestion" signal when the saved
+      // amount is still exactly the one they tapped, unedited since -
+      // see efUsedSuggestedAmount's own comment above.
+      if (efUsedSuggestedAmount === targetAmount) {
+        logRecommendationEvent('emergency_fund_target', 'accepted', { target_amount: targetAmount });
+      }
+      setEfEditing(false);
+    }
   }
 
   // Phase 27 (Goal Calculator, 2026-08-25): "what date would this
@@ -1447,93 +1544,192 @@ export default function Goal() {
                 );
               })()}
 
-            {goalProgress && (goalProgress.goal_type === 'emergency_fund' ? (
-              (() => {
-                const estimate = goalProgress.essential_expense_estimate;
-                const refusalMessage = estimate ? emergencyEstimateRefusalMessage(estimate) : null;
-                return (
-                  <View style={[styles.card, goalStyles.cardMargin]}>
+            {(() => {
+              const estimate = emergencyFundStatus?.essential_expense_estimate;
+              const refusalMessage = estimate ? emergencyEstimateRefusalMessage(estimate) : null;
+              const depositoryAccounts = (accounts?.accounts || []).filter(
+                (a) => a.type === 'depository'
+              );
+              const isConfigured =
+                emergencyFundStatus?.enabled &&
+                emergencyFundStatus?.target_amount &&
+                (emergencyFundStatus?.account_ids?.length || 0) > 0;
+
+              return (
+                <View style={[styles.card, goalStyles.cardMargin]}>
+                  <View style={[goalStyles.projectionsHeaderRow, goalStyles.spaceBetweenRow]}>
                     <View style={goalStyles.projectionsHeaderRow}>
                       <MaterialIcons name="shield" size={18} color={colors.dark} />
-                      <Text style={goalStyles.cardTitle}>Emergency Fund Estimate</Text>
+                      <Text style={goalStyles.cardTitle}>Emergency Fund</Text>
                     </View>
-                    {!estimate ? (
-                      <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
-                        Loading estimate…
-                      </Text>
-                    ) : refusalMessage ? (
-                      <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
-                        {refusalMessage}
-                      </Text>
-                    ) : (
-                      <>
-                        <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
-                          Based on ${formatWhole(estimate.averageMonthlyEssential)}/month in
-                          essential spending ({estimate.monthsOfHistory} months of history), a
-                          typical emergency fund covers 3-6 months of essential expenses.
-                        </Text>
-                        {!goalProgress.has_target && (
-                          <>
-                            {emergencyTargetError && (
-                              <Text style={styles.errorText}>{emergencyTargetError}</Text>
-                            )}
-                            {settingEmergencyTarget ? (
-                              <ActivityIndicator style={goalStyles.estimateSpacing} />
-                            ) : (
-                              <View style={goalStyles.estimateButtonRow}>
-                                <Pressable
-                                  style={goalStyles.estimateOutlineButton}
-                                  onPress={() =>
-                                    applyEmergencyFundTarget(
-                                      Math.round(estimate.averageMonthlyEssential * 3)
-                                    )
-                                  }
-                                  accessibilityRole="button"
-                                >
-                                  <Text style={goalStyles.estimateOutlineButtonText}>
-                                    3 MONTHS (${Math.round(estimate.averageMonthlyEssential * 3)})
-                                  </Text>
-                                </Pressable>
-                                <Pressable
-                                  style={goalStyles.estimateOutlineButton}
-                                  onPress={() =>
-                                    applyEmergencyFundTarget(
-                                      Math.round(estimate.averageMonthlyEssential * 6)
-                                    )
-                                  }
-                                  accessibilityRole="button"
-                                >
-                                  <Text style={goalStyles.estimateOutlineButtonText}>
-                                    6 MONTHS (${Math.round(estimate.averageMonthlyEssential * 6)})
-                                  </Text>
-                                </Pressable>
-                              </View>
-                            )}
-                          </>
-                        )}
-                      </>
+                    {emergencyFundStatus && (
+                      <Switch
+                        value={!!emergencyFundStatus.enabled}
+                        onValueChange={handleEmergencyFundToggle}
+                        disabled={savingEmergencyFund}
+                        trackColor={{ false: colors.sage, true: colors.primary }}
+                      />
                     )}
                   </View>
-                );
-              })()
-            ) : (
-              <View style={[styles.card, goalStyles.cardMargin]}>
-                <Text style={goalStyles.cardTitle}>Want to build an emergency fund instead?</Text>
-                <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
-                  This replaces your current goal - this app tracks one goal at a time.
-                </Text>
-                <View style={goalStyles.estimateSpacing}>
-                  <Pressable
-                    style={goalStyles.estimateOutlineButton}
-                    onPress={switchToEmergencyFundGoal}
-                    accessibilityRole="button"
-                  >
-                    <MaterialIcons name="shield" size={16} color={colors.primary} />
-                    <Text style={goalStyles.estimateOutlineButtonText}>SWITCH TO EMERGENCY FUND</Text>
-                  </Pressable>
+
+                  {!emergencyFundStatus ? (
+                    <Text style={[styles.smallText, goalStyles.estimateSpacing]}>Loading…</Text>
+                  ) : efEditing ? (
+                    <>
+                      <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
+                        Choose which account(s) this tracks and a target amount - Sorrel will
+                        track the real balance against it, the same way a budget category does.
+                      </Text>
+
+                      {depositoryAccounts.length === 0 ? (
+                        <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
+                          No linked bank/savings accounts found yet.
+                        </Text>
+                      ) : (
+                        <View style={goalStyles.estimateSpacing}>
+                          {depositoryAccounts.map((a) => {
+                            const selected = efSelectedAccountIds.includes(a.id);
+                            const balance = a.available_balance ?? a.current_balance;
+                            return (
+                              <Pressable
+                                key={a.id}
+                                style={goalStyles.efAccountRow}
+                                onPress={() => toggleEfAccount(a.id)}
+                                accessibilityRole="checkbox"
+                                accessibilityState={{ checked: selected }}
+                              >
+                                <MaterialIcons
+                                  name={selected ? 'check-box' : 'check-box-outline-blank'}
+                                  size={20}
+                                  color={selected ? colors.primary : colors.muted}
+                                />
+                                <View style={goalStyles.efAccountRowText}>
+                                  <Text style={goalStyles.settingsRowLabel}>
+                                    {a.name}
+                                    {a.mask ? ` ····${a.mask}` : ''}
+                                  </Text>
+                                  <Text style={styles.smallText}>
+                                    {a.institution_name ? `${a.institution_name} · ` : ''}
+                                    {balance != null ? `$${formatDecimal(balance)}` : '—'}
+                                  </Text>
+                                </View>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      )}
+
+                      {estimate && !refusalMessage && (
+                        <>
+                          <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
+                            Based on ${formatWhole(estimate.averageMonthlyEssential)}/month in
+                            essential spending ({estimate.monthsOfHistory} months of history), a
+                            typical emergency fund covers 3-6 months of essential expenses.
+                          </Text>
+                          <View style={goalStyles.estimateButtonRow}>
+                            <Pressable
+                              style={goalStyles.estimateOutlineButton}
+                              onPress={() =>
+                                applySuggestedTarget(Math.round(estimate.averageMonthlyEssential * 3))
+                              }
+                              accessibilityRole="button"
+                            >
+                              <Text style={goalStyles.estimateOutlineButtonText}>
+                                3 MONTHS (${Math.round(estimate.averageMonthlyEssential * 3)})
+                              </Text>
+                            </Pressable>
+                            <Pressable
+                              style={goalStyles.estimateOutlineButton}
+                              onPress={() =>
+                                applySuggestedTarget(Math.round(estimate.averageMonthlyEssential * 6))
+                              }
+                              accessibilityRole="button"
+                            >
+                              <Text style={goalStyles.estimateOutlineButtonText}>
+                                6 MONTHS (${Math.round(estimate.averageMonthlyEssential * 6)})
+                              </Text>
+                            </Pressable>
+                          </View>
+                        </>
+                      )}
+
+                      <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
+                        Target amount
+                      </Text>
+                      <TextInput
+                        style={styles.input}
+                        value={efTargetText}
+                        onChangeText={(text) => {
+                          setEfTargetText(text);
+                          setEfUsedSuggestedAmount(null);
+                        }}
+                        placeholder="e.g. $10,000"
+                        placeholderTextColor={colors.placeholder}
+                        keyboardType="numeric"
+                      />
+
+                      {emergencyFundError && (
+                        <Text style={styles.errorText}>{emergencyFundError}</Text>
+                      )}
+
+                      {savingEmergencyFund ? (
+                        <ActivityIndicator style={goalStyles.estimateSpacing} />
+                      ) : (
+                        <View style={goalStyles.estimateButtonRow}>
+                          <PrimaryButton title="SAVE" onPress={submitEmergencyFundEditor} />
+                          <Pressable
+                            onPress={() => setEfEditing(false)}
+                            accessibilityRole="button"
+                          >
+                            <Text style={goalStyles.textLink}>Cancel</Text>
+                          </Pressable>
+                        </View>
+                      )}
+                    </>
+                  ) : isConfigured ? (
+                    <>
+                      <View style={goalStyles.progressTrack}>
+                        <View
+                          style={[
+                            goalStyles.progressFill,
+                            {
+                              width: `${Math.min(
+                                100,
+                                Math.max(0, emergencyFundStatus.percent_complete || 0)
+                              )}%`,
+                            },
+                          ]}
+                        />
+                      </View>
+                      <Text style={styles.smallText}>
+                        ${formatDecimal(emergencyFundStatus.current_amount)} of $
+                        {formatDecimal(emergencyFundStatus.target_amount)} —{' '}
+                        {Math.round(emergencyFundStatus.percent_complete)}%
+                      </Text>
+                      {emergencyFundStatus.missing_account_ids?.length > 0 && (
+                        <Text style={[styles.errorText, goalStyles.estimateSpacing]}>
+                          One or more tracked accounts are no longer linked - edit below to
+                          update which accounts count toward this.
+                        </Text>
+                      )}
+                      <Pressable
+                        onPress={openEmergencyFundEditor}
+                        accessibilityRole="button"
+                        style={goalStyles.estimateSpacing}
+                      >
+                        <Text style={goalStyles.textLink}>Edit accounts or target</Text>
+                      </Pressable>
+                    </>
+                  ) : (
+                    <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
+                      Turn this on to track a dedicated safety-net balance across one or more of
+                      your accounts, the same way a budget category is tracked - separate from
+                      your primary goal above, not competing with it.
+                    </Text>
+                  )}
                 </View>
-              </View>
-            ))}
+              );
+            })()}
 
             <View style={[styles.card, goalStyles.cardMargin]}>
               <View style={goalStyles.projectionsHeaderRow}>
@@ -2025,6 +2221,30 @@ const goalStyles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     marginBottom: 4,
+  },
+  // Emergency fund card (2026-09-01) - a plain header row plus a toggle
+  // switch at the far end, reused wherever a card header needs a control
+  // on the opposite side rather than just the icon+title.
+  spaceBetweenRow: {
+    justifyContent: 'space-between',
+  },
+  efAccountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 6,
+  },
+  efAccountRowText: {
+    flex: 1,
+  },
+  // Plain secondary link text - Cancel/Edit-style actions that aren't
+  // destructive (inlineEditorLink above is styled for "Remove date"-style
+  // destructive actions specifically, not a fit here).
+  textLink: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.dark,
+    textDecorationLine: 'underline',
   },
   projectionsRow: {
     flexDirection: 'row',

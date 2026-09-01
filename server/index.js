@@ -44,7 +44,7 @@ const { refreshAccountBalances, getAccountsSummary } = require('./accounts');
 const { generateNetWorthSnapshot, getNetWorthSummary } = require('./netWorth');
 const { recomputeNotificationEvents } = require('./notificationEvents');
 const { recomputeSubscriptionAuditEvents } = require('./subscriptionAuditEvents');
-const { getEssentialExpenseEstimate } = require('./emergencyFund');
+const { getEmergencyFundStatus, setEmergencyFundConfig } = require('./emergencyFund');
 const { getRoundUpEstimate } = require('./roundUps');
 const { deliverPendingEventsForUser, runNotificationDelivery } = require('./pushDelivery');
 const { registerDevice, unregisterDevice } = require('./notifications');
@@ -598,10 +598,19 @@ app.get('/plaid-items', requireUser, async (req, res) => {
 // freeform goal typed into `notes`. Kept as a plain string column (not a DB
 // enum) since Step 4's budget prompt just reads it as context for Claude,
 // not as a value anything branches on in code.
+//
+// 'emergency_fund' removed 2026-09-01 (was: 'house', 'debt',
+// 'emergency_fund', 'general', 'other') - promoted to its own
+// independent, always-on tracker (emergency_funds table,
+// GET/POST /emergency-fund) instead of competing with the user's actual
+// primary goal for this one slot, per direct user request. A user whose
+// goal_type happens to still be the old 'emergency_fund' value (none as
+// of this change, confirmed against the real account) simply can't set
+// it again going forward - existing rows are left as historical data,
+// not migrated, since GET /goal doesn't validate goal_type on read.
 const GOAL_TYPES = [
   'house',
   'debt',
-  'emergency_fund',
   'general',
   'other',
 ];
@@ -674,22 +683,53 @@ app.get('/goal/progress', requireUser, async (req, res) => {
     const progress = await getGoalProgress(req.userId);
     if (!progress) return res.status(404).json({ error: 'No goal set' });
 
-    // Only computed for an emergency-fund goal - every other goal_type
-    // pays zero extra cost for this. Best-effort: an estimate failure
-    // shouldn't take down goal progress itself, which is otherwise
-    // unrelated data the rest of the app depends on.
-    if (progress.goal_type === 'emergency_fund') {
-      try {
-        progress.essential_expense_estimate = await getEssentialExpenseEstimate(req.userId);
-      } catch (err) {
-        console.error(err);
-      }
-    }
-
     res.json({ progress });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load goal progress' });
+  }
+});
+
+// Emergency fund (2026-09-01) - its own independent, always-available
+// tracker, deliberately separate from /goal above (see
+// server/emergencyFund.js's own header for the full "why"). Returns the
+// config, its computed progress, and the suggested-target estimate
+// together in one round trip.
+app.get('/emergency-fund', requireUser, async (req, res) => {
+  try {
+    const status = await getEmergencyFundStatus(req.userId);
+    res.json({ status });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load emergency fund status' });
+  }
+});
+
+app.post('/emergency-fund', requireUser, async (req, res) => {
+  const { enabled, target_amount, account_ids } = req.body || {};
+  if (
+    target_amount != null &&
+    (typeof target_amount !== 'number' || !Number.isFinite(target_amount) || target_amount < 0)
+  ) {
+    return res.status(400).json({ error: 'target_amount must be a non-negative number' });
+  }
+  if (account_ids != null && !Array.isArray(account_ids)) {
+    return res.status(400).json({ error: 'account_ids must be an array' });
+  }
+  try {
+    await setEmergencyFundConfig(req.userId, {
+      enabled,
+      targetAmount: target_amount,
+      accountIds: account_ids,
+    });
+    const status = await getEmergencyFundStatus(req.userId);
+    res.json({ status });
+  } catch (err) {
+    if (err.message && err.message.includes('do not belong to this user')) {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save emergency fund settings' });
   }
 });
 
@@ -918,20 +958,6 @@ app.post('/admin/deliver-notifications', requireUser, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message || 'Failed to deliver notifications' });
-  }
-});
-
-// Manual-verification-only route for the emergency-fund investigation's
-// foundation step (see CLAUDE.md) - not called from the app. Same purpose
-// as the other /admin/* routes: lets the estimate be curl'd and eyeballed
-// against real transaction history without any UI built yet.
-app.post('/admin/estimate-essential-expenses', requireUser, async (req, res) => {
-  try {
-    const result = await getEssentialExpenseEstimate(req.userId);
-    res.json(result);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message || 'Failed to estimate essential expenses' });
   }
 });
 

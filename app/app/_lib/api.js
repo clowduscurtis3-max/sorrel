@@ -38,11 +38,13 @@ export const CATEGORIES = [
   'Transfers',
 ];
 
-// Must match GOAL_TYPES in server/index.js.
+// Must match GOAL_TYPES in server/index.js. 'emergency_fund' removed
+// 2026-09-01 - promoted to its own independent Goal-tab tracker instead
+// of one of several primary goal types (see server/index.js's own
+// GOAL_TYPES comment for the full "why").
 export const GOAL_TYPES = [
   { value: 'house', label: 'Save for a house' },
   { value: 'debt', label: 'Pay off debt' },
-  { value: 'emergency_fund', label: 'Build an emergency fund' },
   { value: 'general', label: 'Just be smarter with money' },
   { value: 'other', label: 'Something else' },
 ];
