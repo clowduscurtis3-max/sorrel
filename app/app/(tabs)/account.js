@@ -11,6 +11,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useFocusEffect } from '@react-navigation/native';
 import { createPlaidLinkSession } from 'react-native-plaid-link-sdk';
@@ -59,6 +60,7 @@ function hasRealPlaidError(error) {
 }
 
 export default function Account() {
+  const router = useRouter();
   const { session } = useSessionContext();
   const { signOut, refetchAccounts, notifyBankRelinked, plaidItems, refetchPlaidItems } = useAppData();
 
@@ -486,6 +488,25 @@ export default function Account() {
           </Text>
         </View>
 
+        {/* Phase 38 Step 1: the Settings tab's entry point - a nested
+            menu (settings/index.js) lives behind here, not a flat page.
+            Placed first so it's easy to find without pushing the rest of
+            this screen's existing content further down. */}
+        <Pressable
+          style={[styles.card, accountStyles.cardMargin, accountStyles.settingsRow]}
+          onPress={() => router.push('/settings')}
+          accessibilityRole="button"
+          accessibilityLabel="Settings"
+        >
+          <View style={accountStyles.iconRow}>
+            <View style={accountStyles.iconCircle}>
+              <MaterialIcons name="settings" size={18} color={colors.dark} />
+            </View>
+            <Text style={accountStyles.iconRowText}>Settings</Text>
+          </View>
+          <MaterialIcons name="chevron-right" size={20} color={colors.muted} />
+        </Pressable>
+
         {error && (
           <View style={[styles.card, accountStyles.cardMargin]}>
             <Text style={styles.errorText}>{error}</Text>
@@ -861,6 +882,11 @@ const accountStyles = StyleSheet.create({
   cardMargin: {
     marginHorizontal: 16,
     marginBottom: 12,
+  },
+  settingsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   bankRow: {
     paddingVertical: 12,

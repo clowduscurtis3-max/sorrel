@@ -36,6 +36,7 @@ const {
 } = require('./budget');
 const { getBudgetHistory } = require('./budgetHistory');
 const { getHomeChanges } = require('./homeChanges');
+const { SETTINGS_SECTIONS, getSettings, patchSettings } = require('./settings');
 const { getMonthlyReview } = require('./monthlyReview');
 const { detectRecurringTransactions } = require('./recurring');
 const { recomputeOverspendAlerts } = require('./alerts');
@@ -1483,6 +1484,42 @@ app.get('/home/changes', requireUser, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load home changes' });
+  }
+});
+
+// Phase 38 Step 0: schema/backend foundation for the Settings tab. GET
+// always returns all six sections (empty object for any section never
+// touched yet) so the client never needs its own "section missing" branch.
+// PATCH takes one section per call ({ section, patch }) - matches how
+// every later step's UI will call this, one settings screen editing only
+// its own slice - and shallow-merges into that section rather than
+// replacing it, so unrelated settings saved earlier in the same section
+// survive.
+app.get('/settings', requireUser, async (req, res) => {
+  try {
+    const settings = await getSettings(req.userId);
+    res.json(settings);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load settings' });
+  }
+});
+
+app.patch('/settings', requireUser, async (req, res) => {
+  const { section, patch } = req.body;
+  if (!SETTINGS_SECTIONS.includes(section)) {
+    return res.status(400).json({ error: `section must be one of: ${SETTINGS_SECTIONS.join(', ')}` });
+  }
+  if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) {
+    return res.status(400).json({ error: 'patch must be an object' });
+  }
+
+  try {
+    const settings = await patchSettings(req.userId, section, patch);
+    res.json(settings);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update settings' });
   }
 });
 
