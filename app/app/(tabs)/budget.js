@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { View, Text, Button, Pressable, ActivityIndicator, TextInput, StyleSheet } from 'react-native';
+import { View, Text, Button, Pressable, ActivityIndicator, TextInput, StyleSheet, Alert } from 'react-native';
 // Reverted from react-native-gesture-handler's ScrollView back to plain
 // React Native (2026-08-19). It was switched to RNGH's version in Phase 13
 // because this tab then nested a Gesture.Pan() (the old NumberScrollWheel)
@@ -171,7 +171,16 @@ export default function Budget() {
   );
 
   // Step 4: manual trigger, matches this project's "build in small testable
-  // steps" style rather than auto-generating behind the scenes.
+  // steps" style rather than auto-generating behind the scenes. Always
+  // preserves user-set categories - a real whole-budget "start over
+  // completely" escape hatch exists server-side (`generateBudget`'s `force`
+  // option, `POST /budget/generate` with `{ force: true }`) but is
+  // deliberately not wired to any control on this screen - per direct user
+  // decision 2026-09-02, that action belongs in the future Account Settings
+  // tab (see CLAUDE.md's Settings phase, Step 2) once that exists, not as a
+  // second button/link competing with this one. The immediate fix for a
+  // stale user-set category (see resetCategoryToAI below) is per-category,
+  // not all-or-nothing.
   async function generateBudget() {
     setGeneratingBudget(true);
     setError(null);
@@ -196,6 +205,46 @@ export default function Budget() {
     } finally {
       setGeneratingBudget(false);
     }
+  }
+
+  // Real fix for the actual bug hit 2026-09-02: a category set manually
+  // while testing against Plaid Sandbox accounts survived unchanged even
+  // after those accounts were deleted and a real account linked instead,
+  // with no way to hand it back to the AI. Clears just this one category's
+  // user-set row, then runs the normal (non-force) regenerate - every other
+  // user-set category is untouched, exactly like a plain regenerate today,
+  // this category alone rejoins the AI-controlled pool.
+  async function resetCategoryToAI(category) {
+    setApplyingBudgetEdit(true);
+    setError(null);
+    try {
+      const res = await apiFetch('/budget/reset-category', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category }),
+      });
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      cancelEditBudget();
+      await fetchBudgetStatus();
+      await refetchAlerts();
+      await fetchInsight();
+    } catch (err) {
+      console.error(err);
+      setError(apiErrorMessage(err));
+    } finally {
+      setApplyingBudgetEdit(false);
+    }
+  }
+
+  function confirmResetCategoryToAI(category) {
+    Alert.alert(
+      'Reset this category?',
+      `This clears your manually-set amount for ${category} and lets the AI suggest a fresh one from your current spending.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Reset to AI-Suggested', style: 'destructive', onPress: () => resetCategoryToAI(category) },
+      ]
+    );
   }
 
   // Step 4: opens inline editing for one category, preloaded with its
@@ -680,6 +729,18 @@ export default function Budget() {
                             <Pressable onPress={cancelEditBudget}>
                               <Text style={budgetLocalStyles.cancelText}>Cancel</Text>
                             </Pressable>
+                            {/* Only shown for a category you've previously set
+                                manually - the real fix for the bug hit
+                                2026-09-02 (a value set while testing against
+                                Sandbox accounts survived unchanged after those
+                                accounts were deleted, with no way to hand it
+                                back to the AI). Scoped to this one category,
+                                not a whole-budget reset. */}
+                            {s.is_user_set && (
+                              <Pressable onPress={() => confirmResetCategoryToAI(s.category)}>
+                                <Text style={budgetLocalStyles.resetToAiText}>Reset to AI-suggested</Text>
+                              </Pressable>
+                            )}
                           </View>
                         )}
                       </View>
@@ -851,6 +912,18 @@ const budgetLocalStyles = StyleSheet.create({
     marginTop: 10,
     paddingRight: 2,
     paddingBottom: 2,
+  },
+  // Sits inside a category card (styles.card, light background), same
+  // context as cancelText right next to it - colors.error (not colors.sage,
+  // which is tuned for the dark generateCard elsewhere on this screen)
+  // matches this app's existing convention for a "clear/remove" link on a
+  // light card (see goal.js's inlineEditorLink).
+  resetToAiText: {
+    fontSize: 13,
+    color: colors.error,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+    paddingVertical: 6,
   },
   statRow: {
     flexDirection: 'row',

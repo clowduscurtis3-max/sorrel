@@ -185,12 +185,22 @@ async function generateBudget(userId, target = {}) {
   // overwrite something the user decided. Still told to Claude as fixed
   // context (below) so the categories it *does* propose stay coherent
   // with money already committed elsewhere.
-  const { data: userSetRows, error: userSetError } = await supabaseAdmin
-    .from('budgets')
-    .select('category, budgeted_amount, reasoning')
-    .eq('user_id', userId)
-    .eq('period_start', period_start)
-    .eq('is_user_set', true);
+  //
+  // `target.force` (real gap found 2026-09-02): user-set values have no
+  // expiry or link to the account they were set against, so they survive
+  // forever even once totally stale (e.g. set while testing against Plaid
+  // Sandbox accounts, then those accounts get deleted and a real account
+  // linked instead). `force` is the explicit "start over completely" escape
+  // hatch - every category is treated as regenerable and no user-set row is
+  // preserved, in this call only.
+  const { data: userSetRows, error: userSetError } = target.force
+    ? { data: [], error: null }
+    : await supabaseAdmin
+        .from('budgets')
+        .select('category, budgeted_amount, reasoning')
+        .eq('user_id', userId)
+        .eq('period_start', period_start)
+        .eq('is_user_set', true);
   if (userSetError) throw userSetError;
   const userSetCategories = new Set((userSetRows || []).map((r) => r.category));
   const categoriesToGenerate = SPEND_CATEGORIES.filter((c) => !userSetCategories.has(c));
@@ -345,18 +355,46 @@ async function generateBudget(userId, target = {}) {
   // Acceptable for a single-user manually-triggered action; revisit with
   // a DB transaction (e.g. a Postgres function) if this ever needs to be
   // safe under concurrent access.
-  const { error: deleteError } = await supabaseAdmin
+  let deleteQuery = supabaseAdmin
     .from('budgets')
     .delete()
     .eq('user_id', userId)
-    .eq('period_start', period_start)
-    .eq('is_user_set', false);
+    .eq('period_start', period_start);
+  if (!target.force) deleteQuery = deleteQuery.eq('is_user_set', false);
+  const { error: deleteError } = await deleteQuery;
   if (deleteError) throw deleteError;
 
   const { error: insertError } = await supabaseAdmin.from('budgets').insert(rows);
   if (insertError) throw insertError;
 
   return [...rows, ...userSetBudgetRows];
+}
+
+// The real fix for the bug hit 2026-09-02: a category set manually (directly,
+// or by accepting a re-balance proposal) has no expiry and no link to the
+// account it came from, so it survives forever even once genuinely stale -
+// found live when a category set while testing against Plaid Sandbox
+// accounts kept its old value unchanged after those accounts were deleted
+// and a real account linked instead, with generateBudget's default
+// (correctly) never touching it. Deliberately scoped to one category, not a
+// whole-budget reset (that's generateBudget's own `force` option, reserved
+// for the future Settings tab, not this per-category action) - clears just
+// this category's user-set row, then runs a normal regenerate so it rejoins
+// the AI-controlled pool while every other user-set category stays
+// untouched, identical to what a plain regenerate already leaves alone.
+async function resetCategoryToAI(userId, category) {
+  if (!SPEND_CATEGORIES.includes(category)) {
+    throw new Error(`Unknown category: ${category}`);
+  }
+  const { period_start } = currentMonthRange();
+  const { error: deleteError } = await supabaseAdmin
+    .from('budgets')
+    .delete()
+    .eq('user_id', userId)
+    .eq('period_start', period_start)
+    .eq('category', category);
+  if (deleteError) throw deleteError;
+  return generateBudget(userId);
 }
 
 // Phase 3 Step 3: recomputes this user's actual spend per category for the
@@ -396,6 +434,7 @@ function computeBudgetStatus({ budgets, actuals }) {
             ) / 100
           : null,
       reasoning: budgetByCategory[category]?.reasoning ?? null,
+      is_user_set: budgetByCategory[category]?.is_user_set ?? false,
     }))
     .sort((a, b) => a.category.localeCompare(b.category));
 }
@@ -798,6 +837,7 @@ async function applyBudgetEdit(userId, category, newAmount, adjustments = []) {
 
 module.exports = {
   generateBudget,
+  resetCategoryToAI,
   computeBudgetStatus,
   recomputeBudgetActuals,
   backfillBudgetHistory,

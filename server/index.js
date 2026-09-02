@@ -24,6 +24,7 @@ const { extractReceipts } = require('./receipts');
 const { matchReceiptsToTransactions } = require('./matching');
 const {
   generateBudget,
+  resetCategoryToAI,
   computeBudgetStatus,
   recomputeBudgetActuals,
   backfillBudgetHistory,
@@ -317,6 +318,7 @@ app.post('/link-token', requireUser, async (req, res) => {
         country_codes: ['US'],
         language: 'en',
         access_token: accessToken,
+        android_package_name: 'com.curt182.pocketaccountant',
       });
       return res.json({ link_token: response.data.link_token, mode: 'update' });
     }
@@ -327,6 +329,7 @@ app.post('/link-token', requireUser, async (req, res) => {
       products: ['transactions'],
       country_codes: ['US'],
       language: 'en',
+      android_package_name: 'com.curt182.pocketaccountant',
     });
     res.json({ link_token: response.data.link_token, mode: 'add' });
   } catch (err) {
@@ -1275,7 +1278,13 @@ app.patch('/transactions/:transaction_id/category', requireUser, async (req, res
 // automatic, so it's easy to test and re-run deliberately.
 app.post('/budget/generate', requireUser, async (req, res) => {
   try {
-    const budget = await generateBudget(req.userId);
+    // `force: true` is the "start over completely" path (2026-09-02) -
+    // clears every category, including ones the user previously set
+    // directly, rather than the default behavior of leaving user-set
+    // categories untouched. Real need found live: user-set values have no
+    // expiry, so one set while testing against now-deleted Sandbox accounts
+    // survived indefinitely with no way to clear it.
+    const budget = await generateBudget(req.userId, { force: req.body?.force === true });
     // Best-effort: refreshes budget_actuals immediately so /budget/status
     // is accurate right after generating, without waiting for the next
     // sync cycle. A hiccup here shouldn't fail budget generation, which
@@ -1302,6 +1311,42 @@ app.post('/budget/generate', requireUser, async (req, res) => {
     }
     console.error(err);
     res.status(500).json({ error: err.message || 'Failed to generate budget' });
+  }
+});
+
+// Real fix for the bug hit 2026-09-02: clears one category's manually-set
+// value and lets the AI regenerate just that category, leaving every other
+// user-set category untouched - see resetCategoryToAI's own header comment
+// in budget.js for the full "why".
+app.post('/budget/reset-category', requireUser, async (req, res) => {
+  try {
+    const { category } = req.body || {};
+    if (typeof category !== 'string' || !category) {
+      return res.status(400).json({ error: 'category is required' });
+    }
+    const budget = await resetCategoryToAI(req.userId, category);
+    try {
+      await recomputeBudgetActuals(req.userId);
+    } catch (err) {
+      logError('Failed to recompute budget actuals after category reset (non-fatal):', err);
+    }
+    try {
+      await recomputeOverspendAlerts(req.userId);
+    } catch (err) {
+      logError('Failed to recompute overspend alerts after category reset (non-fatal):', err);
+    }
+    try {
+      await recomputeNotificationEvents(req.userId);
+    } catch (err) {
+      logError('Failed to recompute notification events after category reset (non-fatal):', err);
+    }
+    res.json({ budget });
+  } catch (err) {
+    if (err instanceof NoHistoryError) {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to reset category' });
   }
 });
 
@@ -1340,7 +1385,7 @@ app.get('/budget/status', requireUser, async (req, res) => {
 
     const { data: budgets, error: budgetError } = await supabaseAdmin
       .from('budgets')
-      .select('category, budgeted_amount, reasoning')
+      .select('category, budgeted_amount, reasoning, is_user_set')
       .eq('user_id', req.userId)
       .eq('period_start', period_start);
     if (budgetError) throw budgetError;

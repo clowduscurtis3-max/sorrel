@@ -43,6 +43,12 @@ function originalBudgetStatus({ budgets, actuals, SPEND_CATEGORIES }) {
             ) / 100
           : null,
       reasoning: budgetByCategory[category]?.reasoning ?? null,
+      // Added 2026-09-02 alongside the real computeBudgetStatus - the client
+      // needs to know which categories are user-set to offer "Reset to
+      // AI-suggested" only where it's actually meaningful (see budget.js's
+      // resetCategoryToAI). Added here too so this pin test still proves the
+      // two implementations stay identical everywhere else.
+      is_user_set: budgetByCategory[category]?.is_user_set ?? false,
     }))
     .sort((a, b) => a.category.localeCompare(b.category));
 }
@@ -70,6 +76,8 @@ const { SPEND_CATEGORIES } = require('../categorize');
 
 const BUDGET_CASES = [
   { name: 'typical', budgets: [{ category: 'Dining', budgeted_amount: 300, reasoning: 'why' }], actuals: [{ category: 'Dining', actual_amount: 150 }] },
+  { name: 'a user-set category', budgets: [{ category: 'Dining', budgeted_amount: 300, reasoning: 'why', is_user_set: true }], actuals: [{ category: 'Dining', actual_amount: 150 }] },
+  { name: 'mix of user-set and AI-generated', budgets: [{ category: 'Dining', budgeted_amount: 300, reasoning: 'why', is_user_set: true }, { category: 'Travel', budgeted_amount: 50, reasoning: 'r', is_user_set: false }], actuals: [] },
   { name: 'no budgets at all', budgets: [], actuals: [{ category: 'Dining', actual_amount: 150 }] },
   { name: 'no actuals at all', budgets: [{ category: 'Dining', budgeted_amount: 300, reasoning: null }], actuals: [] },
   { name: 'both empty', budgets: [], actuals: [] },
