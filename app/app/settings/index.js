@@ -1,9 +1,8 @@
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useSharedValue } from 'react-native-reanimated';
 import { styles, colors } from '../_lib/styles';
-import { AppBackdrop, isNightBackdrop } from '../_components/Illustrations';
+import SettingsScreenChrome from '../_components/SettingsScreenChrome';
 
 // Phase 38 Step 1: the Settings tab shell. A nested menu (this screen) ->
 // one screen per section, not one long flat page, per the brief. Each
@@ -20,33 +19,9 @@ const SECTIONS = [
 
 export default function Settings() {
   const router = useRouter();
-  const scrollY = useSharedValue(0);
-  const night = isNightBackdrop();
-  const onBackdropTextColor = night ? colors.background : undefined;
 
   return (
-    <View style={styles.container}>
-      <View style={settingsStyles.backgroundLayer} pointerEvents="none">
-        <AppBackdrop scrollY={scrollY} />
-      </View>
-
-      <View style={settingsStyles.headerRow}>
-        <Pressable
-          style={settingsStyles.backButton}
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="Back to Account"
-        >
-          <MaterialIcons name="arrow-back" size={26} color={onBackdropTextColor || colors.darkest} />
-        </Pressable>
-        <View style={settingsStyles.headerTextCol}>
-          <Text style={[settingsStyles.headerTitle, onBackdropTextColor && { color: onBackdropTextColor }]}>
-            Settings
-          </Text>
-        </View>
-        <View style={settingsStyles.backButton} />
-      </View>
-
+    <SettingsScreenChrome title="Settings" onBack={() => router.back()}>
       <View style={settingsStyles.body}>
         <View style={[styles.card, settingsStyles.listCard]}>
           {SECTIONS.map((section, index) => (
@@ -66,41 +41,11 @@ export default function Settings() {
           ))}
         </View>
       </View>
-    </View>
+    </SettingsScreenChrome>
   );
 }
 
 const settingsStyles = StyleSheet.create({
-  backgroundLayer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 56,
-    paddingBottom: 12,
-    gap: 12,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTextCol: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
   body: {
     flex: 1,
     paddingHorizontal: 16,

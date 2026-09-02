@@ -1,11 +1,10 @@
 import { useCallback, useState } from 'react';
-import { View, Text, Switch, ActivityIndicator, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Switch, ActivityIndicator, StyleSheet } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { MaterialIcons } from '@expo/vector-icons';
-import { useSharedValue } from 'react-native-reanimated';
 import { apiFetch, apiErrorMessage } from '../_lib/api';
 import { styles, colors } from '../_lib/styles';
-import { AppBackdrop, isNightBackdrop } from './Illustrations';
+import SettingsScreenChrome from './SettingsScreenChrome';
+import SettingsFetchGate from './SettingsFetchGate';
 
 // Phase 38 Step 1: shared shell for every Settings section screen until
 // each section's own real controls land in Steps 2-8. Fetches/patches
@@ -21,9 +20,6 @@ export default function SettingsSectionShell({ section, title, subtitle }) {
   const [settings, setSettings] = useState(null);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
-  const scrollY = useSharedValue(0);
-  const night = isNightBackdrop();
-  const onBackdropTextColor = night ? colors.background : undefined;
 
   const fetchSettings = useCallback(async () => {
     setError(null);
@@ -66,43 +62,8 @@ export default function SettingsSectionShell({ section, title, subtitle }) {
   }
 
   return (
-    <View style={styles.container}>
-      <View style={shellStyles.backgroundLayer} pointerEvents="none">
-        <AppBackdrop scrollY={scrollY} />
-      </View>
-
-      <View style={shellStyles.headerRow}>
-        <Pressable
-          style={shellStyles.backButton}
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="Back to Settings"
-        >
-          <MaterialIcons name="arrow-back" size={26} color={onBackdropTextColor || colors.darkest} />
-        </Pressable>
-        <View style={shellStyles.headerTextCol}>
-          <Text style={[shellStyles.headerTitle, onBackdropTextColor && { color: onBackdropTextColor }]}>
-            {title}
-          </Text>
-          {subtitle && (
-            <Text
-              style={[
-                shellStyles.headerSubtitle,
-                night && { color: 'rgba(244, 246, 242, 0.75)' },
-              ]}
-            >
-              {subtitle}
-            </Text>
-          )}
-        </View>
-        <View style={shellStyles.backButton} />
-      </View>
-
-      {settings === null ? (
-        <View style={styles.centered}>
-          <ActivityIndicator />
-        </View>
-      ) : (
+    <SettingsScreenChrome title={title} subtitle={subtitle} onBack={() => router.back()}>
+      <SettingsFetchGate loaded={settings !== null} error={error} onRetry={fetchSettings}>
         <View style={shellStyles.body}>
           {error && <Text style={styles.errorText}>{error}</Text>}
           <View style={[styles.card, shellStyles.placeholderCard]}>
@@ -117,7 +78,7 @@ export default function SettingsSectionShell({ section, title, subtitle }) {
                 <ActivityIndicator />
               ) : (
                 <Switch
-                  value={!!settings[section]?.shell_placeholder}
+                  value={!!settings?.[section]?.shell_placeholder}
                   onValueChange={togglePlaceholder}
                   trackColor={{ false: colors.sage, true: colors.primary }}
                 />
@@ -125,48 +86,12 @@ export default function SettingsSectionShell({ section, title, subtitle }) {
             </View>
           </View>
         </View>
-      )}
-    </View>
+      </SettingsFetchGate>
+    </SettingsScreenChrome>
   );
 }
 
 const shellStyles = StyleSheet.create({
-  backgroundLayer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 56,
-    paddingBottom: 12,
-    gap: 12,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTextCol: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  headerSubtitle: {
-    fontSize: 13,
-    color: colors.dark,
-    marginTop: 2,
-    textAlign: 'center',
-  },
   body: {
     flex: 1,
     paddingHorizontal: 16,

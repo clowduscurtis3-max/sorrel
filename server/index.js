@@ -7,6 +7,7 @@ const { encrypt, decrypt, DecryptionError } = require('./crypto');
 const {
   categorizeTransactions,
   FRIENDLY_CATEGORIES,
+  SPEND_CATEGORIES,
   normalizeMerchantKey,
 } = require('./categorize');
 const {
@@ -1322,8 +1323,8 @@ app.post('/budget/generate', requireUser, async (req, res) => {
 app.post('/budget/reset-category', requireUser, async (req, res) => {
   try {
     const { category } = req.body || {};
-    if (typeof category !== 'string' || !category) {
-      return res.status(400).json({ error: 'category is required' });
+    if (!SPEND_CATEGORIES.includes(category)) {
+      return res.status(400).json({ error: `category must be one of: ${SPEND_CATEGORIES.join(', ')}` });
     }
     const budget = await resetCategoryToAI(req.userId, category);
     try {
@@ -1506,7 +1507,7 @@ app.get('/settings', requireUser, async (req, res) => {
 });
 
 app.patch('/settings', requireUser, async (req, res) => {
-  const { section, patch } = req.body;
+  const { section, patch } = req.body || {};
   if (!SETTINGS_SECTIONS.includes(section)) {
     return res.status(400).json({ error: `section must be one of: ${SETTINGS_SECTIONS.join(', ')}` });
   }
