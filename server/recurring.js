@@ -142,18 +142,34 @@ function applyOverrides(seriesRows, overrides, userId, now = new Date()) {
     .map((row) => {
       const edit = editsByKey.get(row.merchant_key);
       if (!edit) return row;
-      // Only the fields a real edit can meaningfully override - last_seen_
-      // date/next_expected_date/occurrence_count stay driven by the real
+      // last_seen_date/occurrence_count stay driven by the real
       // transactions, which is still the accurate source for those on an
-      // auto-detected series (only display/category/interval/amount/
-      // debt_type are ever wrong in a way worth manually correcting).
+      // auto-detected series. next_expected_date is the one exception:
+      // real bug found by code review, 2026-09-03 - it used to also stay
+      // untouched (auto-detected, from the ORIGINAL interval) even when
+      // an edit overrides the interval itself, so a series edited from
+      // e.g. monthly to quarterly kept a next_expected_date computed
+      // under the old monthly cadence. subscriptionAudit.js's own lapsed
+      // check (`daysSinceExpected > interval.tolerance`) then compared a
+      // stale date against the NEW interval's tolerance - a false
+      // "lapsed" or a false "still active" reading depending on which
+      // direction the interval changed, and Home's "Upcoming bills"
+      // window (which also reads next_expected_date directly) would be
+      // wrong the same way. Recomputed from the real last_seen_date
+      // whenever the effective interval differs from what was actually
+      // detected, so the two can never disagree again.
+      const interval = edit.override_interval ?? row.interval;
+      const intervalChanged = interval !== row.interval;
       return {
         ...row,
         display_name: edit.override_display_name ?? row.display_name,
         category: edit.override_category ?? row.category,
-        interval: edit.override_interval ?? row.interval,
+        interval,
         typical_amount: edit.override_typical_amount ?? row.typical_amount,
         debt_type: edit.override_debt_type ?? row.debt_type,
+        next_expected_date: intervalChanged
+          ? toDateOnly(new Date(new Date(`${row.last_seen_date}T00:00:00Z`).getTime() + INTERVAL_DAYS[interval] * MS_PER_DAY))
+          : row.next_expected_date,
       };
     });
 

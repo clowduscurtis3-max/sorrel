@@ -48,6 +48,15 @@ export default function HomeCardColorPicker({ value, onChange }) {
     commitColor(nextHue, lightness.value);
   }
 
+  // Real bug found by code review, 2026-09-03: `onUpdate` used to call
+  // `runOnJS(commitColor)` - a real network PATCH (onChange ->
+  // patchSettings, _lib/api.js) - on every single gesture frame during a
+  // drag, dozens of queued requests per drag with almost every one
+  // immediately superseded by the next. `lightness`/the thumb still
+  // update every frame for a smooth live drag (local, no network cost);
+  // the actual commit now only fires once, in `.onEnd()`, same "commit
+  // once per gesture, not every frame" pattern DraggableCardList.js's own
+  // onDragEnd already established for reordering.
   const pan = useMemo(
     () =>
       Gesture.Pan()
@@ -58,6 +67,9 @@ export default function HomeCardColorPicker({ value, onChange }) {
           'worklet';
           const deltaLightness = (event.translationX / sliderWidth) * 100;
           lightness.value = clamp(startLightness.value + deltaLightness, 0, 100);
+        })
+        .onEnd(() => {
+          'worklet';
           runOnJS(commitColor)(hue, lightness.value);
         }),
     [sliderWidth, hue] // eslint-disable-line react-hooks/exhaustive-deps

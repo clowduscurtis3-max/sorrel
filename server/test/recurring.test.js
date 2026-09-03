@@ -144,6 +144,33 @@ test('applyOverrides: a manual add\'s stale next_expected_date rolls forward pas
   assert.ok(nextExpected >= now, 'next_expected_date must not still be in the past');
 });
 
+test('applyOverrides: overriding the interval recomputes next_expected_date to match', () => {
+  // Real bug found by code review, 2026-09-03: next_expected_date used to
+  // stay whatever auto-detection computed under the ORIGINAL interval
+  // even when an edit overrides the interval itself - subscriptionAudit.js's
+  // own lapsed check compares next_expected_date against the (new)
+  // interval's own tolerance, so a stale date computed under the old
+  // cadence produced a wrong lapsed/active reading.
+  const rows = [series({ interval: 'monthly', last_seen_date: '2026-08-04', next_expected_date: '2026-09-03' })];
+  const overrides = [
+    { merchant_key: 'vill cap inv:311503:acc1', dismissed: false, override_interval: 'quarterly' },
+  ];
+  const merged = applyOverrides(rows, overrides, 'u1');
+  assert.equal(merged[0].interval, 'quarterly');
+  // 2026-08-04 + 91 days (quarterly), not the original monthly-derived date.
+  assert.equal(merged[0].next_expected_date, '2026-11-03');
+});
+
+test('applyOverrides: an edit that does NOT touch the interval leaves next_expected_date alone', () => {
+  const rows = [series({ interval: 'monthly', last_seen_date: '2026-08-04', next_expected_date: '2026-09-03' })];
+  const overrides = [
+    { merchant_key: 'vill cap inv:311503:acc1', dismissed: false, override_typical_amount: 200 },
+  ];
+  const merged = applyOverrides(rows, overrides, 'u1');
+  assert.equal(merged[0].interval, 'monthly');
+  assert.equal(merged[0].next_expected_date, '2026-09-03');
+});
+
 test('applyOverrides: an untouched series (no matching override) passes through unchanged', () => {
   const rows = [series()];
   const merged = applyOverrides(rows, [], 'u1');

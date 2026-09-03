@@ -2764,11 +2764,20 @@ app.post('/recurring/manage/overrides', requireUser, async (req, res) => {
     return res.status(400).json({ error: 'manual_next_expected_date must be a YYYY-MM-DD date' });
   }
 
-  // A manual add (no merchant_key to fall back on for display/category/
-  // last-seen-date the way an edit's untouched fields do) needs enough of
-  // its own fields to synthesize a complete recurring_series row - see
-  // applyOverrides's own manual-add branch.
-  if (!merchant_key) {
+  // A genuinely NEW manual add (no merchant_key to attach to, and no `id`
+  // of an existing row to edit) needs enough of its own fields to
+  // synthesize a complete recurring_series row - see applyOverrides's own
+  // manual-add branch. Two real bugs found by code review, 2026-09-03,
+  // fixed together here:
+  // 1. This check used to gate on `!merchant_key` alone, which is also
+  //    true when editing an *already-added* manual entry (id present,
+  //    merchant_key still correctly absent) - editing one always 400'd,
+  //    since an edit only sends the fields actually changing (category/
+  //    interval/amount), never display_name or manual_next_expected_date
+  //    again. Scoped to `isNewManualAdd` (id absent too) so an edit skips
+  //    this required-fields check entirely.
+  const isNewManualAdd = !merchant_key && !id;
+  if (isNewManualAdd) {
     if (!override_display_name || typeof override_display_name !== 'string') {
       return res.status(400).json({ error: 'override_display_name is required for a manually-added recurring charge' });
     }
@@ -2784,34 +2793,60 @@ app.post('/recurring/manage/overrides', requireUser, async (req, res) => {
   }
 
   try {
-    const row = {
-      user_id: req.userId,
-      merchant_key: merchant_key || null,
-      account_id: account_id || null,
-      dismissed: !!dismissed,
-      override_display_name: override_display_name || null,
-      override_category: override_category || null,
-      override_interval: override_interval || null,
-      override_typical_amount: override_typical_amount ?? null,
-      override_debt_type: override_debt_type || null,
-      manual_next_expected_date: manual_next_expected_date || null,
-      updated_at: new Date().toISOString(),
-    };
+    // 2. A second, more severe bug in the same code path: the old version
+    //    built one `row` object with every column defaulted to `|| null`
+    //    for anything absent from the request, then blindly upserted/
+    //    updated the *entire* row with it - so even a successful partial
+    //    edit (e.g. just changing the amount) would silently null out
+    //    every field the edit form doesn't collect (override_debt_type
+    //    isn't editable via the UI at all; a manual entry's own
+    //    display_name/manual_next_expected_date aren't resent on its own
+    //    edit either). `patch` now only contains fields actually present
+    //    in this request body, so an edit can only ever change what it
+    //    explicitly sends.
+    const patch = { updated_at: new Date().toISOString() };
+    if (account_id !== undefined) patch.account_id = account_id || null;
+    if (dismissed !== undefined) patch.dismissed = !!dismissed;
+    if (override_display_name !== undefined) patch.override_display_name = override_display_name || null;
+    if (override_category !== undefined) patch.override_category = override_category || null;
+    if (override_interval !== undefined) patch.override_interval = override_interval || null;
+    if (override_typical_amount !== undefined) patch.override_typical_amount = override_typical_amount ?? null;
+    if (override_debt_type !== undefined) patch.override_debt_type = override_debt_type || null;
+    if (manual_next_expected_date !== undefined) patch.manual_next_expected_date = manual_next_expected_date || null;
 
-    if (row.merchant_key) {
-      const { error } = await supabaseAdmin
+    if (merchant_key) {
+      // No single-statement partial upsert exists that both inserts a
+      // fresh row AND does a merge-only update on conflict - read first,
+      // branch explicitly, same reasoning as the partial-patch fix above:
+      // an update must only ever touch what this request actually sent.
+      const { data: existing, error: existingError } = await supabaseAdmin
         .from('recurring_overrides')
-        .upsert(row, { onConflict: 'user_id,merchant_key' });
-      if (error) throw error;
+        .select('id')
+        .eq('user_id', req.userId)
+        .eq('merchant_key', merchant_key)
+        .maybeSingle();
+      if (existingError) throw existingError;
+
+      if (existing) {
+        const { error } = await supabaseAdmin.from('recurring_overrides').update(patch).eq('id', existing.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabaseAdmin
+          .from('recurring_overrides')
+          .insert({ user_id: req.userId, merchant_key, ...patch });
+        if (error) throw error;
+      }
     } else if (id) {
       const { error } = await supabaseAdmin
         .from('recurring_overrides')
-        .update(row)
+        .update(patch)
         .eq('id', id)
         .eq('user_id', req.userId);
       if (error) throw error;
     } else {
-      const { error } = await supabaseAdmin.from('recurring_overrides').insert(row);
+      const { error } = await supabaseAdmin
+        .from('recurring_overrides')
+        .insert({ user_id: req.userId, merchant_key: null, ...patch });
       if (error) throw error;
     }
 

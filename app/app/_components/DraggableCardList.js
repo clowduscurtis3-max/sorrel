@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Pressable, StyleSheet } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -33,8 +33,46 @@ function Row({ itemKey, node, index, editing, onLongPress, onEditingChange, onDr
   const translateY = useSharedValue(index * SLOT_HEIGHT);
   const isDragging = useSharedValue(false);
   const wiggle = useSharedValue(0);
+  // Mirrors the `index` prop on the UI thread so the gesture worklets
+  // below can read a live value without closing over the plain JS prop
+  // directly - what actually lets `pan`/`tap`/`longPress` be built once
+  // (useMemo, below) instead of torn down and rebuilt on every
+  // reorder-triggered re-render.
+  const indexShared = useSharedValue(index);
+  // Snapshotted once when a drag starts and held fixed for its entire
+  // duration. Real bug found by code review, 2026-09-03: the old version
+  // computed `translateY` from the LIVE `index` every frame
+  // (`index * SLOT_HEIGHT + event.translationY`) - but `index` changes
+  // mid-drag the instant the drag crosses another row's boundary
+  // (onUpdate -> parent reorders `liveOrder` -> this row's own `index`
+  // prop changes), so the very next frame's `translateY` jumped by a
+  // full SLOT_HEIGHT with `event.translationY` roughly unchanged -
+  // visible on-device as the dragged card suddenly snapping. Basing the
+  // drag's visual position on where the row STARTED (fixed) instead of
+  // "wherever the list currently thinks it is" is the standard fix for
+  // this class of drag-reorder bug.
+  const dragStartIndex = useSharedValue(index);
+
+  // Always-current refs for the callbacks the memoized gesture below
+  // calls via runOnJS. Necessary specifically because the gestures are
+  // now built once per mount (see the useMemo calls below) rather than
+  // fresh every render: without this indirection, a memoized gesture
+  // would close over whichever render's onDragEnd/onLongPress/etc. it
+  // happened to be built from and keep calling THAT one forever - for
+  // onDragEnd in particular, the parent's own handler closes over
+  // `liveOrder` state that changes on every reorder, so a stale closure
+  // would commit a stale order instead of the list's current one.
+  const onDragUpdateRef = useRef(onDragUpdate);
+  onDragUpdateRef.current = onDragUpdate;
+  const onDragEndRef = useRef(onDragEnd);
+  onDragEndRef.current = onDragEnd;
+  const onLongPressRef = useRef(onLongPress);
+  onLongPressRef.current = onLongPress;
+  const onEditingChangeRef = useRef(onEditingChange);
+  onEditingChangeRef.current = onEditingChange;
 
   useEffect(() => {
+    indexShared.value = index;
     if (!isDragging.value) {
       translateY.value = withSpring(index * SLOT_HEIGHT, { damping: 20, stiffness: 200 });
     }
@@ -57,27 +95,47 @@ function Row({ itemKey, node, index, editing, onLongPress, onEditingChange, onDr
   }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleDragUpdate(proposedIndex) {
-    onDragUpdate(itemKey, proposedIndex);
+    onDragUpdateRef.current(itemKey, proposedIndex);
+  }
+  function handleDragEnd() {
+    onDragEndRef.current();
+  }
+  function handleLongPress() {
+    onLongPressRef.current();
+  }
+  function handleEditingChange(next) {
+    onEditingChangeRef.current(next);
   }
 
-  const pan = Gesture.Pan()
-    .enabled(editing)
-    .onStart(() => {
-      'worklet';
-      isDragging.value = true;
-    })
-    .onUpdate((event) => {
-      'worklet';
-      translateY.value = index * SLOT_HEIGHT + event.translationY;
-      const proposedIndex = Math.round(translateY.value / SLOT_HEIGHT);
-      runOnJS(handleDragUpdate)(proposedIndex);
-    })
-    .onEnd(() => {
-      'worklet';
-      isDragging.value = false;
-      translateY.value = withSpring(index * SLOT_HEIGHT, { damping: 20, stiffness: 200 });
-      runOnJS(onDragEnd)();
-    });
+  // `editing` deliberately switches which gesture is attached at the
+  // GestureDetector level below (the ternary), not via a per-gesture
+  // `.enabled()` call - that's what lets these be built exactly once per
+  // row (empty dep arrays) instead of on every render. Shared values
+  // (translateY/isDragging/dragStartIndex/indexShared) are themselves
+  // stable references across re-renders, so closing over them here is
+  // safe by Reanimated's own design.
+  const pan = useMemo(
+    () =>
+      Gesture.Pan()
+        .onStart(() => {
+          'worklet';
+          isDragging.value = true;
+          dragStartIndex.value = indexShared.value;
+        })
+        .onUpdate((event) => {
+          'worklet';
+          translateY.value = dragStartIndex.value * SLOT_HEIGHT + event.translationY;
+          const proposedIndex = Math.round(translateY.value / SLOT_HEIGHT);
+          runOnJS(handleDragUpdate)(proposedIndex);
+        })
+        .onEnd(() => {
+          'worklet';
+          isDragging.value = false;
+          translateY.value = withSpring(indexShared.value * SLOT_HEIGHT, { damping: 20, stiffness: 200 });
+          runOnJS(handleDragEnd)();
+        }),
+    [] // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   // Real gap found by direct user feedback, 2026-09-03: while editing, a
   // plain tap on a row (no drag) did nothing - Pan's own gesture consumed
@@ -87,19 +145,23 @@ function Row({ itemKey, node, index, editing, onLongPress, onEditingChange, onDr
   // with minimal movement, so a real drag still wins and reorders as
   // before; a plain tap now exits edit mode, matching "the user should be
   // able to just tap the screen when done."
-  const tap = Gesture.Tap()
-    .enabled(editing)
-    .onEnd(() => {
-      'worklet';
-      runOnJS(onEditingChange)(false);
-    });
+  const tap = useMemo(
+    () =>
+      Gesture.Tap().onEnd(() => {
+        'worklet';
+        runOnJS(handleEditingChange)(false);
+      }),
+    [] // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
-  const longPress = Gesture.LongPress()
-    .enabled(!editing)
-    .onStart(() => {
-      'worklet';
-      runOnJS(onLongPress)();
-    });
+  const longPress = useMemo(
+    () =>
+      Gesture.LongPress().onStart(() => {
+        'worklet';
+        runOnJS(handleLongPress)();
+      }),
+    [] // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: translateY.value }, { rotate: `${wiggle.value}deg` }],
