@@ -2661,6 +2661,63 @@ app.get('/recurring/manage', requireUser, async (req, res) => {
   }
 });
 
+// Direct user follow-up, 2026-09-03 ("why dont you have the option to
+// search from existing charges"): a manual add previously meant typing
+// name/category/amount blind, even for a real charge already sitting in
+// the user's own transaction history that just hadn't been auto-detected
+// yet (too few occurrences so far, an amount that varies more than
+// AMOUNT_TOLERANCE_RATIO allows, etc). Groups this user's real
+// transactions by merchant so the add form can offer a real search/pick
+// list instead. Deliberately does NOT call GET /transactions' own
+// syncUserData - this only needs to search data already synced, and
+// forcing a fresh Plaid sync just to open a search box would be a real,
+// avoidable cost on a route that's likely to be opened often while
+// typing a search query.
+app.get('/recurring/manage/merchants', requireUser, async (req, res) => {
+  try {
+    const { data: transactions, error } = await supabaseAdmin
+      .from('transactions')
+      .select('merchant_name, name, amount, date, category, account_id')
+      .eq('user_id', req.userId)
+      .order('date', { ascending: false });
+    if (error) throw error;
+
+    const byMerchant = new Map();
+    for (const t of transactions || []) {
+      const label = t.merchant_name || t.name;
+      if (!label) continue;
+      const key = normalizeMerchantKey(label) || label.toLowerCase();
+      if (!byMerchant.has(key)) {
+        // Already ordered newest-first, so the first transaction seen for
+        // a given key is that merchant's most recent - display_name/
+        // category/typical_amount/account_id all come from that one real
+        // transaction, not an average, so what the user sees in search
+        // results matches a real recent charge exactly.
+        byMerchant.set(key, {
+          display_name: label,
+          category: t.category,
+          // A "typical amount" for a recurring charge is always positive
+          // in this app's convention regardless of Plaid's raw sign -
+          // abs() here so a picked result can go straight into
+          // override_typical_amount without the 'must be positive'
+          // validation on POST /recurring/manage/overrides rejecting it.
+          typical_amount: Math.abs(t.amount),
+          account_id: t.account_id,
+          last_date: t.date,
+          occurrence_count: 0,
+        });
+      }
+      byMerchant.get(key).occurrence_count += 1;
+    }
+
+    const merchants = [...byMerchant.values()].sort((a, b) => a.display_name.localeCompare(b.display_name));
+    res.json({ merchants });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load transaction merchants' });
+  }
+});
+
 // One endpoint for all three override shapes (dismiss/edit/manual add,
 // distinguished by which fields are set - see the migration's own header
 // comment) rather than three separate routes, matching this app's existing

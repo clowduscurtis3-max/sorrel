@@ -46,6 +46,29 @@ export default function RecurringManage() {
   const [addForm, setAddForm] = useState(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
 
+  // Direct user follow-up, 2026-09-03: search the user's real transaction
+  // history instead of typing a new charge in blind. Lazily loaded only
+  // when the add form actually opens (not on every screen visit) since
+  // it's a real, if lightweight, fetch of this user's full transaction
+  // history.
+  const [merchants, setMerchants] = useState(null);
+  const [merchantsError, setMerchantsError] = useState(null);
+  const [merchantQuery, setMerchantQuery] = useState('');
+  const [merchantPickerOpen, setMerchantPickerOpen] = useState(true);
+
+  async function fetchMerchants() {
+    setMerchantsError(null);
+    try {
+      const res = await apiFetch('/recurring/manage/merchants');
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const json = await res.json();
+      setMerchants(json.merchants || []);
+    } catch (err) {
+      console.error(err);
+      setMerchantsError(apiErrorMessage(err));
+    }
+  }
+
   const fetchData = useCallback(async () => {
     setError(null);
     try {
@@ -213,14 +236,36 @@ export default function RecurringManage() {
 
   function openAddForm() {
     setShowAddForm(true);
+    setMerchantPickerOpen(true);
+    setMerchantQuery('');
     setAddForm({
       displayName: '',
       category: 'Bills & Utilities',
       interval: 'monthly',
       amountText: '',
+      accountId: null,
       nextExpectedDate: new Date(Date.now() + 24 * 60 * 60 * 1000),
     });
+    if (merchants === null) fetchMerchants();
   }
+
+  function pickMerchant(m) {
+    setAddForm((p) => ({
+      ...p,
+      displayName: m.display_name,
+      category: CATEGORIES.includes(m.category) ? m.category : p.category,
+      amountText: String(m.typical_amount),
+      accountId: m.account_id,
+    }));
+    setMerchantPickerOpen(false);
+  }
+
+  const filteredMerchants =
+    merchantQuery.trim().length === 0
+      ? []
+      : (merchants || [])
+          .filter((m) => m.display_name.toLowerCase().includes(merchantQuery.trim().toLowerCase()))
+          .slice(0, 8);
 
   async function saveAdd() {
     if (!addForm.displayName.trim()) {
@@ -234,6 +279,7 @@ export default function RecurringManage() {
     }
     const ok = await postOverride({
       merchant_key: null,
+      account_id: addForm.accountId || null,
       override_display_name: addForm.displayName.trim(),
       override_category: addForm.category,
       override_interval: addForm.interval,
@@ -438,12 +484,63 @@ export default function RecurringManage() {
 
           {!showAddForm ? (
             <Pressable style={manageStyles.addButton} onPress={openAddForm} accessibilityRole="button" accessibilityLabel="Add a recurring charge">
-              <MaterialIcons name="add-circle-outline" size={20} color={colors.primary} />
+              <MaterialIcons name="add-circle-outline" size={20} color={colors.background} />
               <Text style={manageStyles.addButtonText}>Add a recurring charge</Text>
             </Pressable>
           ) : (
             <View style={[styles.card, manageStyles.seriesCard]}>
               <Text style={styles.cardTitle}>Add a recurring charge</Text>
+
+              {merchantPickerOpen ? (
+                <View style={manageStyles.merchantPicker}>
+                  <Text style={manageStyles.fieldLabel}>Search your transactions</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. Mortgage, Netflix..."
+                    placeholderTextColor={colors.placeholder}
+                    value={merchantQuery}
+                    onChangeText={setMerchantQuery}
+                    autoFocus
+                  />
+                  {merchantsError && <Text style={styles.errorText}>{merchantsError}</Text>}
+                  {merchants === null && !merchantsError ? (
+                    <ActivityIndicator style={manageStyles.editButtonsSpacing} />
+                  ) : merchantQuery.trim().length > 0 ? (
+                    filteredMerchants.length === 0 ? (
+                      <Text style={manageStyles.merchantEmptyText}>
+                        No matching transactions. You can still enter it manually below.
+                      </Text>
+                    ) : (
+                      filteredMerchants.map((m) => (
+                        <Pressable
+                          key={m.display_name}
+                          style={manageStyles.merchantRow}
+                          onPress={() => pickMerchant(m)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Use ${m.display_name}`}
+                        >
+                          <View style={manageStyles.merchantRowText}>
+                            <Text style={manageStyles.merchantRowName}>{m.display_name}</Text>
+                            <Text style={manageStyles.merchantRowMeta}>
+                              {m.category} · last ${formatDecimal(m.typical_amount)} on{' '}
+                              {formatDateMDY(m.last_date)}
+                            </Text>
+                          </View>
+                          <MaterialIcons name="chevron-right" size={20} color={colors.dark} />
+                        </Pressable>
+                      ))
+                    )
+                  ) : null}
+                  <Pressable onPress={() => setMerchantPickerOpen(false)} accessibilityRole="button">
+                    <Text style={manageStyles.cancelLink}>Enter manually instead</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <Pressable onPress={() => setMerchantPickerOpen(true)} accessibilityRole="button">
+                  <Text style={manageStyles.searchAgainLink}>Search transactions instead</Text>
+                </Pressable>
+              )}
+
               <Text style={manageStyles.fieldLabel}>Name</Text>
               <TextInput
                 style={styles.input}
@@ -529,7 +626,11 @@ const manageStyles = StyleSheet.create({
   bodyContent: {
     paddingHorizontal: 16,
     paddingTop: 8,
-    paddingBottom: 40,
+    // Matches the tab screens' own scroll-content bottom clearance (Home/
+    // Budget/Recurring all use 150) - this screen's old 40 wasn't enough
+    // to clear the phone's own gesture bar, so the last item (usually the
+    // "Add a recurring charge" button) sat partly hidden behind it.
+    paddingBottom: 150,
     gap: 10,
   },
   seriesCard: {
@@ -631,6 +732,44 @@ const manageStyles = StyleSheet.create({
     color: colors.error,
     fontWeight: '600',
   },
+  searchAgainLink: {
+    fontSize: 13,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  merchantPicker: {
+    gap: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.sage,
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 6,
+  },
+  merchantEmptyText: {
+    fontSize: 12,
+    color: colors.muted,
+  },
+  merchantRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.sage,
+  },
+  merchantRowText: {
+    flex: 1,
+  },
+  merchantRowName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.darkest,
+  },
+  merchantRowMeta: {
+    fontSize: 11,
+    color: colors.muted,
+    marginTop: 1,
+  },
   dateButton: {
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.sage,
@@ -648,16 +787,17 @@ const manageStyles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.primary,
+    borderWidth: 1.5,
+    borderColor: colors.background,
     borderRadius: 22,
-    paddingVertical: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
     marginTop: 4,
   },
   addButtonText: {
     fontSize: 13,
     fontWeight: '700',
-    color: colors.primary,
+    color: colors.background,
   },
   hiddenSection: {
     marginTop: 12,
