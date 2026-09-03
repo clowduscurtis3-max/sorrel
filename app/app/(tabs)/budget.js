@@ -94,6 +94,25 @@ export default function Budget() {
     }
   }
 
+  // Phase 38 Step 2: the two Budget Settings toggles (settings/budget.js)
+  // this tab itself needs to obey. `{}` while loading (and for any key
+  // never explicitly set) reads as "show" via the `!== false` checks
+  // below, matching the brief's "a user who's never opened Settings sees
+  // current behavior unchanged" - both were always shown before this
+  // toggle existed.
+  const [budgetSettings, setBudgetSettings] = useState({});
+
+  async function fetchBudgetSettings() {
+    try {
+      const res = await apiFetch('/settings');
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const data = await res.json();
+      setBudgetSettings(data.budget_settings || {});
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   // Phase 11 (2026-08-27): "View spending history" toggle - same
   // toggle-in-place/refetch-on-open pattern this app has used for every
   // similar section since Phase 3 Step 4 (never left showing a stale
@@ -167,6 +186,7 @@ export default function Budget() {
     useCallback(() => {
       fetchBudgetStatus();
       fetchInsight();
+      fetchBudgetSettings();
     }, [])
   );
 
@@ -355,6 +375,8 @@ export default function Budget() {
   const pace = monthProgress ? computePace(spendStats, monthProgress) : null;
   const spentPercent = spendStats.budgeted > 0 ? Math.round((spendStats.spent / spendStats.budgeted) * 100) : null;
   const hasAnyBudget = rows.some((s) => s.budgeted != null);
+  const showCategoryReasoning = budgetSettings.show_category_reasoning !== false;
+  const showInsightPill = budgetSettings.show_insight_pill !== false;
 
   // Text/icons rendered directly on top of AppBackdrop (not inside an
   // opaque card) need to switch to a light color during the night
@@ -410,30 +432,32 @@ export default function Budget() {
             <Text style={[budgetLocalStyles.title, onBackdropTextColor && { color: onBackdropTextColor }]}>
               Budget
             </Text>
-            <Pressable
-              style={[
-                budgetLocalStyles.insightsPill,
-                onBackdropAccentColor && { borderColor: onBackdropAccentColor },
-              ]}
-              onPress={() => (insight ? setInsightModalVisible(true) : scrollRef.current?.scrollTo({ y: 0, animated: true }))}
-              accessibilityRole="button"
-              // Visible label always stays "INSIGHTS" (found on-device: the
-              // full pill_text sentence got cut off, unreadable) - the
-              // accessibility label still carries the real insight for
-              // screen readers, since that's read aloud in full rather
-              // than needing to fit in a fixed-width pill.
-              accessibilityLabel={insight ? insight.pill_text : 'Jump to Can I afford this?'}
-            >
-              <MaterialIcons name="auto-awesome" size={14} color={onBackdropAccentColor || colors.primary} />
-              <Text
+            {showInsightPill && (
+              <Pressable
                 style={[
-                  budgetLocalStyles.insightsPillText,
-                  onBackdropAccentColor && { color: onBackdropAccentColor },
+                  budgetLocalStyles.insightsPill,
+                  onBackdropAccentColor && { borderColor: onBackdropAccentColor },
                 ]}
+                onPress={() => (insight ? setInsightModalVisible(true) : scrollRef.current?.scrollTo({ y: 0, animated: true }))}
+                accessibilityRole="button"
+                // Visible label always stays "INSIGHTS" (found on-device: the
+                // full pill_text sentence got cut off, unreadable) - the
+                // accessibility label still carries the real insight for
+                // screen readers, since that's read aloud in full rather
+                // than needing to fit in a fixed-width pill.
+                accessibilityLabel={insight ? insight.pill_text : 'Jump to Can I afford this?'}
               >
-                INSIGHTS
-              </Text>
-            </Pressable>
+                <MaterialIcons name="auto-awesome" size={14} color={onBackdropAccentColor || colors.primary} />
+                <Text
+                  style={[
+                    budgetLocalStyles.insightsPillText,
+                    onBackdropAccentColor && { color: onBackdropAccentColor },
+                  ]}
+                >
+                  INSIGHTS
+                </Text>
+              </Pressable>
+            )}
           </View>
 
           {/* Phase 5 Step 3 / Phase 13: "Can I afford this?" - decided in
@@ -667,7 +691,9 @@ export default function Budget() {
                     </View>
                   )}
 
-                  {s.reasoning && <Text style={budgetLocalStyles.reasoningText}>{s.reasoning}</Text>}
+                  {showCategoryReasoning && s.reasoning && (
+                    <Text style={budgetLocalStyles.reasoningText}>{s.reasoning}</Text>
+                  )}
 
                   {isEditing &&
                     (budgetProposal ? (
@@ -721,7 +747,7 @@ export default function Budget() {
                           value={budgetEditAmount}
                           onChangeText={setBudgetEditAmount}
                         />
-                        {loadingProposal ? (
+                        {loadingProposal || applyingBudgetEdit ? (
                           <ActivityIndicator />
                         ) : (
                           <View style={budgetLocalStyles.editButtonsRow}>
