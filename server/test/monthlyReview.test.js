@@ -33,6 +33,16 @@ test('computeMonthlyReview: income/spend/saved are computed correctly', () => {
   assert.equal(result.saved, 3500);
 });
 
+test('computeMonthlyReview: passes the period\'s own per-category status through unchanged', () => {
+  // Real gap found by code review, 2026-09-03: getPeriodReview already
+  // computed this (via computeBudgetStatus) but it was silently dropped
+  // before reaching the client - the Home "Monthly Review" detail view
+  // needs it for its own per-category breakdown.
+  const p = period('2026-07-01', '2026-07-31', 4000, { Dining: 300, Groceries: 200 });
+  const result = computeMonthlyReview({ period: p, prior: null, goalProgress: null });
+  assert.deepEqual(result.status, p.status);
+});
+
 test('computeMonthlyReview: no prior period means no biggest move and no note', () => {
   const result = computeMonthlyReview({
     period: period('2026-07-01', '2026-07-31', 4000, { Dining: 300 }),

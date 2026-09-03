@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState } from 'react';
-import { View, Text, Button, Pressable, ActivityIndicator, TextInput, StyleSheet, Alert } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { View, Text, Button, Pressable, ActivityIndicator, TextInput, ScrollView, StyleSheet, Alert } from 'react-native';
 // Reverted from react-native-gesture-handler's ScrollView back to plain
 // React Native (2026-08-19). It was switched to RNGH's version in Phase 13
 // because this tab then nested a Gesture.Pan() (the old NumberScrollWheel)
@@ -18,10 +18,11 @@ import { View, Text, Button, Pressable, ActivityIndicator, TextInput, StyleSheet
 // meaningfully contend with this ScrollView's own gesture recognition in
 // the first place.
 import { StatusBar } from 'expo-status-bar';
+import { useLocalSearchParams } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
 import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
-import { apiFetch, apiErrorMessage, formatDecimal, logRecommendationEvent } from '../_lib/api';
+import { apiFetch, apiErrorMessage, formatDecimal, formatAmount, logRecommendationEvent } from '../_lib/api';
 import { styles, colors } from '../_lib/styles';
 import { useAppData } from '../_lib/appData';
 import { iconForCategory } from '../_lib/categoryIcons';
@@ -53,6 +54,20 @@ const STATUS_COLOR = {
 export default function Budget() {
   const { refetchAlerts, alerts } = useAppData();
 
+  // Direct user request: tapping a category should show the transactions
+  // counting toward it plus insight/reasoning and possible actions. Built
+  // as a local state swap (not a separate router route) per direct
+  // follow-up feedback that the router-based version's back arrow
+  // returned to Home instead of this exact Budget tab state - the same
+  // "full screen swap, not a route" fix Home's own per-institution
+  // drill-down already established (see (tabs)/index.js's viewingItemId,
+  // whose own comment explains the real router-stack bugs this sidesteps
+  // entirely). `null` = normal Budget tab; a category name = viewing that
+  // category's own detail screen instead.
+  const [viewingCategory, setViewingCategory] = useState(null);
+  const [categoryTransactions, setCategoryTransactions] = useState(null);
+  const [categoryTxError, setCategoryTxError] = useState(null);
+
   const [budgetStatus, setBudgetStatus] = useState(null);
   const [loadingBudget, setLoadingBudget] = useState(false);
   const [generatingBudget, setGeneratingBudget] = useState(false);
@@ -63,6 +78,25 @@ export default function Budget() {
   const [loadingProposal, setLoadingProposal] = useState(false);
   const [applyingBudgetEdit, setApplyingBudgetEdit] = useState(false);
   const [error, setError] = useState(null);
+
+  // Direct user request: Home's Financial Health card icons should be
+  // interactive too, jumping straight into a category's own detail view
+  // here - a normal tab switch (Home -> Budget), not a "drill down, expect
+  // back to restore the exact spot" flow, so a plain router param is the
+  // right tool (unlike viewingCategory itself, which specifically can't be
+  // route-based - see its own comment above). Fires once per distinct
+  // category value, not on every render/focus, so manually closing the
+  // detail view afterward doesn't get immediately reopened by the same
+  // still-present param. Waits for budgetStatus too - a fresh navigation
+  // from Home can land here before fetchBudgetStatus's own useFocusEffect
+  // has resolved, and fetchCategoryTransactions needs budgetStatus's
+  // period_start/period_end to filter correctly (opening with it still
+  // null would silently show an empty transaction list).
+  const { category: categoryParam } = useLocalSearchParams();
+  useEffect(() => {
+    if (categoryParam && budgetStatus) openCategory(categoryParam);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categoryParam, budgetStatus]);
 
   const scrollRef = useRef(null);
   // Code review, 2026-09-02: applyingBudgetEdit alone only hides the
@@ -121,6 +155,47 @@ export default function Budget() {
     } catch (err) {
       console.error(err);
     }
+  }
+
+  // Fetched lazily, only once a category's own detail view actually opens
+  // - this tab has never needed the raw transaction list before, and
+  // fetching it on every normal Budget tab visit would be real wasted
+  // work for a view most visits never open. Filtered client-side to this
+  // category and the current budget period (budgetStatus.period_start/
+  // period_end, already fetched); GET /transactions itself already
+  // syncs/returns every field this view needs, no new backend route.
+  async function fetchCategoryTransactions(category) {
+    setCategoryTxError(null);
+    try {
+      const res = await apiFetch('/transactions');
+      // 404 means "no linked bank account yet" (GET /transactions' own
+      // NoLinkedAccountError handling) - not a real error here, just an
+      // empty list.
+      if (res.status === 404) {
+        setCategoryTransactions([]);
+        return;
+      }
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const data = await res.json();
+      setCategoryTransactions(
+        (data.transactions || []).filter(
+          (t) =>
+            t.category === category &&
+            budgetStatus &&
+            t.date >= budgetStatus.period_start &&
+            t.date <= budgetStatus.period_end
+        )
+      );
+    } catch (err) {
+      console.error(err);
+      setCategoryTxError(apiErrorMessage(err));
+    }
+  }
+
+  function openCategory(category) {
+    setViewingCategory(category);
+    setCategoryTransactions(null);
+    fetchCategoryTransactions(category);
   }
 
   // Phase 11 (2026-08-27): "View spending history" toggle - same
@@ -420,12 +495,121 @@ export default function Budget() {
           in-content "Budget" text title with no wordmark row above it;
           that in-content title (headerRow, below) stays as this screen's
           own subtitle-equivalent, it just no longer stands in for the
-          shared header every other tab already has. */}
-      <View style={budgetLocalStyles.wordmarkStrip}>
-        <SorrelWordmark layout="row" leafSize={30} showTagline={false} textColor={onBackdropTextColor} />
-        <MaterialIcons name="notifications-none" size={26} color={onBackdropTextColor || colors.darkest} />
-      </View>
+          shared header every other tab already has. Hidden while viewing
+          a category's own detail screen, which has its own back-arrow
+          header instead - same swap Home's own per-institution drill-down
+          already makes for its wordmarkStrip. */}
+      {viewingCategory === null && (
+        <View style={budgetLocalStyles.wordmarkStrip}>
+          <SorrelWordmark layout="row" leafSize={30} showTagline={false} textColor={onBackdropTextColor} />
+          <MaterialIcons name="notifications-none" size={26} color={onBackdropTextColor || colors.darkest} />
+        </View>
+      )}
 
+      {viewingCategory !== null && (
+        (() => {
+          const row = rows.find((s) => s.category === viewingCategory);
+          return (
+            <>
+              <View style={budgetLocalStyles.categoryDetailHeaderRow}>
+                <Pressable
+                  style={budgetLocalStyles.categoryDetailBackButton}
+                  onPress={() => setViewingCategory(null)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Back to Budget"
+                >
+                  <MaterialIcons name="arrow-back" size={26} color={onBackdropTextColor || colors.darkest} />
+                </Pressable>
+                <Text
+                  style={[budgetLocalStyles.categoryDetailTitle, onBackdropTextColor && { color: onBackdropTextColor }]}
+                >
+                  {viewingCategory}
+                </Text>
+                <View style={budgetLocalStyles.categoryDetailBackButton} />
+              </View>
+
+              <ScrollView
+                style={budgetLocalStyles.categoryDetailScreen}
+                contentContainerStyle={budgetLocalStyles.categoryDetailScreenContent}
+              >
+                  {row && (
+                    <View style={[styles.card, budgetLocalStyles.categoryDetailSummaryCard]}>
+                      <Text style={budgetLocalStyles.categoryDetailSpent}>
+                        {row.budgeted == null
+                          ? `$${formatDecimal(row.actual)} spent`
+                          : `$${formatDecimal(row.actual)} of $${formatDecimal(row.budgeted)}`}
+                      </Text>
+                      {row.budgeted != null && (
+                        <Text
+                          style={[
+                            budgetLocalStyles.categoryDetailRemaining,
+                            { color: row.remaining < 0 ? colors.error : colors.positive },
+                          ]}
+                        >
+                          {row.remaining < 0 ? '-' : ''}${formatDecimal(Math.abs(row.remaining))}{' '}
+                          {row.remaining < 0 ? 'over' : 'left'}
+                        </Text>
+                      )}
+                      {row.reasoning && (
+                        <Text style={budgetLocalStyles.reasoningText}>{row.reasoning}</Text>
+                      )}
+                      {row.is_user_set &&
+                        (applyingBudgetEdit ? (
+                          <ActivityIndicator style={budgetLocalStyles.categoryDetailActionSpacing} />
+                        ) : (
+                          <Pressable
+                            style={budgetLocalStyles.categoryDetailResetButton}
+                            onPress={() => confirmResetCategoryToAI(viewingCategory)}
+                            accessibilityRole="button"
+                            accessibilityLabel="Reset to AI-suggested"
+                          >
+                            <MaterialIcons name="auto-awesome" size={16} color={colors.primary} />
+                            <Text style={budgetLocalStyles.categoryDetailResetButtonText}>
+                              RESET TO AI-SUGGESTED
+                            </Text>
+                          </Pressable>
+                        ))}
+                    </View>
+                  )}
+
+                  <Text style={budgetLocalStyles.categoryDetailSectionLabel}>
+                    TRANSACTIONS {categoryTransactions ? `(${categoryTransactions.length})` : ''}
+                  </Text>
+
+                  {categoryTxError ? (
+                    <Text style={styles.errorText}>{categoryTxError}</Text>
+                  ) : categoryTransactions === null ? (
+                    <ActivityIndicator />
+                  ) : categoryTransactions.length === 0 ? (
+                    <Text style={styles.smallText}>No transactions in this category this period.</Text>
+                  ) : (
+                    categoryTransactions.map((t) => (
+                      <View key={t.transaction_id} style={[styles.card, budgetLocalStyles.categoryDetailTxRow]}>
+                        <View style={budgetLocalStyles.categoryIconCircle}>
+                          <MaterialIcons name={iconForCategory(t.category)} size={16} color={colors.dark} />
+                        </View>
+                        <View style={budgetLocalStyles.categoryDetailTxTextCol}>
+                          <Text style={budgetLocalStyles.categoryDetailTxName} numberOfLines={1}>
+                            {t.merchant_name || t.name}
+                          </Text>
+                        </View>
+                        <Text style={budgetLocalStyles.categoryDetailTxAmount}>{formatAmount(t.amount)}</Text>
+                      </View>
+                    ))
+                  )}
+              </ScrollView>
+            </>
+          );
+        })()
+      )}
+
+      {/* Deliberately NOT gated on viewingCategory (an earlier version of
+          this screen was, and missed it): `error` is shared by several
+          actions on this tab, including resetCategoryToAI - which the
+          category detail view's own "Reset to AI-suggested" button also
+          calls - so a failure from inside that view needs to still show
+          up somewhere, not silently vanish because the banner only
+          rendered in the other half of this screen's own conditional. */}
       {error && (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>{error}</Text>
@@ -433,7 +617,7 @@ export default function Budget() {
         </View>
       )}
 
-      {loadingBudget ? (
+      {viewingCategory === null && (loadingBudget ? (
         <View style={styles.centered}>
           <ActivityIndicator />
         </View>
@@ -663,7 +847,23 @@ export default function Budget() {
             const percent = s.budgeted > 0 ? Math.min(1, s.actual / s.budgeted) : s.budgeted === 0 ? 1 : 0;
             const isEditing = editingBudgetCategory === s.category;
             return (
-              <View key={s.category} style={[styles.card, budgetLocalStyles.categoryCard]}>
+              // Direct user request: tapping a category should show the
+              // transactions counting toward it plus insight/reasoning and
+              // possible actions. Disabled while this card's own inline
+              // edit section is open (isEditing) so it can't fight the
+              // edit form underneath - the EDIT chip below is its own
+              // nested Pressable, which consumes its own taps before they
+              // ever reach this outer one, same "innermost interactive
+              // element wins" pattern already used elsewhere in this app
+              // (Home Settings' tap-anywhere-to-exit-edit-mode).
+              <Pressable
+                key={s.category}
+                style={[styles.card, budgetLocalStyles.categoryCard]}
+                onPress={() => openCategory(s.category)}
+                disabled={isEditing}
+                accessibilityRole="button"
+                accessibilityLabel={`View ${s.category} transactions`}
+              >
                   <View style={budgetLocalStyles.categoryTopRow}>
                     <View style={budgetLocalStyles.categoryIconCircle}>
                       <MaterialIcons name={iconForCategory(s.category)} size={18} color={colors.dark} />
@@ -791,12 +991,12 @@ export default function Budget() {
                         )}
                       </View>
                     ))}
-              </View>
+              </Pressable>
             );
           })}
         </Animated.ScrollView>
         </TopEdgeFade>
-      )}
+      ))}
       <BudgetInsightModal
         visible={insightModalVisible}
         onClose={() => setInsightModalVisible(false)}
@@ -1136,5 +1336,100 @@ const budgetLocalStyles = StyleSheet.create({
   historyPeriodStat: {
     fontSize: 13,
     color: colors.dark,
+  },
+  // Category detail view (local state swap, not a route - see
+  // viewingCategory's own comment for why). Same header shape as
+  // SettingsScreenChrome/Home's own per-institution drill-down.
+  categoryDetailHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 56,
+    paddingBottom: 12,
+    gap: 12,
+  },
+  categoryDetailBackButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  categoryDetailTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.darkest,
+  },
+  categoryDetailScreen: {
+    flex: 1,
+  },
+  categoryDetailScreenContent: {
+    paddingTop: 8,
+    paddingBottom: 150,
+  },
+  categoryDetailSummaryCard: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    gap: 6,
+  },
+  categoryDetailSpent: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.darkest,
+  },
+  categoryDetailRemaining: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  categoryDetailActionSpacing: {
+    marginTop: 4,
+  },
+  categoryDetailResetButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.sage,
+    backgroundColor: colors.background,
+    borderRadius: 22,
+    paddingVertical: 10,
+    marginTop: 4,
+  },
+  categoryDetailResetButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primary,
+    letterSpacing: 0.3,
+  },
+  categoryDetailSectionLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    color: colors.muted,
+    marginHorizontal: 16,
+    marginBottom: 6,
+  },
+  categoryDetailTxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    paddingVertical: 4,
+  },
+  categoryDetailTxTextCol: {
+    flex: 1,
+  },
+  categoryDetailTxName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.darkest,
+  },
+  categoryDetailTxAmount: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.darkest,
   },
 });

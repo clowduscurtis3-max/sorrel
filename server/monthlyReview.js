@@ -57,6 +57,15 @@ function computeMonthlyReview({ period, prior, goalProgress }) {
     biggest_move: biggestMove,
     note,
     goal_pace: goalProgress ? { on_pace: goalProgress.on_pace ?? null, message: goalProgress.message } : null,
+    // Direct user request: Home's Monthly Review card should open into "a
+    // larger window with more details" - this was already computed by
+    // getPeriodReview below (via computeBudgetStatus) but silently
+    // discarded before this point, only ever used internally for the
+    // biggest-mover diff. Exposing it as-is gives the detail view a real
+    // per-category budgeted/actual/remaining breakdown for the reviewed
+    // month, not just the single "biggest mover" line the card itself
+    // has room for.
+    status: period.status,
   };
 }
 

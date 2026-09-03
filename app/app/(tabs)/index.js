@@ -37,6 +37,8 @@ import {
 } from '../_lib/homeSummary';
 import { iconForCategory as iconForTxCategory } from '../_lib/categoryIcons';
 import { HOME_CARD_GROUP_BEFORE_STATS, HOME_CARD_GROUP_AFTER_STATS, orderCardGroup } from '../_lib/homeCards';
+import ProjectedSpendModal from '../_components/ProjectedSpendModal';
+import MonthlyReviewModal from '../_components/MonthlyReviewModal';
 
 const STATUS_ICON = { ok: 'check-circle', warning: 'warning', severe: 'error' };
 const STATUS_COLOR = {
@@ -229,6 +231,14 @@ export default function Home() {
   // no new route for the root gate or a cold app-launch to ever resolve to.
   const [viewingItemId, setViewingItemId] = useState(null);
 
+  // A plain <Modal>, not a route or a local-state screen swap - this is
+  // purely explanatory content with no need for full-screen real estate
+  // or the "return to exact scroll position" guarantee viewingItemId/
+  // Budget's own viewingCategory need. Matches BudgetInsightModal.js's
+  // own established precedent for exactly this shape of overlay.
+  const [showProjectedSpendDetail, setShowProjectedSpendDetail] = useState(false);
+  const [showMonthlyReviewDetail, setShowMonthlyReviewDetail] = useState(false);
+
   // Kept for the Overview branch's Animated.ScrollView onScroll wiring
   // below - no longer drives the backdrop itself (AppBackdrop is a
   // static full-screen layer, not scroll-parallaxed).
@@ -370,6 +380,35 @@ export default function Home() {
     });
     return () => subscription.remove();
   }, []);
+
+  // Direct user request, 2026-09-03: "how fast does the application pick
+  // up transactions as I'm spinning in real time" -> auto-refresh. Before
+  // this, a new transaction only ever showed up on one of three triggers
+  // (opening/switching to this tab, resuming from background, or a manual
+  // pull-to-refresh) - nothing re-checked while you were just sitting on
+  // Home watching for it. This adds a fourth: a 30s poll, but ONLY while
+  // Home is the focused tab AND the app is actually in the foreground -
+  // both checked on every tick, not just at setup, so backgrounding the
+  // app or switching tabs stops it immediately rather than continuing to
+  // poll for a screen the user isn't even looking at. 30s (not something
+  // more aggressive) is a deliberately conservative interval: Plaid's own
+  // real-world latency for a bank to even report a new charge is commonly
+  // minutes, not seconds, so polling faster wouldn't reveal a transaction
+  // any sooner in practice, only burn more calls for no benefit - and
+  // this app's Trial-plan Plaid access (free, but of undocumented rate
+  // limit - see CLAUDE.md's own note on why Trial was chosen) is a real
+  // reason to stay conservative rather than assume "free" also means
+  // "no frequency ceiling worth respecting."
+  useFocusEffect(
+    useCallback(() => {
+      const interval = setInterval(() => {
+        if (AppState.currentState === 'active') {
+          fetchTransactions({ silent: true, suppressErrorBanner: true });
+        }
+      }, 30000);
+      return () => clearInterval(interval);
+    }, [])
+  );
 
   async function onRefresh() {
     setRefreshing(true);
@@ -647,7 +686,31 @@ export default function Home() {
 
         <View style={homeStyles.categoryRow}>
           {categoryTiles.map((tile) => (
-            <View key={tile.category} style={homeStyles.categoryTile}>
+            // Direct user request: Home cards should be interactive.
+            // Jumps into the Budget tab, pre-opened to this exact
+            // category's own detail view (see (tabs)/budget.js's
+            // categoryParam effect) - a normal tab switch, not a
+            // drill-down needing to preserve this exact Home scroll
+            // position, so a plain router push is the right tool here
+            // (unlike Budget's own in-tab category taps, which had to be
+            // a local state swap instead - see that fix's own comment).
+            // 'Other' (computeCategoryStatuses's own synthetic rollup of
+            // every category not given its own named tile) has no single
+            // real category to open - lands on plain Budget instead of
+            // guessing which one the user meant.
+            <Pressable
+              key={tile.category}
+              style={homeStyles.categoryTile}
+              onPress={() =>
+                router.push(
+                  tile.category === 'Other'
+                    ? '/budget'
+                    : { pathname: '/budget', params: { category: tile.category } }
+                )
+              }
+              accessibilityRole="button"
+              accessibilityLabel={`View ${tile.label} in Budget`}
+            >
               <View style={homeStyles.categoryIconCircle}>
                 <MaterialIcons name={tile.icon} size={20} color={colors.dark} />
               </View>
@@ -663,7 +726,7 @@ export default function Home() {
                   color={STATUS_COLOR[tile.status]}
                 />
               )}
-            </View>
+            </Pressable>
           ))}
         </View>
 
@@ -776,7 +839,16 @@ export default function Home() {
     if (!monthlyReview) return null;
     const textColor = readableTextColor(cardColors.monthly_review, colors);
     return (
-      <View style={[styles.card, homeStyles.cardMargin, cardColors.monthly_review && { backgroundColor: cardColors.monthly_review }]}>
+      // Direct user request: Home cards should be interactive - opens
+      // into "a larger window with more details" (MonthlyReviewModal),
+      // which adds the full per-category breakdown the card itself has
+      // no room for.
+      <Pressable
+        style={[styles.card, homeStyles.cardMargin, cardColors.monthly_review && { backgroundColor: cardColors.monthly_review }]}
+        onPress={() => setShowMonthlyReviewDetail(true)}
+        accessibilityRole="button"
+        accessibilityLabel="View full monthly review"
+      >
         <Text style={[homeStyles.cardEyebrow, textColor && { color: textColor }]}>
           {new Date(`${monthlyReview.period_start}T00:00:00Z`)
             .toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' })
@@ -803,7 +875,7 @@ export default function Home() {
         {monthlyReview.goal_pace?.message && (
           <Text style={homeStyles.changeMore}>{monthlyReview.goal_pace.message}</Text>
         )}
-      </View>
+      </Pressable>
     );
   }
 
@@ -829,7 +901,20 @@ export default function Home() {
     if (!goalProgress?.has_target) return null;
     const textColor = readableTextColor(cardColors.goal_progress, colors);
     return (
-      <View style={[styles.card, homeStyles.cardMargin, cardColors.goal_progress && { backgroundColor: cardColors.goal_progress }]}>
+      // Direct user request: Home cards should be interactive. This one
+      // navigates to the Goal tab - a normal tab switch, not a "drill
+      // into detail then expect back to restore this exact spot" flow
+      // (unlike Budget's own category detail view, which had to be a
+      // local state swap instead of a router push specifically because
+      // it needed a reliable way back to the exact same place - see that
+      // fix's own comment in (tabs)/budget.js). Switching tabs has no
+      // such expectation, so a plain router.push is the right tool here.
+      <Pressable
+        style={[styles.card, homeStyles.cardMargin, cardColors.goal_progress && { backgroundColor: cardColors.goal_progress }]}
+        onPress={() => router.push('/goal')}
+        accessibilityRole="button"
+        accessibilityLabel="View Goal tab"
+      >
         <Text style={[styles.cardTitle, textColor && { color: textColor }]}>Goal progress</Text>
         <View style={homeStyles.progressTrack}>
           <View
@@ -843,7 +928,7 @@ export default function Home() {
           ${formatDecimal(goalProgress.saved_amount)} of ${formatDecimal(goalProgress.target_amount)} —{' '}
           {Math.round(goalProgress.percent_complete)}% · {formatGoalType(goalProgress.goal_type)}
         </Text>
-      </View>
+      </Pressable>
     );
   }
 
@@ -1162,14 +1247,32 @@ export default function Home() {
               Settings' manageable cards (Phase 38 Step 3) - always shown,
               always in this exact spot, same as before that step existed. */}
           <View style={[styles.card, homeStyles.cardMargin, homeStyles.statRow]}>
-            <View style={homeStyles.statTile}>
+            {/* Direct user request: Home cards should be interactive.
+                Lands on the plain Budget tab (no category param) - it
+                already shows every category's own spend broken out, which
+                is a fuller answer to "what's counted toward this total"
+                than a second, flat all-categories transaction list would
+                be, and each of ITS category cards already drills in
+                further (the categoryParam flow built for the Financial
+                Health tiles, above). */}
+            <Pressable
+              style={homeStyles.statTile}
+              onPress={() => router.push('/budget')}
+              accessibilityRole="button"
+              accessibilityLabel="View spend by category in Budget"
+            >
               <MaterialIcons name="account-balance-wallet" size={18} color={colors.dark} />
               <Text style={homeStyles.statLabel}>SPENT SO FAR</Text>
               <Text style={homeStyles.statValue}>${formatWhole(spendStats.spent)}</Text>
               <Text style={homeStyles.statSub}>of ${formatWhole(spendStats.budgeted)}</Text>
-            </View>
+            </Pressable>
             <View style={homeStyles.statDivider} />
-            <View style={homeStyles.statTile}>
+            <Pressable
+              style={homeStyles.statTile}
+              onPress={() => setShowProjectedSpendDetail(true)}
+              accessibilityRole="button"
+              accessibilityLabel="What is projected spend?"
+            >
               <MaterialIcons name="show-chart" size={18} color={colors.dark} />
               <Text style={homeStyles.statLabel}>PROJECTED SPEND</Text>
               <Text style={homeStyles.statValue}>
@@ -1185,7 +1288,7 @@ export default function Home() {
                   ? `$${formatWhole(pace.aheadBy)} ${pace.isAhead ? 'under' : 'over'} budget`
                   : 'not enough data'}
               </Text>
-            </View>
+            </Pressable>
             <View style={homeStyles.statDivider} />
             <View style={homeStyles.statTile}>
               <MaterialIcons name="event" size={18} color={colors.dark} />
@@ -1196,7 +1299,15 @@ export default function Home() {
               <Text style={homeStyles.statSub}>in {monthName}</Text>
             </View>
             <View style={homeStyles.statDivider} />
-            <View style={homeStyles.statTile}>
+            {/* Same destination as the "Goal progress" card further down
+                (already interactive) - consistent behavior for the same
+                underlying data shown twice on this screen. */}
+            <Pressable
+              style={homeStyles.statTile}
+              onPress={() => router.push('/goal')}
+              accessibilityRole="button"
+              accessibilityLabel="View Goal tab"
+            >
               <MaterialIcons name="track-changes" size={18} color={colors.dark} />
               <Text style={homeStyles.statLabel}>GOAL PROGRESS</Text>
               <Text style={homeStyles.statValue}>
@@ -1205,13 +1316,28 @@ export default function Home() {
               <Text style={homeStyles.statSub}>
                 {goalProgress ? formatGoalType(goalProgress.goal_type) : 'No goal yet'}
               </Text>
-            </View>
+            </Pressable>
           </View>
 
           {orderedCardsAfterStats.map(renderHomeCard)}
         </Animated.ScrollView>
         </TopEdgeFade>
       )}
+
+      <ProjectedSpendModal
+        visible={showProjectedSpendDetail}
+        onClose={() => setShowProjectedSpendDetail(false)}
+        pace={pace}
+        spendStats={spendStats}
+        monthProgress={monthProgress}
+        monthName={monthName}
+      />
+
+      <MonthlyReviewModal
+        visible={showMonthlyReviewDetail}
+        onClose={() => setShowMonthlyReviewDetail(false)}
+        monthlyReview={monthlyReview}
+      />
 
       <StatusBar style="auto" />
     </View>

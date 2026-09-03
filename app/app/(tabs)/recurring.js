@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
@@ -120,16 +120,31 @@ const INTERVAL_FILTERS = [
   { key: 'annual', label: 'Annual' },
 ];
 
-function GlanceTile({ icon, label, value, sub, isLast }) {
+// Direct user request: Recurring tab's "This month at a glance" should be
+// interactive too, "same treatment" as Home's own cards. Each tile jumps
+// to the existing section it summarizes, already built further down this
+// same screen - UPCOMING/DUE SOON both describe the recurring-charges
+// list itself; VS LAST MONTH/POTENTIAL SAVINGS both describe the
+// price-change findings section, which already has its own expand/
+// collapse (showSavings) this just also opens. No new subview was built
+// for either - scrolling to and revealing what's already there is a
+// truer answer than fabricating a new "due soon only" filtered list this
+// screen doesn't otherwise have.
+function GlanceTile({ icon, label, value, sub, isLast, onPress, accessibilityLabel }) {
   return (
-    <View style={[recurringStyles.glanceTile, !isLast && recurringStyles.glanceTileDivider]}>
+    <Pressable
+      style={[recurringStyles.glanceTile, !isLast && recurringStyles.glanceTileDivider]}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+    >
       <View style={recurringStyles.glanceIconCircle}>
         <MaterialIcons name={icon} size={16} color={colors.background} />
       </View>
       <Text style={recurringStyles.glanceLabel}>{label}</Text>
       <Text style={recurringStyles.glanceValue}>{value}</Text>
       {sub && <Text style={recurringStyles.glanceSub}>{sub}</Text>}
-    </View>
+    </Pressable>
   );
 }
 
@@ -223,6 +238,22 @@ export default function Recurring() {
     scrollY.value = event.contentOffset.y;
   });
 
+  // Measured on layout, used only to scroll the glance tiles to the
+  // section they summarize - see GlanceTile's own comment for why these
+  // jump to existing sections rather than a new filtered subview.
+  const scrollRef = useRef(null);
+  const groupsY = useRef(0);
+  const savingsY = useRef(0);
+
+  function scrollToGroups() {
+    scrollRef.current?.scrollTo({ y: groupsY.current, animated: true });
+  }
+
+  function scrollToSavings() {
+    setShowSavings(true);
+    scrollRef.current?.scrollTo({ y: savingsY.current, animated: true });
+  }
+
   // Text/icons rendered directly on top of AppBackdrop (not inside an
   // opaque card) need to switch to a light color during the night
   // backdrop - colors.darkest reads fine on the light morning/afternoon/
@@ -245,6 +276,7 @@ export default function Recurring() {
 
       <TopEdgeFade height={90}>
       <Animated.ScrollView
+        ref={scrollRef}
         style={[styles.list, recurringStyles.transparentScroll]}
         contentContainerStyle={{ paddingBottom: 150 }}
         onScroll={onScroll}
@@ -322,18 +354,24 @@ export default function Recurring() {
                   label="UPCOMING"
                   value={subscriptionAudit.glance.upcoming_count}
                   sub="Payments"
+                  onPress={scrollToGroups}
+                  accessibilityLabel="Upcoming payments - view all recurring charges"
                 />
                 <GlanceTile
                   icon="attach-money"
                   label="DUE SOON"
                   value={`$${formatDecimal(subscriptionAudit.glance.due_soon_total)}`}
                   sub={`in next ${subscriptionAudit.glance.due_soon_days} days`}
+                  onPress={scrollToGroups}
+                  accessibilityLabel="Due soon - view all recurring charges"
                 />
                 <GlanceTile
                   icon="trending-up"
                   label="VS LAST MONTH"
                   value={delta ? delta.text : 'N/A'}
                   sub={delta ? delta.direction : 'not enough history'}
+                  onPress={scrollToSavings}
+                  accessibilityLabel="Vs last month - view savings details"
                 />
                 <GlanceTile
                   icon="local-offer"
@@ -341,6 +379,8 @@ export default function Recurring() {
                   value={`$${formatDecimal(subscriptionAudit.glance.potential_savings_total)}`}
                   sub="/ month"
                   isLast
+                  onPress={scrollToSavings}
+                  accessibilityLabel="Potential savings - view savings details"
                 />
               </View>
             </View>
@@ -398,25 +438,30 @@ export default function Recurring() {
               </View>
             )}
 
-            {hasAnyMatch ? (
-              groups.map((g) => (
-                <GroupCard
-                  key={g.key}
-                  group={g}
-                  query={query}
-                  intervalFilter={intervalFilter}
-                  expanded={!!expandedGroups[g.key]}
-                  onToggle={() => toggleGroup(g.key)}
-                />
-              ))
-            ) : (
-              <Text style={[styles.smallText, recurringStyles.cardMargin]}>
-                No recurring charges match your search or filter.
-              </Text>
-            )}
+            <View onLayout={(e) => { groupsY.current = e.nativeEvent.layout.y; }}>
+              {hasAnyMatch ? (
+                groups.map((g) => (
+                  <GroupCard
+                    key={g.key}
+                    group={g}
+                    query={query}
+                    intervalFilter={intervalFilter}
+                    expanded={!!expandedGroups[g.key]}
+                    onToggle={() => toggleGroup(g.key)}
+                  />
+                ))
+              ) : (
+                <Text style={[styles.smallText, recurringStyles.cardMargin]}>
+                  No recurring charges match your search or filter.
+                </Text>
+              )}
+            </View>
 
             {subscriptionAudit.glance.potential_savings_total > 0 && (
-              <View style={[styles.card, recurringStyles.cardMargin, recurringStyles.savingsCard]}>
+              <View
+                onLayout={(e) => { savingsY.current = e.nativeEvent.layout.y; }}
+                style={[styles.card, recurringStyles.cardMargin, recurringStyles.savingsCard]}
+              >
                 <View style={recurringStyles.insightIconCircle}>
                   <MaterialIcons name="eco" size={18} color={colors.dark} />
                 </View>
