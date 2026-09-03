@@ -65,6 +65,16 @@ export default function Budget() {
   const [error, setError] = useState(null);
 
   const scrollRef = useRef(null);
+  // Code review, 2026-09-02: applyingBudgetEdit alone only hides the
+  // "Reset to AI-suggested" link *after* resetCategoryToAI has already
+  // started (which only happens once the Alert.alert confirm button is
+  // tapped) - it does nothing to stop the link itself from being
+  // double-tapped before the alert even renders, which would open two
+  // Alert.alert confirmations and, if both are confirmed, fire two
+  // concurrent resets. A ref (synchronous, unlike state) closes that
+  // specific gap: the very first tap sets it before any async work starts,
+  // so a second tap in the same instant sees it already true.
+  const resetPendingRef = useRef(false);
 
   // Drives AppBackdrop's scroll-linked parallax/wiggle - Budget was the
   // one tab with a plain (non-Animated) ScrollView, since it predates the
@@ -253,17 +263,25 @@ export default function Budget() {
       setError(apiErrorMessage(err));
     } finally {
       setApplyingBudgetEdit(false);
+      resetPendingRef.current = false;
     }
   }
 
   function confirmResetCategoryToAI(category) {
+    if (resetPendingRef.current) return;
+    resetPendingRef.current = true;
     Alert.alert(
       'Reset this category?',
       `This clears your manually-set amount for ${category} and lets the AI suggest a fresh one from your current spending.`,
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: 'Cancel', style: 'cancel', onPress: () => { resetPendingRef.current = false; } },
         { text: 'Reset to AI-Suggested', style: 'destructive', onPress: () => resetCategoryToAI(category) },
-      ]
+      ],
+      // Android can also dismiss this by tapping outside the dialog or the
+      // back button, which fires neither button's onPress above - without
+      // this, that path would leave resetPendingRef stuck true forever,
+      // permanently disabling the link until the app restarts.
+      { onDismiss: () => { resetPendingRef.current = false; } }
     );
   }
 
@@ -541,11 +559,11 @@ export default function Budget() {
               <View style={budgetLocalStyles.statDivider} />
               <View style={budgetLocalStyles.statTile}>
                 <MaterialIcons name="show-chart" size={18} color={colors.dark} />
-                <Text style={budgetLocalStyles.statLabel}>PACE</Text>
+                <Text style={budgetLocalStyles.statLabel}>PROJECTED SPEND</Text>
                 <Text
                   style={[budgetLocalStyles.statValue, pace && !pace.isAhead && { color: colors.error }]}
                 >
-                  {pace ? `$${formatDecimal(pace.aheadBy)}` : '—'}
+                  {pace ? `$${formatDecimal(pace.projected)}` : '—'}
                 </Text>
                 <Text
                   style={[
@@ -553,7 +571,9 @@ export default function Budget() {
                     pace && { color: pace.isAhead ? colors.positive : colors.error },
                   ]}
                 >
-                  {pace ? (pace.isAhead ? 'ahead of pace' : 'behind pace') : 'not enough data'}
+                  {pace
+                    ? `$${formatDecimal(pace.aheadBy)} ${pace.isAhead ? 'under' : 'over'} budget`
+                    : 'not enough data'}
                 </Text>
               </View>
               <View style={budgetLocalStyles.statDivider} />

@@ -240,11 +240,18 @@ export function computeSpendStats(budgetStatus) {
 
 // Same pace-projection formula alerts.js already uses per-category
 // (projected = actual * daysInPeriod/daysElapsed), applied once to the
-// month's total instead - a dollar figure for "ahead of/behind pace",
-// mirroring the mockup's own "$142 ahead of pace" tile.
+// month's total instead. `projected` (the actual month-end estimate) is
+// what the Home/Budget stat tile now shows directly, per direct user
+// request (2026-09-03) to relabel this tile "Projected Spend" instead of
+// "Pace" - `aheadBy`/`isAhead` (the delta vs. budget) are kept too, still
+// used for the tile's under/over-budget caption.
 export function computePace({ spent, budgeted }, { daysElapsed, daysInMonth }) {
   if (daysElapsed <= 0 || budgeted <= 0) return null;
   const projected = spent * (daysInMonth / daysElapsed);
   const diff = Math.round((budgeted - projected) * 100) / 100;
-  return { aheadBy: Math.abs(diff), isAhead: diff >= 0 };
+  return {
+    projected: Math.round(projected * 100) / 100,
+    aheadBy: Math.abs(diff),
+    isAhead: diff >= 0,
+  };
 }

@@ -278,3 +278,40 @@ export function logRecommendationEvent(recommendationType, status, context = {})
     body: JSON.stringify({ recommendation_type: recommendationType, status, context }),
   }).catch((err) => console.error(err));
 }
+
+// Fixed a real race found by code review, 2026-09-02: server/settings.js's
+// patchSettings does an unsynchronized read-merge-write per call (read the
+// current section, merge the patch in JS, upsert) - two PATCH /settings
+// calls to the same section in flight at once can both read the same
+// starting point, and whichever's upsert lands last silently wins,
+// dropping the other's change. settings/home.js in particular can fire a
+// PATCH on every single reorder tap, visibility toggle, and color pick in
+// quick succession. Rather than making the server call atomic (would need
+// a raw SQL jsonb merge via an RPC function, more invasive for what's
+// fundamentally a same-device UI race), every screen routes its PATCH
+// /settings calls through this one shared, app-wide promise chain instead
+// of calling apiFetch directly - guarantees no two are ever in flight
+// concurrently, regardless of which screen/component issues them, so each
+// call's read-merge-write sees the previous call's already-committed
+// result.
+let settingsPatchChain = Promise.resolve();
+export function patchSettings(section, patch) {
+  const run = async () => {
+    const res = await apiFetch('/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ section, patch }),
+    });
+    if (!res.ok) throw new Error('SERVER_ERROR');
+    return res.json();
+  };
+  // Runs `run` after the previous call settles, success or failure alike -
+  // a failed patch must not permanently block every later one.
+  const result = settingsPatchChain.then(run, run);
+  // Swallowed here, not lost: `result` (the promise this function returns)
+  // still rejects normally for its own caller to handle - this only stops
+  // one call's rejection from poisoning the shared chain for whoever
+  // queues up next.
+  settingsPatchChain = result.catch(() => {});
+  return result;
+}

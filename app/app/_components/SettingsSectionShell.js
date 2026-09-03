@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { View, Text, Switch, ActivityIndicator, StyleSheet } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { apiFetch, apiErrorMessage } from '../_lib/api';
+import { apiFetch, apiErrorMessage, patchSettings } from '../_lib/api';
 import { styles, colors } from '../_lib/styles';
 import SettingsScreenChrome from './SettingsScreenChrome';
 import SettingsFetchGate from './SettingsFetchGate';
@@ -40,22 +40,21 @@ export default function SettingsSectionShell({ section, title, subtitle }) {
   );
 
   async function togglePlaceholder(value) {
-    const previous = settings;
     setSettings((prev) => ({ ...prev, [section]: { ...prev[section], shell_placeholder: value } }));
     setSaving(true);
     setError(null);
     try {
-      const res = await apiFetch('/settings', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ section, patch: { shell_placeholder: value } }),
-      });
-      if (!res.ok) throw new Error('SERVER_ERROR');
-      setSettings(await res.json());
+      setSettings(await patchSettings(section, { shell_placeholder: value }));
     } catch (err) {
       console.error(err);
       setError(apiErrorMessage(err));
-      setSettings(previous);
+      // Re-fetch the real server state on failure rather than restoring a
+      // locally-held "previous" snapshot (code review, 2026-09-02): a
+      // snapshot taken before this PATCH started can itself be stale by
+      // the time the failure is handled (e.g. a focus-triggered refetch
+      // landed newer data in between), and restoring it would silently
+      // discard that newer data. The server is always the source of truth.
+      fetchSettings();
     } finally {
       setSaving(false);
     }

@@ -19,7 +19,7 @@ import { createPlaidLinkSession } from 'react-native-plaid-link-sdk';
 import { MaterialIcons } from '@expo/vector-icons';
 import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
 import { apiFetch, apiErrorMessage, formatAmount, formatDecimal, formatWhole, CATEGORIES } from '../_lib/api';
-import { styles, colors } from '../_lib/styles';
+import { styles, colors, readableTextColor, isValidHexColor } from '../_lib/styles';
 import { useAppData } from '../_lib/appData';
 import { useSessionContext } from '../_lib/session';
 import SorrelWordmark from '../_components/SorrelWordmark';
@@ -36,6 +36,7 @@ import {
   computePace,
 } from '../_lib/homeSummary';
 import { iconForCategory as iconForTxCategory } from '../_lib/categoryIcons';
+import { HOME_CARD_GROUP_BEFORE_STATS, HOME_CARD_GROUP_AFTER_STATS, orderCardGroup } from '../_lib/homeCards';
 
 const STATUS_ICON = { ok: 'check-circle', warning: 'warning', severe: 'error' };
 const STATUS_COLOR = {
@@ -103,35 +104,73 @@ function formatUpNextText(date) {
   return `expected in ${days} days`;
 }
 
-// Groups transactions into the shape SectionList expects, one section per
-// category, ported verbatim from old app/App.js. A transaction with matched
-// receipt items is exploded into its individual line items (each under its
-// own category) instead of showing as a single lump-sum row.
-function groupByCategory(transactions) {
-  const groups = {};
+// Per-transaction date shown in the per-bank drill-down list (direct user
+// request, 2026-09-03: transactions had no visible date at all, grouped
+// only by category, so there was no way to tell when anything happened).
+// Short month + day, no year - the section header above each row already
+// establishes the month/year, so repeating it per row would be redundant;
+// this is just enough to scan quickly within a month's transactions.
+function formatShortDate(dateOnly) {
+  const d = new Date(`${dateOnly}T00:00:00Z`);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
 
-  function addTo(category, entry) {
-    const key = category || 'Other';
-    if (!groups[key]) groups[key] = [];
-    groups[key].push(entry);
+function formatMonthTitle(monthKey) {
+  const [year, month] = monthKey.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString('en-US', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+// Groups transactions into the shape SectionList expects, one section per
+// calendar month - replaced the old per-category grouping 2026-09-03, per
+// direct user feedback: grouping by category (then sorting those
+// alphabetically) scattered everything with no way to tell when anything
+// actually happened. `transactions` already arrives newest-first (GET
+// /transactions orders by date descending), and month keys are tracked in
+// a separate `order` array (not relied on via Object.keys iteration order,
+// which - while it would also happen to work here, since 'YYYY-MM' isn't
+// an integer-like key V8 would reorder - is a subtler thing to depend on
+// than just tracking insertion order explicitly), so sections and each
+// section's own rows both come out newest-first with no extra sort. A
+// transaction with matched receipt items is exploded into its individual
+// line items (each still dated to the parent transaction's date) instead
+// of showing as a single lump-sum row, same as before this change.
+function groupByMonth(transactions) {
+  const groups = {};
+  const order = [];
+
+  function addTo(monthKey, entry) {
+    if (!groups[monthKey]) {
+      groups[monthKey] = [];
+      order.push(monthKey);
+    }
+    groups[monthKey].push(entry);
   }
 
   for (const t of transactions) {
+    const monthKey = t.date.slice(0, 7);
     if (t.items && t.items.length > 0) {
       t.items.forEach((item, i) => {
-        addTo(item.category, {
+        addTo(monthKey, {
           key: `${t.transaction_id}-${i}`,
           name: item.name,
           amount: item.amount,
+          date: t.date,
+          category: item.category,
           needsReview: false,
         });
       });
     } else {
-      addTo(t.category, {
+      addTo(monthKey, {
         key: t.transaction_id,
         transactionId: t.transaction_id,
         name: t.merchant_name || t.name,
         amount: t.amount,
+        date: t.date,
+        category: t.category,
         needsReview: t.category === 'Uncategorized' || t.category_confidence !== 'high',
         isRecurring: !!t.is_recurring,
         recurringInterval: t.recurring_interval,
@@ -139,9 +178,7 @@ function groupByCategory(transactions) {
     }
   }
 
-  return Object.keys(groups)
-    .sort()
-    .map((title) => ({ title, data: groups[title] }));
+  return order.map((monthKey) => ({ title: formatMonthTitle(monthKey), data: groups[monthKey] }));
 }
 
 // Phase 7 Step 1 sub-step 1.3: the real Home tab, replacing the sub-step
@@ -221,6 +258,25 @@ export default function Home() {
   // no new fetch needed.
   const [showNetWorthHistory, setShowNetWorthHistory] = useState(false);
 
+  // Phase 38 Step 3 (Home Settings): which cards show, in what order, and
+  // with what background color - all decided in Settings, this tab just
+  // reads the result. `{}` (nothing customized yet) reads as "default
+  // order, nothing hidden, no color overrides" via the derived values
+  // below, matching "a user who's never opened Settings sees current
+  // behavior unchanged."
+  const [homeSettings, setHomeSettings] = useState({});
+
+  async function fetchHomeSettings() {
+    try {
+      const res = await apiFetch('/settings');
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const data = await res.json();
+      setHomeSettings(data.home_settings || {});
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   // Phase 14 (Home synthesis) - all pure/derived from already-fetched data,
   // recomputed on every render (cheap arithmetic over small arrays, no
   // memoization needed at this scale). See _lib/homeSummary.js for the
@@ -283,6 +339,7 @@ export default function Home() {
   useFocusEffect(
     useCallback(() => {
       fetchTransactions();
+      fetchHomeSettings();
     }, [])
   );
 
@@ -441,7 +498,12 @@ export default function Home() {
   // shows any transactions.
   function renderTransactionRow({ item, index, section }) {
     const isLast = index === section.data.length - 1;
-    const icon = item.isRecurring ? 'autorenew' : iconForTxCategory(section.title);
+    // `section.title` is a month name now (groupByMonth, 2026-09-03), not
+    // a category - the icon has to come from the transaction's own
+    // category instead, same value groupByMonth's own category-grouped
+    // predecessor used to get for free from the section itself.
+    const icon = item.isRecurring ? 'autorenew' : iconForTxCategory(item.category);
+    const isReviewing = reviewingTransactionId === item.transactionId;
     return (
       <View style={[homeStyles.txRow, isLast && homeStyles.txRowLast]}>
         <View style={homeStyles.txTopRow}>
@@ -455,40 +517,67 @@ export default function Home() {
               </Text>
               <Text style={styles.rowAmount}>{formatAmount(item.amount)}</Text>
             </View>
-            {item.isRecurring && (
-              <Text style={styles.recurringTag}>Recurring · {item.recurringInterval}</Text>
-            )}
+            <View style={homeStyles.txMetaRow}>
+              <Text style={homeStyles.txDate}>{formatShortDate(item.date)}</Text>
+              {item.isRecurring && (
+                <Text style={[styles.recurringTag, homeStyles.txRecurringTag]}>
+                  Recurring · {item.recurringInterval}
+                </Text>
+              )}
+            </View>
           </View>
+          {/* Real gap found 2026-09-03: the category-chip picker below used
+              to only ever open via the "needs review" nudge, which only
+              shows for Uncategorized/low-confidence transactions - there
+              was no way at all to fix one the AI categorized wrong with
+              HIGH confidence (confirmed live: a recurring mortgage payment
+              Plaid itself only weakly guessed at came back from our own
+              categorizer as "Transfers" with confidence "high", and was
+              then uncorrectable). This icon opens the exact same picker
+              for any transaction, reviewed or not - not shown while
+              already reviewing/correcting, so it can't compete with the
+              chip row or Cancel button that replace it below. */}
+          {!isReviewing && !correctingCategory && (
+            <Pressable
+              style={homeStyles.editCategoryButton}
+              onPress={() => setReviewingTransactionId(item.transactionId)}
+              accessibilityRole="button"
+              accessibilityLabel={`Change category for ${item.name}`}
+              hitSlop={8}
+            >
+              <MaterialIcons name="edit" size={16} color={colors.muted} />
+            </Pressable>
+          )}
         </View>
 
-        {item.needsReview &&
-          (reviewingTransactionId === item.transactionId ? (
-            correctingCategory ? (
-              <ActivityIndicator style={homeStyles.reviewSpacing} />
-            ) : (
-              <View style={[homeStyles.categoryChipsRow, homeStyles.reviewSpacing]}>
-                {CATEGORIES.map((c) => (
-                  <Pressable
-                    key={c}
-                    style={homeStyles.categoryChip}
-                    onPress={() => correctCategory(item.transactionId, c)}
-                    accessibilityRole="button"
-                    accessibilityLabel={c}
-                  >
-                    <Text style={homeStyles.categoryChipText}>{c}</Text>
-                  </Pressable>
-                ))}
-                <Pressable
-                  style={homeStyles.cancelChip}
-                  onPress={() => setReviewingTransactionId(null)}
-                  accessibilityRole="button"
-                  accessibilityLabel="Cancel"
-                >
-                  <Text style={homeStyles.cancelChipText}>Cancel</Text>
-                </Pressable>
-              </View>
-            )
+        {isReviewing ? (
+          correctingCategory ? (
+            <ActivityIndicator style={homeStyles.reviewSpacing} />
           ) : (
+            <View style={[homeStyles.categoryChipsRow, homeStyles.reviewSpacing]}>
+              {CATEGORIES.map((c) => (
+                <Pressable
+                  key={c}
+                  style={homeStyles.categoryChip}
+                  onPress={() => correctCategory(item.transactionId, c)}
+                  accessibilityRole="button"
+                  accessibilityLabel={c}
+                >
+                  <Text style={homeStyles.categoryChipText}>{c}</Text>
+                </Pressable>
+              ))}
+              <Pressable
+                style={homeStyles.cancelChip}
+                onPress={() => setReviewingTransactionId(null)}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel"
+              >
+                <Text style={homeStyles.cancelChipText}>Cancel</Text>
+              </Pressable>
+            </View>
+          )
+        ) : (
+          item.needsReview && (
             <View style={[styles.reviewRow, homeStyles.reviewSpacing]}>
               <View style={homeStyles.reviewTextRow}>
                 <View style={homeStyles.reviewIconCircle}>
@@ -504,9 +593,372 @@ export default function Home() {
                 onPress={() => setReviewingTransactionId(item.transactionId)}
               />
             </View>
-          ))}
+          )
+        )}
       </View>
     );
+  }
+
+  // Phase 38 Step 3 (Home Settings): visibility/order/color, all decided in
+  // Settings and just read here. Defined as closures (not extracted to
+  // separate components/files) specifically so every card keeps closing
+  // over this render's own already-computed values (health, insight,
+  // monthProgress, etc.) directly, with zero prop-drilling and zero risk
+  // of behavior drift from the pre-Step-3 inline JSX these were copied
+  // from verbatim - only a color-override append and a function wrapper
+  // were added to each.
+  // Fixed by code review, 2026-09-02: cardColors.X used to be applied
+  // straight to backgroundColor with no validation, asymmetric with
+  // readableTextColor (called on the same value) which already validates
+  // and falls back to null - settings/home.js itself never writes an
+  // invalid value, but PATCH /settings doesn't validate card_colors
+  // server-side, so any other write path could persist one. Sanitizing
+  // once here means every card's backgroundColor override and its
+  // readableTextColor call are guaranteed to agree: both see a real hex
+  // color or neither does.
+  const rawCardColors = homeSettings.card_colors || {};
+  const cardColors = Object.fromEntries(
+    Object.entries(rawCardColors).filter(([, value]) => isValidHexColor(value))
+  );
+  const hiddenCards = new Set(homeSettings.hidden_cards || []);
+  const cardOrder = homeSettings.card_order || [];
+  const orderedCardsBeforeStats = orderCardGroup(HOME_CARD_GROUP_BEFORE_STATS, cardOrder);
+  const orderedCardsAfterStats = orderCardGroup(HOME_CARD_GROUP_AFTER_STATS, cardOrder);
+
+  function renderFinancialHealthCard() {
+    const textColor = readableTextColor(cardColors.financial_health, colors);
+    return (
+      <View style={[styles.card, homeStyles.cardMargin, cardColors.financial_health && { backgroundColor: cardColors.financial_health }]}>
+        <View style={homeStyles.healthHeaderRow}>
+          <Text style={[homeStyles.cardEyebrow, textColor && { color: textColor }]}>
+            {monthName.toUpperCase()} FINANCIAL HEALTH
+          </Text>
+          <View
+            style={[
+              homeStyles.healthPill,
+              { backgroundColor: HEALTH_PILL_COLOR[health.color] },
+            ]}
+          >
+            <Text style={homeStyles.healthPillText}>{health.label.toUpperCase()}</Text>
+          </View>
+        </View>
+
+        <Text style={[homeStyles.healthReason, textColor && { color: textColor }]}>{health.reason}</Text>
+
+        <View style={homeStyles.categoryRow}>
+          {categoryTiles.map((tile) => (
+            <View key={tile.category} style={homeStyles.categoryTile}>
+              <View style={homeStyles.categoryIconCircle}>
+                <MaterialIcons name={tile.icon} size={20} color={colors.dark} />
+              </View>
+              <Text style={homeStyles.categoryLabel} numberOfLines={2}>
+                {tile.label}
+              </Text>
+              {tile.status === 'neutral' ? (
+                <View style={homeStyles.neutralDot} />
+              ) : (
+                <MaterialIcons
+                  name={STATUS_ICON[tile.status]}
+                  size={16}
+                  color={STATUS_COLOR[tile.status]}
+                />
+              )}
+            </View>
+          ))}
+        </View>
+
+        {monthProgress && budgetStatus && (
+          <>
+            <View style={homeStyles.divider} />
+            <View style={homeStyles.monthLabelsRow}>
+              <Text style={homeStyles.smallLabel}>
+                {monthName.slice(0, 3).toUpperCase()} 1
+              </Text>
+              <Text style={homeStyles.smallLabel}>
+                {monthName.slice(0, 3).toUpperCase()} {monthProgress.daysInMonth}
+              </Text>
+            </View>
+            <View style={homeStyles.progressTrack}>
+              <View
+                style={[
+                  homeStyles.progressFill,
+                  { width: `${monthProgress.percent * 100}%` },
+                ]}
+              />
+            </View>
+            <View style={homeStyles.progressCaptionRow}>
+              <View>
+                <Text style={homeStyles.progressCaption}>
+                  {monthProgress.daysElapsed} days into {monthName}
+                </Text>
+                <Text style={homeStyles.progressCaption}>
+                  {monthProgress.daysRemaining} days remaining
+                </Text>
+              </View>
+              <SeasonalHills width={110} height={70} />
+            </View>
+          </>
+        )}
+      </View>
+    );
+  }
+
+  function renderInsightCard() {
+    const textColor = readableTextColor(cardColors.insight, colors);
+    return (
+      <Pressable
+        style={[styles.card, homeStyles.cardMargin, homeStyles.insightCard, cardColors.insight && { backgroundColor: cardColors.insight }]}
+        onPress={() => router.push('/budget')}
+        accessibilityRole="button"
+        accessibilityLabel="View budget details"
+      >
+        <View style={homeStyles.insightIconCircle}>
+          <MaterialIcons name="auto-awesome" size={18} color={colors.dark} />
+        </View>
+        <View style={homeStyles.insightBody}>
+          <Text style={[homeStyles.cardEyebrow, textColor && { color: textColor }]}>INSIGHT</Text>
+          <Text style={[homeStyles.insightText, textColor && { color: textColor }]}>{insight.text}</Text>
+          {insight.hasDetail && (
+            <Text style={homeStyles.insightTapHint}>Tap to see details and recommendations.</Text>
+          )}
+        </View>
+        <MaterialIcons name="chevron-right" size={22} color={colors.dark} />
+      </Pressable>
+    );
+  }
+
+  function renderWhatChangedCard() {
+    if (!(homeChanges?.has_baseline && (homeChanges.items.length > 0 || homeChanges.net_worth))) return null;
+    const textColor = readableTextColor(cardColors.what_changed, colors);
+    return (
+      <View style={[styles.card, homeStyles.cardMargin, cardColors.what_changed && { backgroundColor: cardColors.what_changed }]}>
+        <Text style={[homeStyles.cardEyebrow, textColor && { color: textColor }]}>WHAT CHANGED</Text>
+        {homeChanges.net_worth && (
+          <View style={homeStyles.changeRow}>
+            <MaterialIcons
+              name={homeChanges.net_worth.delta >= 0 ? 'trending-up' : 'trending-down'}
+              size={18}
+              color={homeChanges.net_worth.delta >= 0 ? colors.positive : colors.error}
+            />
+            <Text style={[homeStyles.changeText, textColor && { color: textColor }]}>
+              Net worth {homeChanges.net_worth.delta >= 0 ? 'up' : 'down'} $
+              {Math.abs(homeChanges.net_worth.delta).toLocaleString('en-US', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}{' '}
+              since your last visit.
+            </Text>
+          </View>
+        )}
+        {homeChanges.items.slice(0, 6).map((item, i) => (
+          <View key={`${item.event_type}-${item.at}-${i}`} style={homeStyles.changeRow}>
+            <MaterialIcons
+              name={STATUS_ICON[item.kind === 'resolved' ? 'ok' : 'warning']}
+              size={18}
+              color={STATUS_COLOR[item.kind === 'resolved' ? 'ok' : 'warning']}
+            />
+            <Text style={[homeStyles.changeText, textColor && { color: textColor }]} numberOfLines={1}>
+              {item.kind === 'resolved' ? 'Resolved: ' : ''}
+              {item.title}
+            </Text>
+          </View>
+        ))}
+        {homeChanges.items.length > 6 && (
+          <Text style={homeStyles.changeMore}>
+            and {homeChanges.items.length - 6} more
+          </Text>
+        )}
+      </View>
+    );
+  }
+
+  function renderMonthlyReviewCard() {
+    if (!monthlyReview) return null;
+    const textColor = readableTextColor(cardColors.monthly_review, colors);
+    return (
+      <View style={[styles.card, homeStyles.cardMargin, cardColors.monthly_review && { backgroundColor: cardColors.monthly_review }]}>
+        <Text style={[homeStyles.cardEyebrow, textColor && { color: textColor }]}>
+          {new Date(`${monthlyReview.period_start}T00:00:00Z`)
+            .toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' })
+            .toUpperCase()}{' '}
+          REVIEW
+        </Text>
+        <Text style={[homeStyles.insightText, textColor && { color: textColor }]}>
+          {monthlyReview.saved >= 0
+            ? `You saved $${formatDecimal(monthlyReview.saved)} — $${formatDecimal(monthlyReview.spend)} spent on $${formatDecimal(monthlyReview.income)} income.`
+            : `You spent $${formatDecimal(Math.abs(monthlyReview.saved))} more than you earned — $${formatDecimal(monthlyReview.spend)} spent on $${formatDecimal(monthlyReview.income)} income.`}
+        </Text>
+        {monthlyReview.note && (
+          <View style={homeStyles.changeRow}>
+            <MaterialIcons
+              name={monthlyReview.biggest_move.direction === 'up' ? 'trending-up' : 'trending-down'}
+              size={18}
+              color={
+                monthlyReview.biggest_move.direction === 'up' ? colors.error : colors.positive
+              }
+            />
+            <Text style={[homeStyles.changeText, textColor && { color: textColor }]}>{monthlyReview.note}</Text>
+          </View>
+        )}
+        {monthlyReview.goal_pace?.message && (
+          <Text style={homeStyles.changeMore}>{monthlyReview.goal_pace.message}</Text>
+        )}
+      </View>
+    );
+  }
+
+  function renderUpNextCard() {
+    if (!subscriptionAudit?.up_next) return null;
+    const textColor = readableTextColor(cardColors.up_next, colors);
+    return (
+      <View style={[styles.card, homeStyles.cardMargin, cardColors.up_next && { backgroundColor: cardColors.up_next }]}>
+        <Text style={[styles.cardTitle, textColor && { color: textColor }]}>Up next</Text>
+        <View style={styles.alertRow}>
+          <Text style={[styles.alertText, textColor && { color: textColor }]}>
+            {subscriptionAudit.up_next.display_name} —{' '}
+            {subscriptionAudit.up_next.type === 'income' ? 'est. ' : ''}
+            ${formatDecimal(subscriptionAudit.up_next.amount)}
+          </Text>
+          <Text style={styles.smallText}>{formatUpNextText(subscriptionAudit.up_next.date)}</Text>
+        </View>
+      </View>
+    );
+  }
+
+  function renderGoalProgressCard() {
+    if (!goalProgress?.has_target) return null;
+    const textColor = readableTextColor(cardColors.goal_progress, colors);
+    return (
+      <View style={[styles.card, homeStyles.cardMargin, cardColors.goal_progress && { backgroundColor: cardColors.goal_progress }]}>
+        <Text style={[styles.cardTitle, textColor && { color: textColor }]}>Goal progress</Text>
+        <View style={homeStyles.progressTrack}>
+          <View
+            style={[
+              homeStyles.progressFill,
+              { width: `${Math.min(100, Math.max(0, goalProgress.percent_complete))}%` },
+            ]}
+          />
+        </View>
+        <Text style={[styles.smallText, textColor && { color: textColor }]}>
+          ${formatDecimal(goalProgress.saved_amount)} of ${formatDecimal(goalProgress.target_amount)} —{' '}
+          {Math.round(goalProgress.percent_complete)}% · {formatGoalType(goalProgress.goal_type)}
+        </Text>
+      </View>
+    );
+  }
+
+  function renderUpcomingBillsCard() {
+    if (upcomingBills.length === 0) return null;
+    const textColor = readableTextColor(cardColors.upcoming_bills, colors);
+    return (
+      <View style={[styles.card, homeStyles.cardMargin, cardColors.upcoming_bills && { backgroundColor: cardColors.upcoming_bills }]}>
+        <Text style={[styles.cardTitle, textColor && { color: textColor }]}>Upcoming bills ({upcomingBills.length})</Text>
+        {upcomingBills.map((bill) => {
+          const institution = institutionForAccount(bill.account_id);
+          return (
+            <View key={bill.id} style={styles.alertRow}>
+              <Text style={[styles.alertText, textColor && { color: textColor }]}>
+                {bill.display_name} — ${formatDecimal(bill.typical_amount)}
+              </Text>
+              <Text style={styles.smallText}>
+                {formatDueText(bill.next_expected_date)}
+                {institution ? ` · ${institution}` : ''}
+              </Text>
+            </View>
+          );
+        })}
+      </View>
+    );
+  }
+
+  function renderAccountsCard() {
+    if (plaidItems.length === 0) return null;
+    const textColor = readableTextColor(cardColors.accounts, colors);
+    return (
+      <View style={[styles.card, homeStyles.cardMargin, cardColors.accounts && { backgroundColor: cardColors.accounts }]}>
+        <Text style={[homeStyles.cardEyebrow, textColor && { color: textColor }]}>ACCOUNTS</Text>
+        <View style={homeStyles.accountsList}>
+          {plaidItems.map((i) => {
+            const total = bankTotal(i.id);
+            return (
+              <Pressable
+                key={i.id}
+                style={homeStyles.accountRow}
+                onPress={() => setViewingItemId(i.id)}
+                accessibilityRole="button"
+                accessibilityLabel={`View ${i.institution_name || 'linked bank'}`}
+              >
+                <View style={homeStyles.accountIconCircle}>
+                  <MaterialIcons name="account-balance" size={18} color={colors.background} />
+                </View>
+                <Text style={[homeStyles.accountName, textColor && { color: textColor }]} numberOfLines={1}>
+                  {(i.institution_name || 'Linked bank').toUpperCase()}
+                </Text>
+                <Text style={[homeStyles.accountBalance, textColor && { color: textColor }]}>
+                  {total != null ? `$${formatDecimal(total)}` : '—'}
+                </Text>
+                <MaterialIcons name="chevron-right" size={20} color={colors.dark} />
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+    );
+  }
+
+  function renderNetWorthCard() {
+    if (!netWorth?.current) return null;
+    const textColor = readableTextColor(cardColors.net_worth, colors);
+    return (
+      <View style={[styles.card, homeStyles.cardMargin, cardColors.net_worth && { backgroundColor: cardColors.net_worth }]}>
+        <View style={homeStyles.healthHeaderRow}>
+          <Text style={[homeStyles.cardEyebrow, textColor && { color: textColor }]}>NET WORTH</Text>
+          {netWorth.history.length > 0 && (
+            <Pressable
+              style={homeStyles.historyChip}
+              onPress={() => setShowNetWorthHistory((v) => !v)}
+              accessibilityRole="button"
+              accessibilityLabel={showNetWorthHistory ? 'Hide history' : 'View history'}
+            >
+              <Text style={homeStyles.historyChipText}>
+                {showNetWorthHistory ? 'HIDE HISTORY' : 'VIEW HISTORY'}
+              </Text>
+            </Pressable>
+          )}
+        </View>
+        <Text style={[homeStyles.netWorthValue, textColor && { color: textColor }]}>
+          {netWorth.current.net_worth < 0 ? '-' : ''}$
+          {Math.abs(netWorth.current.net_worth).toLocaleString('en-US', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })}
+        </Text>
+        <Text style={[styles.smallText, textColor && { color: textColor }]}>
+          ${formatDecimal(netWorth.current.assets)} assets — ${formatDecimal(netWorth.current.liabilities)}{' '}
+          liabilities
+        </Text>
+
+        {showNetWorthHistory && <NetWorthChart history={netWorth.history} />}
+      </View>
+    );
+  }
+
+  const HOME_CARD_RENDERERS = {
+    financial_health: renderFinancialHealthCard,
+    insight: renderInsightCard,
+    what_changed: renderWhatChangedCard,
+    monthly_review: renderMonthlyReviewCard,
+    up_next: renderUpNextCard,
+    goal_progress: renderGoalProgressCard,
+    upcoming_bills: renderUpcomingBillsCard,
+    accounts: renderAccountsCard,
+    net_worth: renderNetWorthCard,
+  };
+
+  function renderHomeCard(key) {
+    if (hiddenCards.has(key)) return null;
+    const node = HOME_CARD_RENDERERS[key]();
+    return node ? <View key={key}>{node}</View> : null;
   }
 
   return (
@@ -616,7 +1068,7 @@ export default function Home() {
               <SectionList
                 style={styles.list}
                 contentContainerStyle={{ paddingBottom: 150 }}
-                sections={groupByCategory(bankTransactions)}
+                sections={groupByMonth(bankTransactions)}
                 keyExtractor={(item) => item.key}
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
                 ListHeaderComponent={
@@ -702,213 +1154,13 @@ export default function Home() {
             </Text>
           </View>
 
-          {/* Financial Health card - Phase 14/15's synthesized headline,
-              replacing the old raw goalProgress line + unranked alert list
-              (both now folded into this card + the Insight card below, per
-              Phase 14's own "ranked, capped summary instead of an unranked
-              stack" goal). */}
-          <View style={[styles.card, homeStyles.cardMargin]}>
-            <View style={homeStyles.healthHeaderRow}>
-              <Text style={homeStyles.cardEyebrow}>
-                {monthName.toUpperCase()} FINANCIAL HEALTH
-              </Text>
-              <View
-                style={[
-                  homeStyles.healthPill,
-                  { backgroundColor: HEALTH_PILL_COLOR[health.color] },
-                ]}
-              >
-                <Text style={homeStyles.healthPillText}>{health.label.toUpperCase()}</Text>
-              </View>
-            </View>
-
-            <Text style={homeStyles.healthReason}>{health.reason}</Text>
-
-            <View style={homeStyles.categoryRow}>
-              {categoryTiles.map((tile) => (
-                <View key={tile.category} style={homeStyles.categoryTile}>
-                  <View style={homeStyles.categoryIconCircle}>
-                    <MaterialIcons name={tile.icon} size={20} color={colors.dark} />
-                  </View>
-                  <Text style={homeStyles.categoryLabel} numberOfLines={2}>
-                    {tile.label}
-                  </Text>
-                  {tile.status === 'neutral' ? (
-                    <View style={homeStyles.neutralDot} />
-                  ) : (
-                    <MaterialIcons
-                      name={STATUS_ICON[tile.status]}
-                      size={16}
-                      color={STATUS_COLOR[tile.status]}
-                    />
-                  )}
-                </View>
-              ))}
-            </View>
-
-            {monthProgress && budgetStatus && (
-              <>
-                <View style={homeStyles.divider} />
-                <View style={homeStyles.monthLabelsRow}>
-                  <Text style={homeStyles.smallLabel}>
-                    {monthName.slice(0, 3).toUpperCase()} 1
-                  </Text>
-                  <Text style={homeStyles.smallLabel}>
-                    {monthName.slice(0, 3).toUpperCase()} {monthProgress.daysInMonth}
-                  </Text>
-                </View>
-                <View style={homeStyles.progressTrack}>
-                  <View
-                    style={[
-                      homeStyles.progressFill,
-                      { width: `${monthProgress.percent * 100}%` },
-                    ]}
-                  />
-                </View>
-                <View style={homeStyles.progressCaptionRow}>
-                  <View>
-                    <Text style={homeStyles.progressCaption}>
-                      {monthProgress.daysElapsed} days into {monthName}
-                    </Text>
-                    <Text style={homeStyles.progressCaption}>
-                      {monthProgress.daysRemaining} days remaining
-                    </Text>
-                  </View>
-                  <SeasonalHills width={110} height={70} />
-                </View>
-              </>
-            )}
-          </View>
-
-          {/* Insight card - the single most-material thing worth surfacing
-              right now (see _lib/homeSummary.js's computeInsight), tapping
-              through to Budget for the full detail behind it. */}
-          <Pressable
-            style={[styles.card, homeStyles.cardMargin, homeStyles.insightCard]}
-            onPress={() => router.push('/budget')}
-            accessibilityRole="button"
-            accessibilityLabel="View budget details"
-          >
-            <View style={homeStyles.insightIconCircle}>
-              <MaterialIcons name="auto-awesome" size={18} color={colors.dark} />
-            </View>
-            <View style={homeStyles.insightBody}>
-              <Text style={homeStyles.cardEyebrow}>INSIGHT</Text>
-              <Text style={homeStyles.insightText}>{insight.text}</Text>
-              {insight.hasDetail && (
-                <Text style={homeStyles.insightTapHint}>Tap to see details and recommendations.</Text>
-              )}
-            </View>
-            <MaterialIcons name="chevron-right" size={22} color={colors.dark} />
-          </Pressable>
-
-          {/* "What changed?" card (Phase 16) - only rendered when there's
-              something real to report: has_baseline is false on the very
-              first-ever open (nothing to diff against yet, so nothing is
-              shown rather than dumping the account's whole history), and an
-              empty items/net_worth pair on a later open just means nothing
-              actually changed since last time, which also isn't worth a
-              card. Reuses the same STATUS_ICON/STATUS_COLOR 'warning'/'ok'
-              pairing the category tiles above already use - 'new' items
-              (an issue surfaced) get the warning treatment, 'resolved' gets
-              the positive check, no third icon set invented for this.
-              Shows each item's `title` (short, one line by design - these
-              are the same strings used as push notification titles),
-              `numberOfLines={1}` as a hard backstop. A real duplicate-
-              looking pair was found live (2026-08-27): editing the goal's
-              target/timeframe re-triggers `savings_reminder` under a new
-              dedup signature without retiring the old one, so both a stale
-              and current reminder could show at once, sharing this exact
-              generic title. Fixed at the source, not here -
-              `buildChangeItems` (server/homeChanges.js) now dedupes by
-              (event_type, category), keeping only the most recent of each,
-              so this list can never show the same underlying thing twice
-              regardless of which field is displayed. */}
-          {homeChanges?.has_baseline &&
-            (homeChanges.items.length > 0 || homeChanges.net_worth) && (
-              <View style={[styles.card, homeStyles.cardMargin]}>
-                <Text style={homeStyles.cardEyebrow}>WHAT CHANGED</Text>
-                {homeChanges.net_worth && (
-                  <View style={homeStyles.changeRow}>
-                    <MaterialIcons
-                      name={homeChanges.net_worth.delta >= 0 ? 'trending-up' : 'trending-down'}
-                      size={18}
-                      color={homeChanges.net_worth.delta >= 0 ? colors.positive : colors.error}
-                    />
-                    <Text style={homeStyles.changeText}>
-                      Net worth {homeChanges.net_worth.delta >= 0 ? 'up' : 'down'} $
-                      {Math.abs(homeChanges.net_worth.delta).toLocaleString('en-US', {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}{' '}
-                      since your last visit.
-                    </Text>
-                  </View>
-                )}
-                {homeChanges.items.slice(0, 6).map((item, i) => (
-                  <View key={`${item.event_type}-${item.at}-${i}`} style={homeStyles.changeRow}>
-                    <MaterialIcons
-                      name={STATUS_ICON[item.kind === 'resolved' ? 'ok' : 'warning']}
-                      size={18}
-                      color={STATUS_COLOR[item.kind === 'resolved' ? 'ok' : 'warning']}
-                    />
-                    <Text style={homeStyles.changeText} numberOfLines={1}>
-                      {item.kind === 'resolved' ? 'Resolved: ' : ''}
-                      {item.title}
-                    </Text>
-                  </View>
-                ))}
-                {homeChanges.items.length > 6 && (
-                  <Text style={homeStyles.changeMore}>
-                    and {homeChanges.items.length - 6} more
-                  </Text>
-                )}
-              </View>
-            )}
-
-          {/* Monthly review (Phase 17) - last closed calendar month's
-              income/spend/saved, the category that moved the most vs. the
-              month before, and the account's current goal pace. `review`
-              is null (not a fabricated $0 card) when last month has no
-              real budget/actuals data yet - see server/monthlyReview.js.
-              Same up=error/down=positive coloring homeChanges.net_worth
-              uses above, but flipped: for a spend category, "up" is the
-              bad direction and "down" is the good one, the opposite of a
-              rising net worth. */}
-          {monthlyReview && (
-            <View style={[styles.card, homeStyles.cardMargin]}>
-              <Text style={homeStyles.cardEyebrow}>
-                {new Date(`${monthlyReview.period_start}T00:00:00Z`)
-                  .toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' })
-                  .toUpperCase()}{' '}
-                REVIEW
-              </Text>
-              <Text style={homeStyles.insightText}>
-                {monthlyReview.saved >= 0
-                  ? `You saved $${formatDecimal(monthlyReview.saved)} — $${formatDecimal(monthlyReview.spend)} spent on $${formatDecimal(monthlyReview.income)} income.`
-                  : `You spent $${formatDecimal(Math.abs(monthlyReview.saved))} more than you earned — $${formatDecimal(monthlyReview.spend)} spent on $${formatDecimal(monthlyReview.income)} income.`}
-              </Text>
-              {monthlyReview.note && (
-                <View style={homeStyles.changeRow}>
-                  <MaterialIcons
-                    name={monthlyReview.biggest_move.direction === 'up' ? 'trending-up' : 'trending-down'}
-                    size={18}
-                    color={
-                      monthlyReview.biggest_move.direction === 'up' ? colors.error : colors.positive
-                    }
-                  />
-                  <Text style={homeStyles.changeText}>{monthlyReview.note}</Text>
-                </View>
-              )}
-              {monthlyReview.goal_pace?.message && (
-                <Text style={homeStyles.changeMore}>{monthlyReview.goal_pace.message}</Text>
-              )}
-            </View>
-          )}
+          {orderedCardsBeforeStats.map(renderHomeCard)}
 
           {/* Stat tiles - each already backed by data computed above; a
               restyle/composition over existing numbers, no new math beyond
-              simple sums/ratios (see homeSummary.js). */}
+              simple sums/ratios (see homeSummary.js). Not one of Home
+              Settings' manageable cards (Phase 38 Step 3) - always shown,
+              always in this exact spot, same as before that step existed. */}
           <View style={[styles.card, homeStyles.cardMargin, homeStyles.statRow]}>
             <View style={homeStyles.statTile}>
               <MaterialIcons name="account-balance-wallet" size={18} color={colors.dark} />
@@ -919,9 +1171,9 @@ export default function Home() {
             <View style={homeStyles.statDivider} />
             <View style={homeStyles.statTile}>
               <MaterialIcons name="show-chart" size={18} color={colors.dark} />
-              <Text style={homeStyles.statLabel}>PACE</Text>
+              <Text style={homeStyles.statLabel}>PROJECTED SPEND</Text>
               <Text style={homeStyles.statValue}>
-                {pace ? `$${formatWhole(pace.aheadBy)}` : '—'}
+                {pace ? `$${formatWhole(pace.projected)}` : '—'}
               </Text>
               <Text
                 style={[
@@ -929,7 +1181,9 @@ export default function Home() {
                   pace && { color: pace.isAhead ? colors.positive : colors.error },
                 ]}
               >
-                {pace ? (pace.isAhead ? 'ahead of pace' : 'behind pace') : 'not enough data'}
+                {pace
+                  ? `$${formatWhole(pace.aheadBy)} ${pace.isAhead ? 'under' : 'over'} budget`
+                  : 'not enough data'}
               </Text>
             </View>
             <View style={homeStyles.statDivider} />
@@ -954,145 +1208,7 @@ export default function Home() {
             </View>
           </View>
 
-          {/* Phase 24 "UP NEXT" - the single soonest expected event of any
-              kind (a paycheck or a bill, whichever is closer), from the
-              original Sorrel Home mockup. Reuses server/subscriptionAudit.js's
-              already-computed up_next (soonest of nextExpectedIncome vs. the
-              recurring_bills list) rather than a third, separate client-side
-              computation. Deliberately a single glanceable line, not a list -
-              "Upcoming bills" right below already covers the fuller due-soon
-              list. */}
-          {subscriptionAudit?.up_next && (
-            <View style={[styles.card, homeStyles.cardMargin]}>
-              <Text style={styles.cardTitle}>Up next</Text>
-              <View style={styles.alertRow}>
-                <Text style={styles.alertText}>
-                  {subscriptionAudit.up_next.display_name} —{' '}
-                  {subscriptionAudit.up_next.type === 'income' ? 'est. ' : ''}
-                  ${formatDecimal(subscriptionAudit.up_next.amount)}
-                </Text>
-                <Text style={styles.smallText}>{formatUpNextText(subscriptionAudit.up_next.date)}</Text>
-              </View>
-            </View>
-          )}
-
-          {/* Phase 24 "GOAL PROGRESS" - the last remaining piece of the
-              original Home mockup ("$6,380 of $10,000, 64%" + a bar), not
-              already covered by Phases 14-17. The stat-tile row above
-              already shows the bare percentage; this adds the actual
-              dollar fraction and bar the mockup called for. Reuses
-              goalProgress (already fetched for that stat tile) and
-              homeStyles.progressTrack/progressFill (already built for the
-              Financial Health card's month-progress bar above) - no new
-              data, no new styles. */}
-          {goalProgress?.has_target && (
-            <View style={[styles.card, homeStyles.cardMargin]}>
-              <Text style={styles.cardTitle}>Goal progress</Text>
-              <View style={homeStyles.progressTrack}>
-                <View
-                  style={[
-                    homeStyles.progressFill,
-                    { width: `${Math.min(100, Math.max(0, goalProgress.percent_complete))}%` },
-                  ]}
-                />
-              </View>
-              <Text style={styles.smallText}>
-                ${formatDecimal(goalProgress.saved_amount)} of ${formatDecimal(goalProgress.target_amount)} —{' '}
-                {Math.round(goalProgress.percent_complete)}% · {formatGoalType(goalProgress.goal_type)}
-              </Text>
-            </View>
-          )}
-
-          {/* Upcoming bills - Bills & Utilities specifically (mortgage/
-              phone/electricity-style), not Subscriptions (Netflix-style,
-              shown on the Recurring tab only). A non-interactive header
-              bubble (same visual chip language as the bank bubbles below,
-              just not tappable) followed by the list itself, each row
-              tagged with its bank so two real, distinct bills sharing a
-              merchant/amount don't read as a duplicate. */}
-          {upcomingBills.length > 0 && (
-            <View style={[styles.card, homeStyles.cardMargin]}>
-              <Text style={styles.cardTitle}>Upcoming bills ({upcomingBills.length})</Text>
-              {upcomingBills.map((bill) => {
-                const institution = institutionForAccount(bill.account_id);
-                return (
-                  <View key={bill.id} style={styles.alertRow}>
-                    <Text style={styles.alertText}>
-                      {bill.display_name} — ${formatDecimal(bill.typical_amount)}
-                    </Text>
-                    <Text style={styles.smallText}>
-                      {formatDueText(bill.next_expected_date)}
-                      {institution ? ` · ${institution}` : ''}
-                    </Text>
-                  </View>
-                );
-              })}
-            </View>
-          )}
-
-          {plaidItems.length > 0 && (
-            <View style={[styles.card, homeStyles.cardMargin]}>
-              <Text style={homeStyles.cardEyebrow}>ACCOUNTS</Text>
-              <View style={homeStyles.accountsList}>
-                {plaidItems.map((i) => {
-                  const total = bankTotal(i.id);
-                  return (
-                    <Pressable
-                      key={i.id}
-                      style={homeStyles.accountRow}
-                      onPress={() => setViewingItemId(i.id)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`View ${i.institution_name || 'linked bank'}`}
-                    >
-                      <View style={homeStyles.accountIconCircle}>
-                        <MaterialIcons name="account-balance" size={18} color={colors.background} />
-                      </View>
-                      <Text style={homeStyles.accountName} numberOfLines={1}>
-                        {(i.institution_name || 'Linked bank').toUpperCase()}
-                      </Text>
-                      <Text style={homeStyles.accountBalance}>
-                        {total != null ? `$${formatDecimal(total)}` : '—'}
-                      </Text>
-                      <MaterialIcons name="chevron-right" size={20} color={colors.dark} />
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-          )}
-
-          {netWorth?.current && (
-            <View style={[styles.card, homeStyles.cardMargin]}>
-              <View style={homeStyles.healthHeaderRow}>
-                <Text style={homeStyles.cardEyebrow}>NET WORTH</Text>
-                {netWorth.history.length > 0 && (
-                  <Pressable
-                    style={homeStyles.historyChip}
-                    onPress={() => setShowNetWorthHistory((v) => !v)}
-                    accessibilityRole="button"
-                    accessibilityLabel={showNetWorthHistory ? 'Hide history' : 'View history'}
-                  >
-                    <Text style={homeStyles.historyChipText}>
-                      {showNetWorthHistory ? 'HIDE HISTORY' : 'VIEW HISTORY'}
-                    </Text>
-                  </Pressable>
-                )}
-              </View>
-              <Text style={homeStyles.netWorthValue}>
-                {netWorth.current.net_worth < 0 ? '-' : ''}$
-                {Math.abs(netWorth.current.net_worth).toLocaleString('en-US', {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
-              </Text>
-              <Text style={styles.smallText}>
-                ${formatDecimal(netWorth.current.assets)} assets — ${formatDecimal(netWorth.current.liabilities)}{' '}
-                liabilities
-              </Text>
-
-              {showNetWorthHistory && <NetWorthChart history={netWorth.history} />}
-            </View>
-          )}
+          {orderedCardsAfterStats.map(renderHomeCard)}
         </Animated.ScrollView>
         </TopEdgeFade>
       )}
@@ -1476,6 +1592,25 @@ const homeStyles = StyleSheet.create({
   },
   txMain: {
     flex: 1,
+  },
+  txMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  txDate: {
+    fontSize: 11,
+    color: colors.muted,
+  },
+  txRecurringTag: {
+    marginTop: 0,
+    marginLeft: 8,
+  },
+  editCategoryButton: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   reviewSpacing: {
     marginTop: 8,

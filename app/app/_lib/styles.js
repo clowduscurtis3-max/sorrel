@@ -1,5 +1,52 @@
 import { StyleSheet } from 'react-native';
 
+// Phase 38 Step 3 (Home card colors) - shared by both the Home tab (applies
+// the color) and settings/home.js (live preview while picking one).
+// Standard WCAG relative-luminance formula, not a full contrast-ratio
+// check against the specific text size/weight - a "basic contrast check"
+// per the brief, not a full accessibility audit. Returns null for
+// anything that isn't a clean 6-digit hex, so callers can tell "no valid
+// color" apart from a real light/dark answer.
+export function isValidHexColor(hexColor) {
+  return typeof hexColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(hexColor);
+}
+
+function relativeLuminance(hexColor) {
+  const hex = hexColor.slice(1);
+  const r = parseInt(hex.slice(0, 2), 16) / 255;
+  const g = parseInt(hex.slice(2, 4), 16) / 255;
+  const b = parseInt(hex.slice(4, 6), 16) / 255;
+  const linear = (c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+  return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+}
+
+// WCAG contrast ratio: (lighter + 0.05) / (darker + 0.05).
+function contrastRatio(luminanceA, luminanceB) {
+  const lighter = Math.max(luminanceA, luminanceB);
+  const darker = Math.min(luminanceA, luminanceB);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+// Fixed by code review, 2026-09-02: this used to pick colors.darkest vs.
+// colors.background by a flat 0.5 luminance threshold on the background
+// color alone. The real crossover - the luminance where colors.darkest and
+// colors.background give equal contrast against a given background - works
+// out to ≈0.21 for this app's actual palette (colors.darkest is very dark,
+// luminance ≈0.02; colors.background is very light, ≈0.92), nowhere near
+// 0.5. A mid-brightness color like #B0B0B0 (luminance ≈0.435) used to get
+// light text (≈2:1 contrast, barely readable) when dark text would have
+// given ≈7:1 - directly undermining the "basic contrast check" this
+// function exists for. Computing both real contrast ratios and picking
+// whichever is actually higher is correct by construction and needs no
+// hand-derived threshold at all.
+export function readableTextColor(hexColor, colors) {
+  if (!isValidHexColor(hexColor)) return null;
+  const bgLuminance = relativeLuminance(hexColor);
+  const contrastWithDark = contrastRatio(bgLuminance, relativeLuminance(colors.darkest));
+  const contrastWithLight = contrastRatio(bgLuminance, relativeLuminance(colors.background));
+  return contrastWithDark >= contrastWithLight ? colors.darkest : colors.background;
+}
+
 // Sorrel brand palette (CLAUDE.md "Color palette" note, 2026-08-13) -
 // dark-forest-green/sage/cream, light theme. Named by role so future
 // screens import `colors` rather than re-typing hex values.
