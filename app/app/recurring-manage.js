@@ -1,5 +1,16 @@
 import { useCallback, useState } from 'react';
-import { View, Text, Pressable, TextInput, ActivityIndicator, Alert, ScrollView, StyleSheet } from 'react-native';
+import {
+  View,
+  Text,
+  Pressable,
+  TextInput,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+} from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -466,11 +477,24 @@ export default function RecurringManage() {
   return (
     <SettingsScreenChrome
       title="Manage Recurring"
-      subtitle="Fix a charge detection got wrong, or add one it missed."
+      subtitle="Correct or add a missed charge."
       onBack={() => router.back()}
     >
       <SettingsFetchGate loaded={data !== null} error={error} onRetry={fetchData}>
-        <ScrollView style={manageStyles.body} contentContainerStyle={manageStyles.bodyContent}>
+        {/* Real gap flagged directly, 2026-09-03: this screen's search box
+            and every add/edit form field sit in a plain ScrollView with
+            no keyboard handling - same class of bug this app already hit
+            once on AffordabilityChat.js (see that file's own comment).
+            "height" (not "padding") on Android - "padding" can leave a
+            gap under the keyboard on some devices/Android versions;
+            "height" reliably shrinks the content area instead. iOS keeps
+            "padding", the standard choice there. */}
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <ScrollView
+          style={manageStyles.body}
+          contentContainerStyle={manageStyles.bodyContent}
+          keyboardShouldPersistTaps="handled"
+        >
           {error && <Text style={styles.errorText}>{error}</Text>}
 
           {activeSeries.length === 0 && manualOverrides.length === 0 ? (
@@ -494,13 +518,19 @@ export default function RecurringManage() {
               {merchantPickerOpen ? (
                 <View style={manageStyles.merchantPicker}>
                   <Text style={manageStyles.fieldLabel}>Search your transactions</Text>
+                  {/* Real gap found live, 2026-09-03: autoFocus here
+                      popped the keyboard the instant the add form opened,
+                      before the user had even seen the form - on a
+                      screen this dense, that keyboard covered enough of
+                      the layout to read as "completely blocks
+                      everything." Waits for a real tap now, same as
+                      every other text field on this screen. */}
                   <TextInput
                     style={styles.input}
                     placeholder="e.g. Mortgage, Netflix..."
                     placeholderTextColor={colors.placeholder}
                     value={merchantQuery}
                     onChangeText={setMerchantQuery}
-                    autoFocus
                   />
                   {merchantsError && <Text style={styles.errorText}>{merchantsError}</Text>}
                   {merchants === null && !merchantsError ? (
@@ -614,6 +644,7 @@ export default function RecurringManage() {
             </View>
           )}
         </ScrollView>
+        </KeyboardAvoidingView>
       </SettingsFetchGate>
     </SettingsScreenChrome>
   );
