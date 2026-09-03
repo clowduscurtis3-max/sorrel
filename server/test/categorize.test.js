@@ -49,6 +49,37 @@ test('plaidCategorization returns null when there is nothing to categorize from'
   assert.equal(plaidCategorization({}), null);
 });
 
+test('plaidCategorization routes a credit-card payment to Transfers, not Bills & Utilities', () => {
+  // Real bug found 2026-09-03 on a user's first real account link: paying
+  // off a credit card is money moving between the user's own accounts,
+  // not new spend (the real purchases were already counted once when they
+  // hit the card) - a $7,000 card payment alone blew a month's budget by
+  // day 3 and dragged goal progress negative by a comparable amount before
+  // this fix.
+  const cardPayment = plaidCategorization({
+    primary: 'LOAN_PAYMENTS',
+    detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT',
+    confidence_level: 'VERY_HIGH',
+  });
+  assert.equal(cardPayment.category, 'Transfers');
+});
+
+test('plaidCategorization still treats every other loan payment as a real bill', () => {
+  // Mortgage/car/personal/student-loan payments are genuine recurring
+  // expenses (real money leaving the household to an external lender),
+  // unlike a credit-card payoff - only that one detail is special-cased.
+  for (const detailed of [
+    'LOAN_PAYMENTS_MORTGAGE_PAYMENT',
+    'LOAN_PAYMENTS_CAR_PAYMENT',
+    'LOAN_PAYMENTS_PERSONAL_LOAN_PAYMENT',
+    'LOAN_PAYMENTS_STUDENT_LOAN_PAYMENT',
+    'LOAN_PAYMENTS_OTHER_PAYMENT',
+  ]) {
+    const result = plaidCategorization({ primary: 'LOAN_PAYMENTS', detailed, confidence_level: 'VERY_HIGH' });
+    assert.equal(result.category, 'Bills & Utilities', `expected ${detailed} to stay Bills & Utilities`);
+  }
+});
+
 test('Gas is a real spend category and is treated as a necessity', () => {
   assert.ok(SPEND_CATEGORIES.includes('Gas'));
   assert.ok(ESSENTIAL_CATEGORIES.includes('Gas'));

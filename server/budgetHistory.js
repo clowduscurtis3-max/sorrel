@@ -87,7 +87,7 @@ async function getBudgetHistory(userId, months = 6) {
 
     const { data: budgets, error: budgetError } = await supabaseAdmin
       .from('budgets')
-      .select('category, budgeted_amount, reasoning')
+      .select('category, budgeted_amount, reasoning, is_user_set')
       .eq('user_id', userId)
       .eq('period_start', period_start);
     if (budgetError) throw budgetError;

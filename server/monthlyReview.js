@@ -69,7 +69,7 @@ function computeMonthlyReview({ period, prior, goalProgress }) {
 async function getPeriodReview(userId, periodStart, periodEnd) {
   const { data: budgets, error: budgetError } = await supabaseAdmin
     .from('budgets')
-    .select('category, budgeted_amount, reasoning')
+    .select('category, budgeted_amount, reasoning, is_user_set')
     .eq('user_id', userId)
     .eq('period_start', periodStart);
   if (budgetError) throw budgetError;

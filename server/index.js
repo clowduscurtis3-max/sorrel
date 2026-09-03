@@ -1311,7 +1311,11 @@ app.post('/budget/generate', requireUser, async (req, res) => {
     if (err instanceof NoHistoryError) {
       return res.status(400).json({ error: err.message });
     }
-    console.error(err);
+    // Reaches an Anthropic call (generateBudget), so this must go through
+    // logError, not a raw console.error - see the CLAUDE.md rule this
+    // route otherwise violates (a network-level failure on that call
+    // attaches the outgoing request, including the API key, to err.config).
+    logError('Failed to generate budget:', err);
     res.status(500).json({ error: err.message || 'Failed to generate budget' });
   }
 });
@@ -1347,7 +1351,9 @@ app.post('/budget/reset-category', requireUser, async (req, res) => {
     if (err instanceof NoHistoryError) {
       return res.status(400).json({ error: err.message });
     }
-    console.error(err);
+    // Same reasoning as /budget/generate's own catch just above -
+    // resetCategoryToAI calls generateBudget, which reaches Anthropic.
+    logError('Failed to reset category:', err);
     res.status(500).json({ error: err.message || 'Failed to reset category' });
   }
 });

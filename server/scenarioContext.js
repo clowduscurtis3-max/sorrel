@@ -44,7 +44,7 @@ async function loadScenarioContext(userId, now = new Date()) {
   ] = await Promise.all([
     supabaseAdmin
       .from('budgets')
-      .select('category, budgeted_amount, reasoning')
+      .select('category, budgeted_amount, reasoning, is_user_set')
       .eq('user_id', userId)
       .eq('period_start', period.period_start),
     supabaseAdmin

@@ -73,9 +73,25 @@ const PRIMARY_LABELS = {
 };
 
 // A few detailed-category overrides where the broad bucket is too coarse.
+//
+// LOAN_PAYMENTS_CREDIT_CARD_PAYMENT added 2026-09-03, real bug found live
+// on the user's first real (non-Sandbox) account link: PRIMARY_LABELS maps
+// the whole LOAN_PAYMENTS bucket to 'Bills & Utilities', correct for a
+// mortgage/car/personal/student-loan payment (genuine recurring bills,
+// real money leaving the household) but wrong for a credit-card payment -
+// that's money moving between the user's own accounts to pay off
+// purchases already counted once when they hit the card. Left unfixed,
+// paying off a card doubled as a second, phantom expense - one real
+// account showed a $7,000 card payment alone blow a whole month's budget
+// on day 3, and dragged goal progress negative by a comparable amount
+// (computeNetSaved, goalProgress.js, only excludes 'Transfers'). Every
+// other LOAN_PAYMENTS_* detail (mortgage/car/personal/student loan) is
+// deliberately left mapped to 'Bills & Utilities' via PRIMARY_LABELS
+// unchanged - those really are bills.
 const DETAILED_LABELS = {
   FOOD_AND_DRINK_GROCERIES: 'Groceries',
   TRANSPORTATION_GAS: 'Gas',
+  LOAN_PAYMENTS_CREDIT_CARD_PAYMENT: 'Transfers',
 };
 
 const LOW_CONFIDENCE = new Set(['LOW', 'UNKNOWN']);
@@ -172,12 +188,30 @@ function plaidCategorization(pfc) {
 async function categorizeAmbiguous(transactions) {
   if (transactions.length === 0) return {};
 
-  const items = transactions.map((t) => ({
-    id: t.transaction_id,
-    name: t.merchant_name || t.name,
-    amount: t.amount,
-    plaid_category: t.personal_finance_category?.primary || null,
-  }));
+  // `plaid_category_reliable` added 2026-09-03, real bug found live: a
+  // transaction only reaches this function because plaidCategorization()
+  // already declined to trust Plaid directly - either its confidence was
+  // LOW/UNKNOWN, or its primary category has no entry in PRIMARY_LABELS
+  // (e.g. GENERAL_SERVICES). The old prompt still handed Claude
+  // `plaid_category` with no indication of which case applied, and Claude
+  // was observed just parroting back a LOW-confidence Plaid guess with
+  // HIGH confidence of its own (a real mortgage payment at a merchant
+  // Plaid itself only guessed "investment transfer" for, at LOW
+  // confidence, came back from Claude as "Transfers" with confidence
+  // "high") - compounding Plaid's own uncertainty into false certainty,
+  // and (per the correction-UI fix, same session) something the user then
+  // had no way to fix. Distinguishing the two cases lets the prompt below
+  // tell Claude when to treat the hint as weak.
+  const items = transactions.map((t) => {
+    const pfc = t.personal_finance_category;
+    return {
+      id: t.transaction_id,
+      name: t.merchant_name || t.name,
+      amount: t.amount,
+      plaid_category: pfc?.primary || null,
+      plaid_category_reliable: !!pfc && !LOW_CONFIDENCE.has(pfc.confidence_level),
+    };
+  });
 
   let message;
   try {
@@ -196,7 +230,9 @@ async function categorizeAmbiguous(transactions) {
         `"Subscriptions" is for recurring memberships/services (streaming, software, gym, etc) - use merchant name to judge whether something looks recurring. ` +
         `"Gas" is only for purchases at a gas station (Shell, Chevron, Exxon, Speedway, and similar chains) - other transportation costs like rideshares, parking, tolls, or public transit stay under "Transportation". ` +
         `"Income" and "Transfers" are for money coming in or moving between the user's own accounts, not spending. ` +
-        `For each transaction also give a brief reasoning (under 12 words, mention the merchant name) and a confidence of "high", "medium", or "low". ` +
+        `Each transaction includes Plaid's own best-guess category (plaid_category) and whether Plaid itself was confident in that guess (plaid_category_reliable). ` +
+        `When plaid_category_reliable is false, Plaid was NOT confident - treat plaid_category as a weak hint only, and judge primarily from the merchant name and amount instead of just repeating Plaid's own uncertain guess back. ` +
+        `For each transaction also give a brief reasoning (under 12 words, mention the merchant name) and a confidence of "high", "medium", or "low" - your own confidence in your answer, not Plaid's. ` +
         `Respond with ONLY a JSON object mapping each transaction id to {"category": "...", "reasoning": "...", "confidence": "..."}, no other text.`,
       messages: [{ role: 'user', content: JSON.stringify(items) }],
     });
