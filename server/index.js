@@ -39,7 +39,7 @@ const { getBudgetHistory } = require('./budgetHistory');
 const { getHomeChanges } = require('./homeChanges');
 const { SETTINGS_SECTIONS, getSettings, patchSettings } = require('./settings');
 const { getMonthlyReview } = require('./monthlyReview');
-const { detectRecurringTransactions } = require('./recurring');
+const { detectRecurringTransactions, INTERVALS } = require('./recurring');
 const { recomputeOverspendAlerts } = require('./alerts');
 const { getGoalProgress } = require('./goalProgress');
 const { getSubscriptionAudit } = require('./subscriptionAudit');
@@ -2611,6 +2611,179 @@ app.post('/admin/detect-recurring', requireUser, async (req, res) => {
   } catch (err) {
     logError('Failed to detect recurring transactions:', err);
     res.status(500).json({ error: 'Failed to detect recurring transactions' });
+  }
+});
+
+// Recurring management (direct user request, 2026-09-03): "there should be
+// an option to edit recurring charges, or maybe add or remove recurring
+// charges." Backed by recurring_overrides (see its own migration comment)
+// - a sync-proof layer detectRecurringTransactions merges in via
+// applyOverrides (server/recurring.js), so a manual dismiss/edit/add
+// survives every future sync's wholesale rebuild instead of being wiped by
+// it. Every mutation below re-runs detection immediately (not waiting for
+// the next natural sync) so the change is reflected right away.
+const INTERVAL_NAMES = INTERVALS.map((i) => i.name);
+
+async function getRecurringManagementData(userId) {
+  const { data: series, error: seriesError } = await supabaseAdmin
+    .from('recurring_series')
+    .select(
+      'id, merchant_key, account_id, display_name, category, debt_type, interval, typical_amount, last_seen_date, next_expected_date, occurrence_count'
+    )
+    .eq('user_id', userId)
+    .order('display_name');
+  if (seriesError) throw seriesError;
+
+  const { data: overrides, error: overridesError } = await supabaseAdmin
+    .from('recurring_overrides')
+    .select(
+      'id, merchant_key, account_id, dismissed, override_display_name, override_category, override_interval, override_typical_amount, override_debt_type, manual_next_expected_date, created_at, updated_at'
+    )
+    .eq('user_id', userId)
+    .order('created_at');
+  if (overridesError) throw overridesError;
+
+  return { series: series || [], overrides: overrides || [] };
+}
+
+// GET returns both the currently-detected series (each with its own
+// merchant_key, the stable identity a dismiss/edit override attaches to)
+// and this user's existing overrides together, so the client can render
+// "already dismissed"/"already edited"/manually-added state without a
+// second round trip.
+app.get('/recurring/manage', requireUser, async (req, res) => {
+  try {
+    const data = await getRecurringManagementData(req.userId);
+    res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load recurring charges' });
+  }
+});
+
+// One endpoint for all three override shapes (dismiss/edit/manual add,
+// distinguished by which fields are set - see the migration's own header
+// comment) rather than three separate routes, matching this app's existing
+// PATCH /settings "one endpoint, shape decided by the body" convention.
+// Upserts on (user_id, merchant_key) when merchant_key is set (an edit to
+// an already-overridden series updates the same row rather than erroring
+// on a duplicate). A manual add (merchant_key null) has no such natural
+// conflict key - `id` (the override's own row id, absent on first create)
+// distinguishes "add a new manual entry" from "edit an existing one": real
+// bug caught before shipping, editing an already-added manual entry with
+// no `id` sent would have silently inserted a second, orphaned row instead
+// of updating the original.
+app.post('/recurring/manage/overrides', requireUser, async (req, res) => {
+  const body = req.body || {};
+  const {
+    id,
+    merchant_key,
+    account_id,
+    dismissed,
+    override_display_name,
+    override_category,
+    override_interval,
+    override_typical_amount,
+    override_debt_type,
+    manual_next_expected_date,
+  } = body;
+
+  if (merchant_key != null && typeof merchant_key !== 'string') {
+    return res.status(400).json({ error: 'merchant_key must be a string or null' });
+  }
+  if (override_category != null && !FRIENDLY_CATEGORIES.includes(override_category)) {
+    return res.status(400).json({ error: `override_category must be one of: ${FRIENDLY_CATEGORIES.join(', ')}` });
+  }
+  if (override_interval != null && !INTERVAL_NAMES.includes(override_interval)) {
+    return res.status(400).json({ error: `override_interval must be one of: ${INTERVAL_NAMES.join(', ')}` });
+  }
+  if (
+    override_typical_amount != null &&
+    (typeof override_typical_amount !== 'number' || !Number.isFinite(override_typical_amount) || override_typical_amount <= 0)
+  ) {
+    return res.status(400).json({ error: 'override_typical_amount must be a positive number' });
+  }
+  if (manual_next_expected_date != null && !/^\d{4}-\d{2}-\d{2}$/.test(manual_next_expected_date)) {
+    return res.status(400).json({ error: 'manual_next_expected_date must be a YYYY-MM-DD date' });
+  }
+
+  // A manual add (no merchant_key to fall back on for display/category/
+  // last-seen-date the way an edit's untouched fields do) needs enough of
+  // its own fields to synthesize a complete recurring_series row - see
+  // applyOverrides's own manual-add branch.
+  if (!merchant_key) {
+    if (!override_display_name || typeof override_display_name !== 'string') {
+      return res.status(400).json({ error: 'override_display_name is required for a manually-added recurring charge' });
+    }
+    if (!override_interval) {
+      return res.status(400).json({ error: 'override_interval is required for a manually-added recurring charge' });
+    }
+    if (override_typical_amount == null) {
+      return res.status(400).json({ error: 'override_typical_amount is required for a manually-added recurring charge' });
+    }
+    if (!manual_next_expected_date) {
+      return res.status(400).json({ error: 'manual_next_expected_date is required for a manually-added recurring charge' });
+    }
+  }
+
+  try {
+    const row = {
+      user_id: req.userId,
+      merchant_key: merchant_key || null,
+      account_id: account_id || null,
+      dismissed: !!dismissed,
+      override_display_name: override_display_name || null,
+      override_category: override_category || null,
+      override_interval: override_interval || null,
+      override_typical_amount: override_typical_amount ?? null,
+      override_debt_type: override_debt_type || null,
+      manual_next_expected_date: manual_next_expected_date || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (row.merchant_key) {
+      const { error } = await supabaseAdmin
+        .from('recurring_overrides')
+        .upsert(row, { onConflict: 'user_id,merchant_key' });
+      if (error) throw error;
+    } else if (id) {
+      const { error } = await supabaseAdmin
+        .from('recurring_overrides')
+        .update(row)
+        .eq('id', id)
+        .eq('user_id', req.userId);
+      if (error) throw error;
+    } else {
+      const { error } = await supabaseAdmin.from('recurring_overrides').insert(row);
+      if (error) throw error;
+    }
+
+    await detectRecurringTransactions(req.userId);
+    res.json(await getRecurringManagementData(req.userId));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save recurring override' });
+  }
+});
+
+// Removes one override entirely - undoes a dismiss, reverts an edit back
+// to the real auto-detected values, or deletes a manual add outright, all
+// via the same call (which of the three it was is just which fields that
+// row happened to have set).
+app.delete('/recurring/manage/overrides/:id', requireUser, async (req, res) => {
+  try {
+    const { error } = await supabaseAdmin
+      .from('recurring_overrides')
+      .delete()
+      .eq('id', req.params.id)
+      .eq('user_id', req.userId);
+    if (error) throw error;
+
+    await detectRecurringTransactions(req.userId);
+    res.json(await getRecurringManagementData(req.userId));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to remove recurring override' });
   }
 });
 

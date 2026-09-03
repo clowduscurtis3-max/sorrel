@@ -5,10 +5,23 @@ const { normalizeMerchantKey } = require('./categorize');
 // ~15 day gaps) is deliberately omitted - it sits close enough to biweekly
 // (14 days) that the two would constantly misclassify each other, and
 // biweekly already covers the common real-world case (payroll).
+//
+// Monthly's tolerance widened 5 -> 8 (2026-09-03), real bug found live on
+// a real mortgage payment: gaps of 22 and 34 days between three genuinely
+// monthly charges (same merchant, same amount within AMOUNT_TOLERANCE_RATIO)
+// both had to fit for the series to register as recurring at all, and 22
+// days fell outside the old ±5 window (25-35). A real monthly bill posting
+// a bank-processing-day or two earlier/later one month is normal, not a
+// sign it isn't recurring. 8 is deliberately not wider than that - per
+// direct user instruction ("dont make the algorithm too loose... these are
+// charges that are one occurence a month, and generally around same time /
+// ammount") - 22-38 days stays well clear of biweekly's own range (11-17)
+// on one side and quarterly's (81-101) on the other, so this can't blur
+// into either.
 const INTERVALS = [
   { name: 'weekly', days: 7, tolerance: 2 },
   { name: 'biweekly', days: 14, tolerance: 3 },
-  { name: 'monthly', days: 30, tolerance: 5 },
+  { name: 'monthly', days: 30, tolerance: 8 },
   { name: 'quarterly', days: 91, tolerance: 10 },
   { name: 'annual', days: 365, tolerance: 15 },
 ];
@@ -86,6 +99,95 @@ function toDateOnly(d) {
   return d.toISOString().slice(0, 10);
 }
 
+// Phase (recurring management, 2026-09-03): rolls a manually-declared
+// recurring charge's next_expected_date forward past any cycles that have
+// already elapsed, so a manual entry the user hasn't touched in a while
+// still shows a genuinely upcoming date instead of a stale one from
+// whenever it was added/last edited. Unlike recurringSchedule.js's
+// STALE_INTERVALS_THRESHOLD (which treats a long-past auto-detected series
+// as likely cancelled and stops rolling it forward), a manual entry has no
+// such signal - the user explicitly told the system this bill recurs, so
+// it keeps projecting forward indefinitely until they remove it
+// themselves. Bounded to a sane number of steps regardless, purely as a
+// defensive ceiling against a malformed/very-old stored date, not a
+// staleness judgment.
+const MAX_MANUAL_ADVANCE_STEPS = 1200;
+function advanceManualDate(dateOnly, intervalDays, now) {
+  let date = new Date(`${dateOnly}T00:00:00Z`);
+  const nowUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  let steps = 0;
+  while (date < nowUtc && steps < MAX_MANUAL_ADVANCE_STEPS) {
+    date = new Date(date.getTime() + intervalDays * MS_PER_DAY);
+    steps++;
+  }
+  return toDateOnly(date);
+}
+
+// Folds this user's manual recurring_overrides (dismiss/edit/add - see the
+// migration's own header comment for the full shape) into the auto-
+// detected seriesRows, pure/no-I/O so the merge logic itself is directly
+// testable without a live DB. Runs AFTER auto-detection has already
+// produced its own seriesRows, right before they're upserted.
+function applyOverrides(seriesRows, overrides, userId, now = new Date()) {
+  const dismissedKeys = new Set(
+    overrides.filter((o) => o.merchant_key && o.dismissed).map((o) => o.merchant_key)
+  );
+  const editsByKey = new Map(
+    overrides.filter((o) => o.merchant_key && !o.dismissed).map((o) => [o.merchant_key, o])
+  );
+  const manualAdds = overrides.filter((o) => !o.merchant_key);
+
+  const merged = seriesRows
+    .filter((row) => !dismissedKeys.has(row.merchant_key))
+    .map((row) => {
+      const edit = editsByKey.get(row.merchant_key);
+      if (!edit) return row;
+      // Only the fields a real edit can meaningfully override - last_seen_
+      // date/next_expected_date/occurrence_count stay driven by the real
+      // transactions, which is still the accurate source for those on an
+      // auto-detected series (only display/category/interval/amount/
+      // debt_type are ever wrong in a way worth manually correcting).
+      return {
+        ...row,
+        display_name: edit.override_display_name ?? row.display_name,
+        category: edit.override_category ?? row.category,
+        interval: edit.override_interval ?? row.interval,
+        typical_amount: edit.override_typical_amount ?? row.typical_amount,
+        debt_type: edit.override_debt_type ?? row.debt_type,
+      };
+    });
+
+  for (const manual of manualAdds) {
+    const intervalName = manual.override_interval || 'monthly';
+    const intervalDays = INTERVAL_DAYS[intervalName];
+    const nextExpectedDate = advanceManualDate(manual.manual_next_expected_date, intervalDays, now);
+    const lastSeenDate = toDateOnly(
+      new Date(new Date(`${nextExpectedDate}T00:00:00Z`).getTime() - intervalDays * MS_PER_DAY)
+    );
+    merged.push({
+      user_id: userId,
+      merchant_key: `manual:${manual.id}`,
+      account_id: manual.account_id || null,
+      display_name: manual.override_display_name || 'Recurring charge',
+      category: manual.override_category || null,
+      debt_type: manual.override_debt_type || null,
+      interval: intervalName,
+      typical_amount: manual.override_typical_amount ?? 0,
+      last_seen_date: lastSeenDate,
+      next_expected_date: nextExpectedDate,
+      // No real transactions back a manual entry, so there's no genuine
+      // occurrence count - MIN_OCCURRENCES represents "the user directly
+      // confirmed this is real," matching what an auto-detected series's
+      // own minimum-to-qualify bar already means, rather than a number
+      // (0 or 1) that would read as "not yet established."
+      occurrence_count: MIN_OCCURRENCES,
+      updated_at: new Date().toISOString(),
+    });
+  }
+
+  return merged;
+}
+
 // Re-scans this user's full transaction history and rebuilds recurring_series
 // from scratch each run (rather than incrementally), tagging matching
 // transactions via recurring_series_id. Simpler than incremental bookkeeping,
@@ -106,6 +208,11 @@ async function detectRecurringTransactions(userId) {
     .eq('user_id', userId)
     .order('date', { ascending: true });
   if (error) throw error;
+  // A user with zero transactions still can't get a manual-only recurring
+  // entry (recurring_overrides, below) created until at least one sync has
+  // real transaction data - a real linked account always has some, so this
+  // is a zero-transaction edge case (no account linked yet) rather than
+  // one this feature realistically needs to handle.
   if (!transactions || transactions.length === 0) return { seriesCount: 0, taggedCount: 0 };
 
   // Found tap-testing Phase 8 Step 3 on-device: grouping by merchant alone
@@ -178,6 +285,23 @@ async function detectRecurringTransactions(userId) {
     }
   }
 
+  // Direct user request, 2026-09-03: manual dismiss/edit/add overrides
+  // (recurring_overrides, a separate sync-proof table - see its own
+  // migration comment for why this can't just live on recurring_series
+  // itself, which is wholesale rebuilt below on every call). Folded in
+  // right before upsert so every downstream step (upsert, stale-row
+  // cleanup, transaction tagging) treats a manual add exactly like a real
+  // auto-detected series - no separate code path for the rest of this
+  // function to keep in sync.
+  const { data: overrides, error: overridesError } = await supabaseAdmin
+    .from('recurring_overrides')
+    .select(
+      'id, merchant_key, account_id, dismissed, override_display_name, override_category, override_interval, override_typical_amount, override_debt_type, manual_next_expected_date'
+    )
+    .eq('user_id', userId);
+  if (overridesError) throw overridesError;
+  const mergedSeriesRows = applyOverrides(seriesRows, overrides || [], userId);
+
   // Clear all of this user's existing tags first, then re-apply below - the
   // simplest way to make a series that no longer qualifies (e.g. the last
   // charge fell outside every interval's tolerance) stop being shown as
@@ -188,14 +312,14 @@ async function detectRecurringTransactions(userId) {
     .eq('user_id', userId);
   if (clearError) throw clearError;
 
-  if (seriesRows.length === 0) {
+  if (mergedSeriesRows.length === 0) {
     await supabaseAdmin.from('recurring_series').delete().eq('user_id', userId);
     return { seriesCount: 0, taggedCount: 0 };
   }
 
   const { data: upsertedSeries, error: upsertError } = await supabaseAdmin
     .from('recurring_series')
-    .upsert(seriesRows, { onConflict: 'user_id,merchant_key' })
+    .upsert(mergedSeriesRows, { onConflict: 'user_id,merchant_key' })
     .select('id, merchant_key');
   if (upsertError) throw upsertError;
 
@@ -211,7 +335,7 @@ async function detectRecurringTransactions(userId) {
   // character escaping (only quoting values that actually need it), the
   // same dedicated-method pattern this codebase already uses for .in()
   // elsewhere (accounts.js, netWorth.js) rather than a hand-built string.
-  const currentKeys = seriesRows.map((r) => r.merchant_key);
+  const currentKeys = mergedSeriesRows.map((r) => r.merchant_key);
   const { error: staleError } = await supabaseAdmin
     .from('recurring_series')
     .delete()
@@ -234,4 +358,12 @@ async function detectRecurringTransactions(userId) {
   return { seriesCount: upsertedSeries.length, taggedCount };
 }
 
-module.exports = { detectRecurringTransactions, INTERVALS, INTERVAL_DAYS, AMOUNT_TOLERANCE_RATIO };
+module.exports = {
+  detectRecurringTransactions,
+  INTERVALS,
+  INTERVAL_DAYS,
+  AMOUNT_TOLERANCE_RATIO,
+  detectInterval,
+  clusterByAmount,
+  applyOverrides,
+};

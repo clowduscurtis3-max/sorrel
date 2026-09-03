@@ -29,7 +29,7 @@ import { colors } from '../_lib/styles';
 // dependency for the drag/wiggle itself.
 const SLOT_HEIGHT = 76;
 
-function Row({ itemKey, node, index, editing, onLongPress, onDragUpdate, onDragEnd, onDelete }) {
+function Row({ itemKey, node, index, editing, onLongPress, onEditingChange, onDragUpdate, onDragEnd, onDelete }) {
   const translateY = useSharedValue(index * SLOT_HEIGHT);
   const isDragging = useSharedValue(false);
   const wiggle = useSharedValue(0);
@@ -41,9 +41,13 @@ function Row({ itemKey, node, index, editing, onLongPress, onDragUpdate, onDragE
   }, [index]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    // Dialed back per direct user feedback, 2026-09-03 ("dial back the
+    // wiggling just a tad, its a bit intense") - was ±1.5deg/100ms per
+    // leg (a 200ms full cycle); now ±0.9deg/140ms (a 280ms cycle), a
+    // calmer wiggle without losing the "these are now editable" signal.
     if (editing) {
       wiggle.value = withRepeat(
-        withSequence(withTiming(-1.5, { duration: 100 }), withTiming(1.5, { duration: 100 })),
+        withSequence(withTiming(-0.9, { duration: 140 }), withTiming(0.9, { duration: 140 })),
         -1,
         true
       );
@@ -75,6 +79,21 @@ function Row({ itemKey, node, index, editing, onLongPress, onDragUpdate, onDragE
       runOnJS(onDragEnd)();
     });
 
+  // Real gap found by direct user feedback, 2026-09-03: while editing, a
+  // plain tap on a row (no drag) did nothing - Pan's own gesture consumed
+  // the touch without acting on it, and there was no way to exit edit
+  // mode except the "Done" link. Raced against Pan (Gesture.Race - RNGH's
+  // standard tap-vs-drag disambiguation): Tap only activates on release
+  // with minimal movement, so a real drag still wins and reorders as
+  // before; a plain tap now exits edit mode, matching "the user should be
+  // able to just tap the screen when done."
+  const tap = Gesture.Tap()
+    .enabled(editing)
+    .onEnd(() => {
+      'worklet';
+      runOnJS(onEditingChange)(false);
+    });
+
   const longPress = Gesture.LongPress()
     .enabled(!editing)
     .onStart(() => {
@@ -89,7 +108,7 @@ function Row({ itemKey, node, index, editing, onLongPress, onDragUpdate, onDragE
   }));
 
   return (
-    <GestureDetector gesture={editing ? pan : longPress}>
+    <GestureDetector gesture={editing ? Gesture.Race(pan, tap) : longPress}>
       <Animated.View style={[localStyles.row, animatedStyle]}>
         {editing && (
           <Pressable
@@ -147,7 +166,20 @@ export default function DraggableCardList({ items, onReorder, onDelete, editing,
   const nodeByKey = Object.fromEntries(items.map((i) => [i.key, i.node]));
 
   return (
-    <View style={{ height: liveOrder.length * SLOT_HEIGHT }}>
+    // The 8px gap below each row (SLOT_HEIGHT minus the row's own height,
+    // see localStyles.row) isn't covered by any Row's own GestureDetector -
+    // wrapping the whole stack in one Pressable catches a tap that lands
+    // in that gap too, same "tap the screen when done" exit as tapping a
+    // row directly (Row's own Race(pan,tap) handles that case; this
+    // Pressable is purely a backstop for the small gaps between rows,
+    // matching plain RN Pressable already used for deleteBadge in this
+    // same file rather than mixing in a second gesture-handler primitive
+    // for what's just a plain tap target).
+    <Pressable
+      style={{ height: liveOrder.length * SLOT_HEIGHT }}
+      onPress={() => editing && onEditingChange(false)}
+      disabled={!editing}
+    >
       {liveOrder.map((key) => (
         <Row
           key={key}
@@ -156,12 +188,13 @@ export default function DraggableCardList({ items, onReorder, onDelete, editing,
           index={liveOrder.indexOf(key)}
           editing={editing}
           onLongPress={() => onEditingChange(true)}
+          onEditingChange={onEditingChange}
           onDragUpdate={handleDragUpdate}
           onDragEnd={handleDragEnd}
           onDelete={onDelete}
         />
       ))}
-    </View>
+    </Pressable>
   );
 }
 

@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
@@ -187,6 +188,7 @@ function GroupCard({ group, query, intervalFilter, expanded, onToggle }) {
 }
 
 export default function Recurring() {
+  const router = useRouter();
   const { subscriptionAudit, refetchSubscriptionAudit } = useAppData();
 
   useFocusEffect(
@@ -249,9 +251,27 @@ export default function Recurring() {
         scrollEventThrottle={16}
       >
         <View style={recurringStyles.titleBlock}>
-          <Text style={[recurringStyles.title, onBackdropTextColor && { color: onBackdropTextColor }]}>
-            Recurring
-          </Text>
+          <View style={recurringStyles.titleRow}>
+            <Text style={[recurringStyles.title, onBackdropTextColor && { color: onBackdropTextColor }]}>
+              Recurring
+            </Text>
+            {/* Direct user request, 2026-09-03: "there should be an option
+                to edit recurring charges, or maybe add or remove recurring
+                charges" - a real mortgage payment that Plaid/Claude
+                couldn't confidently categorize had no way to be corrected
+                as a bill, or added at all if detection ever misses one. */}
+            <Pressable
+              style={recurringStyles.manageLink}
+              onPress={() => router.push('/recurring-manage')}
+              accessibilityRole="button"
+              accessibilityLabel="Manage recurring charges"
+            >
+              <MaterialIcons name="tune" size={16} color={onBackdropTextColor || colors.primary} />
+              <Text style={[recurringStyles.manageLinkText, onBackdropTextColor && { color: onBackdropTextColor }]}>
+                Manage
+              </Text>
+            </Pressable>
+          </View>
           <Text
             style={[recurringStyles.subtitle, night && { color: 'rgba(244, 246, 242, 0.75)' }]}
           >
@@ -469,10 +489,27 @@ const recurringStyles = StyleSheet.create({
     paddingBottom: 16,
     gap: 4,
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   title: {
     fontSize: 26,
     fontWeight: '700',
     color: colors.darkest,
+  },
+  manageLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+  },
+  manageLinkText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
   },
   subtitle: {
     fontSize: 13,

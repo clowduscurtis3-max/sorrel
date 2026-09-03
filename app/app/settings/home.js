@@ -105,8 +105,11 @@ export default function HomeSettings() {
   // own row: every row inside DraggableCardList is fixed-height and
   // absolutely positioned (needed for the drag math), so anything taller
   // than that slot would overflow into the row below it. Selecting a card
-  // here instead shows one shared color-editing panel below both lists -
-  // see that panel, rendered once, further down.
+  // instead shows a picker panel directly below whichever group (before-
+  // or after-stats) contains it - close enough to "a dropdown below that
+  // specific tab" per direct user feedback (2026-09-03) without needing
+  // to break the drag list's fixed-position layout for an exact per-row
+  // placement.
   function cardNode(key) {
     const currentColor = isValidHexColor(cardColors[key]) ? cardColors[key] : null;
     const previewTextColor = readableTextColor(currentColor, colors) || colors.darkest;
@@ -136,96 +139,117 @@ export default function HomeSettings() {
     );
   }
 
+  const expandedInBefore = expandedKey && HOME_CARD_GROUP_BEFORE_STATS.includes(expandedKey);
+  const expandedInAfter = expandedKey && HOME_CARD_GROUP_AFTER_STATS.includes(expandedKey);
+
+  function colorPanel() {
+    return (
+      <View style={[styles.card, homeSettingsStyles.colorPanel]}>
+        <Text style={styles.cardTitle}>{HOME_CARD_TITLES[expandedKey]} color</Text>
+        <HomeCardColorPicker
+          value={isValidHexColor(cardColors[expandedKey]) ? cardColors[expandedKey] : null}
+          onChange={(hex) => setCardColor(expandedKey, hex)}
+        />
+        <View style={homeSettingsStyles.colorPanelFooter}>
+          {isValidHexColor(cardColors[expandedKey]) ? (
+            <Pressable onPress={() => resetCardColor(expandedKey)} accessibilityRole="button" accessibilityLabel="Reset to default color">
+              <Text style={homeSettingsStyles.resetLink}>Reset to default</Text>
+            </Pressable>
+          ) : (
+            <View />
+          )}
+          {/* "OK" rather than a bare close icon (direct user feedback,
+              2026-09-03: "needs an ok button to lock in the color instead
+              of an x") - the color is already applied live as you pick
+              (same swatch-tap/slider-drag behavior as before), this button
+              just confirms you're done and collapses the panel. */}
+          <Pressable
+            style={homeSettingsStyles.okButton}
+            onPress={() => setExpandedKey(null)}
+            accessibilityRole="button"
+            accessibilityLabel="Lock in color"
+          >
+            <Text style={homeSettingsStyles.okButtonText}>OK</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <SettingsScreenChrome
       title="Home Settings"
-      subtitle={editing ? 'Drag to reorder, tap × to hide. Tap Done when finished.' : 'Choose which cards show on Home, and in what order.'}
+      subtitle={
+        editing
+          ? 'Drag to reorder, tap × to remove. Tap anywhere when done.'
+          : 'Choose which cards show in Home and what order. Tap and hold any card to make edits.'
+      }
       onBack={() => router.back()}
     >
       <SettingsFetchGate loaded={settings !== null} error={error} onRetry={fetchSettings}>
-        <ScrollView
-          style={homeSettingsStyles.body}
-          contentContainerStyle={homeSettingsStyles.bodyContent}
-          scrollEnabled={!editing}
+        {/* Tapping any non-interactive area (padding, the notice card, the
+            hidden section) also exits edit mode, matching each
+            DraggableCardList's own equivalent backstop for its internal
+            row gaps (see that component's own comment) - together these
+            cover "tap the screen when done" across the whole screen, not
+            just on a card. */}
+        <Pressable
+          style={{ flex: 1 }}
+          onPress={() => editing && setEditing(false)}
+          disabled={!editing}
         >
-          {error && <Text style={styles.errorText}>{error}</Text>}
+          <ScrollView
+            style={homeSettingsStyles.body}
+            contentContainerStyle={homeSettingsStyles.bodyContent}
+            scrollEnabled={!editing}
+          >
+            {error && <Text style={styles.errorText}>{error}</Text>}
 
-          <View style={homeSettingsStyles.toolbar}>
-            {saving && <ActivityIndicator size="small" />}
-            <View style={{ flex: 1 }} />
-            {editing && (
-              <Pressable onPress={() => setEditing(false)} accessibilityRole="button" accessibilityLabel="Done editing">
-                <Text style={homeSettingsStyles.doneLink}>Done</Text>
-              </Pressable>
-            )}
-          </View>
-
-          <DraggableCardList
-            items={orderedBefore.map((key) => ({ key, node: cardNode(key) }))}
-            editing={editing}
-            onEditingChange={enterEditMode}
-            onReorder={(order) => reorderGroup(HOME_CARD_GROUP_BEFORE_STATS, order)}
-            onDelete={hideCard}
-          />
-
-          <View style={homeSettingsStyles.statsNotice}>
-            <MaterialIcons name="info-outline" size={14} color={colors.muted} />
-            <Text style={homeSettingsStyles.statsNoticeText}>
-              Your quick stats row (spent, pace, days left, goal %) always appears here and isn't
-              a movable card.
-            </Text>
-          </View>
-
-          <DraggableCardList
-            items={orderedAfter.map((key) => ({ key, node: cardNode(key) }))}
-            editing={editing}
-            onEditingChange={enterEditMode}
-            onReorder={(order) => reorderGroup(HOME_CARD_GROUP_AFTER_STATS, order)}
-            onDelete={hideCard}
-          />
-
-          {hiddenCards.length > 0 && (
-            <View style={homeSettingsStyles.hiddenSection}>
-              <Text style={homeSettingsStyles.hiddenTitle}>HIDDEN</Text>
-              {hiddenCards.map((key) => (
-                <Pressable
-                  key={key}
-                  style={homeSettingsStyles.hiddenRow}
-                  onPress={() => unhideCard(key)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Show ${HOME_CARD_TITLES[key]} on Home`}
-                >
-                  <Text style={homeSettingsStyles.hiddenRowText}>{HOME_CARD_TITLES[key]}</Text>
-                  <MaterialIcons name="add-circle-outline" size={20} color={colors.primary} />
-                </Pressable>
-              ))}
+            <View style={homeSettingsStyles.toolbar}>
+              {saving && <ActivityIndicator size="small" />}
             </View>
-          )}
 
-          {/* One shared color-editing panel for whichever card is
-              currently selected, rather than expanding inline inside a
-              fixed-height draggable row (see cardNode's own comment for
-              why that would overflow into the row below it). */}
-          {expandedKey && !editing && (
-            <View style={[styles.card, homeSettingsStyles.colorPanel]}>
-              <View style={homeSettingsStyles.colorPanelHeader}>
-                <Text style={styles.cardTitle}>{HOME_CARD_TITLES[expandedKey]} color</Text>
-                <Pressable onPress={() => setExpandedKey(null)} accessibilityRole="button" accessibilityLabel="Close color picker" hitSlop={8}>
-                  <MaterialIcons name="close" size={20} color={colors.dark} />
-                </Pressable>
+            <DraggableCardList
+              items={orderedBefore.map((key) => ({ key, node: cardNode(key) }))}
+              editing={editing}
+              onEditingChange={enterEditMode}
+              onReorder={(order) => reorderGroup(HOME_CARD_GROUP_BEFORE_STATS, order)}
+              onDelete={hideCard}
+            />
+
+            {expandedInBefore && !editing && colorPanel()}
+
+            <View style={homeSettingsStyles.groupDivider} />
+
+            <DraggableCardList
+              items={orderedAfter.map((key) => ({ key, node: cardNode(key) }))}
+              editing={editing}
+              onEditingChange={enterEditMode}
+              onReorder={(order) => reorderGroup(HOME_CARD_GROUP_AFTER_STATS, order)}
+              onDelete={hideCard}
+            />
+
+            {expandedInAfter && !editing && colorPanel()}
+
+            {hiddenCards.length > 0 && (
+              <View style={homeSettingsStyles.hiddenSection}>
+                <Text style={homeSettingsStyles.hiddenTitle}>HIDDEN</Text>
+                {hiddenCards.map((key) => (
+                  <Pressable
+                    key={key}
+                    style={homeSettingsStyles.hiddenRow}
+                    onPress={() => unhideCard(key)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Show ${HOME_CARD_TITLES[key]} on Home`}
+                  >
+                    <Text style={homeSettingsStyles.hiddenRowText}>{HOME_CARD_TITLES[key]}</Text>
+                    <MaterialIcons name="add-circle-outline" size={20} color={colors.primary} />
+                  </Pressable>
+                ))}
               </View>
-              <HomeCardColorPicker
-                value={isValidHexColor(cardColors[expandedKey]) ? cardColors[expandedKey] : null}
-                onChange={(hex) => setCardColor(expandedKey, hex)}
-              />
-              {isValidHexColor(cardColors[expandedKey]) && (
-                <Pressable onPress={() => resetCardColor(expandedKey)} accessibilityRole="button" accessibilityLabel="Reset to default color">
-                  <Text style={homeSettingsStyles.resetLink}>Reset to default color</Text>
-                </Pressable>
-              )}
-            </View>
-          )}
-        </ScrollView>
+            )}
+          </ScrollView>
+        </Pressable>
       </SettingsFetchGate>
     </SettingsScreenChrome>
   );
@@ -245,11 +269,6 @@ const homeSettingsStyles = StyleSheet.create({
     alignItems: 'center',
     minHeight: 24,
     marginBottom: 4,
-  },
-  doneLink: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.primary,
   },
   cardRow: {
     height: '100%',
@@ -281,10 +300,11 @@ const homeSettingsStyles = StyleSheet.create({
     color: colors.darkest,
   },
   colorPanel: {
-    marginTop: 16,
+    marginTop: 8,
+    marginBottom: 12,
     gap: 10,
   },
-  colorPanelHeader: {
+  colorPanelFooter: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -294,18 +314,19 @@ const homeSettingsStyles = StyleSheet.create({
     color: colors.muted,
     fontWeight: '600',
   },
-  statsNotice: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 6,
-    paddingHorizontal: 4,
-    paddingVertical: 8,
+  okButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 16,
+    paddingVertical: 6,
+    paddingHorizontal: 20,
   },
-  statsNoticeText: {
-    flex: 1,
-    fontSize: 12,
-    color: colors.muted,
-    lineHeight: 16,
+  okButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.background,
+  },
+  groupDivider: {
+    height: 12,
   },
   hiddenSection: {
     marginTop: 12,
