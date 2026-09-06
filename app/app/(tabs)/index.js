@@ -39,6 +39,7 @@ import { iconForCategory as iconForTxCategory } from '../_lib/categoryIcons';
 import { HOME_CARD_GROUP_BEFORE_STATS, HOME_CARD_GROUP_AFTER_STATS, orderCardGroup } from '../_lib/homeCards';
 import ProjectedSpendModal from '../_components/ProjectedSpendModal';
 import MonthlyReviewModal from '../_components/MonthlyReviewModal';
+import SpentSoFarModal from '../_components/SpentSoFarModal';
 
 const STATUS_ICON = { ok: 'check-circle', warning: 'warning', severe: 'error' };
 const STATUS_COLOR = {
@@ -238,6 +239,7 @@ export default function Home() {
   // own established precedent for exactly this shape of overlay.
   const [showProjectedSpendDetail, setShowProjectedSpendDetail] = useState(false);
   const [showMonthlyReviewDetail, setShowMonthlyReviewDetail] = useState(false);
+  const [showSpentSoFarDetail, setShowSpentSoFarDetail] = useState(false);
 
   // Kept for the Overview branch's Animated.ScrollView onScroll wiring
   // below - no longer drives the backdrop itself (AppBackdrop is a
@@ -1247,19 +1249,20 @@ export default function Home() {
               Settings' manageable cards (Phase 38 Step 3) - always shown,
               always in this exact spot, same as before that step existed. */}
           <View style={[styles.card, homeStyles.cardMargin, homeStyles.statRow]}>
-            {/* Direct user request: Home cards should be interactive.
-                Lands on the plain Budget tab (no category param) - it
-                already shows every category's own spend broken out, which
-                is a fuller answer to "what's counted toward this total"
-                than a second, flat all-categories transaction list would
-                be, and each of ITS category cards already drills in
-                further (the categoryParam flow built for the Financial
-                Health tiles, above). */}
+            {/* Direct user follow-up request: rather than navigating away
+                to the full Budget tab, open a lighter in-place summary -
+                every category's own spend/budget with a health-colored
+                progress bar, same severity rule Budget's own cards and
+                the Financial Health tiles already share
+                (statusForCategory, _lib/homeSummary.js). Still not a dead
+                end - tapping a row inside SpentSoFarModal closes it and
+                deep-links into Budget's real category detail (the
+                categoryParam flow built for the Financial Health tiles). */}
             <Pressable
               style={homeStyles.statTile}
-              onPress={() => router.push('/budget')}
+              onPress={() => setShowSpentSoFarDetail(true)}
               accessibilityRole="button"
-              accessibilityLabel="View spend by category in Budget"
+              accessibilityLabel="View spend by category"
             >
               <MaterialIcons name="account-balance-wallet" size={18} color={colors.dark} />
               <Text style={homeStyles.statLabel}>SPENT SO FAR</Text>
@@ -1331,6 +1334,18 @@ export default function Home() {
         spendStats={spendStats}
         monthProgress={monthProgress}
         monthName={monthName}
+      />
+
+      <SpentSoFarModal
+        visible={showSpentSoFarDetail}
+        onClose={() => setShowSpentSoFarDetail(false)}
+        budgetStatus={budgetStatus}
+        alerts={alerts}
+        spendStats={spendStats}
+        onSelectCategory={(category) => {
+          setShowSpentSoFarDetail(false);
+          router.push({ pathname: '/budget', params: { category } });
+        }}
       />
 
       <MonthlyReviewModal
