@@ -6,12 +6,15 @@
 // perspective. A single persisted "when did the app last go to
 // background" timestamp is banded into three outcomes on every
 // return-to-foreground (warm resume) and once on cold start: short
-// elapsed time is a no-op, LOCK_AFTER_BACKGROUND_MS triggers a biometric
-// re-check (reusing Phase 20's existing lock screen), and
-// SIGN_OUT_AFTER_BACKGROUND_MS triggers a full sign-out requiring fresh
-// Google OAuth. Named constants specifically so they're easy to retune
-// without hunting through _layout.js's gating logic.
-export const LOCK_AFTER_BACKGROUND_MS = 5 * 60 * 1000;
+// elapsed time is a no-op, the user's own session-timeout preference
+// (Phase 38 Step 6, `_lib/sessionTimeoutPreference.js` -
+// getSessionTimeoutMinutes(), previously a hardcoded constant here named
+// LOCK_AFTER_BACKGROUND_MS) triggers a biometric re-check (reusing Phase
+// 20's existing lock screen), and SIGN_OUT_AFTER_BACKGROUND_MS below
+// triggers a full sign-out requiring fresh Google OAuth - a hard backstop
+// that always applies regardless of the session-timeout preference, even
+// when that preference is "Off" (direct user decision, see _layout.js's
+// own comment on the exact mechanics).
 export const SIGN_OUT_AFTER_BACKGROUND_MS = 30 * 60 * 1000;
 
 // How long the warm-resume listener waits for the app to sit still on

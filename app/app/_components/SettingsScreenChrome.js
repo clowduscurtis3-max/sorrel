@@ -11,6 +11,16 @@ import { AppBackdrop, isNightBackdrop } from './Illustrations';
 // code review, 2026-09-02: this app has already been bitten once by the
 // same class of copy-pasted-constant drift, see GOAL_TYPES's client/server
 // mirror). A tweak to the Settings header now only has one place to make it.
+//
+// IMPORTANT, found the hard way (2026-09-06): `children` is rendered
+// directly, NOT wrapped in a ScrollView - a screen with more content than
+// fits one viewport (most of them, once real content lands) will silently
+// fail to scroll unless it wraps its own body in a <ScrollView> itself.
+// settings/home.js has the established, working pattern to copy
+// (ScrollView + contentContainerStyle, with real bottom padding so the
+// last card clears the screen edge) - every Step 4-8 screen missed this
+// the first time and had to be fixed after an on-device tap-test caught
+// it. Do this for any new Settings screen from the start.
 export default function SettingsScreenChrome({ title, subtitle, onBack, children }) {
   const scrollY = useSharedValue(0);
   const night = isNightBackdrop();

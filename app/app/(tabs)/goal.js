@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
 import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   useAudioRecorder,
   useAudioRecorderState,
@@ -445,12 +446,31 @@ export default function Goal() {
     fetchEmergencyFundStatus();
   }, []);
 
+  // Real bug found live, 2026-09-05: `depositoryAccounts` used to only be
+  // computed inline inside this card's own render block, below - meaning
+  // openEmergencyFundEditor (which needs it to filter stale ids, see
+  // right below) couldn't reach it. Hoisted here so both share one
+  // definition, not two that could drift.
+  const depositoryAccounts = (accounts?.accounts || []).filter((a) => a.type === 'depository');
+
   // Opens the settings panel seeded from whatever's already saved (or a
   // sensible empty state for first-time setup) - never starts from a
   // blank slate if the user is just coming back to adjust an existing
   // configuration.
   function openEmergencyFundEditor() {
-    setEfSelectedAccountIds(emergencyFundStatus?.account_ids || []);
+    // Real bug found live, 2026-09-05: a since-unlinked account's id
+    // silently stayed in account_ids forever - the checkbox list below
+    // only renders currently-linked accounts, so a stale id had no
+    // checkbox to ever uncheck it with, and every save kept resending it
+    // verbatim. The server correctly rejects an account id that no
+    // longer belongs to the user (setEmergencyFundConfig's ownership
+    // check), so every save attempt failed with the same opaque
+    // "SERVER_ERROR" with no way for the user to self-recover through
+    // this UI. Filtering to currently-real accounts here means opening
+    // the editor and saving now self-heals a stale config instead of
+    // permanently wedging it.
+    const realAccountIds = new Set(depositoryAccounts.map((a) => a.id));
+    setEfSelectedAccountIds((emergencyFundStatus?.account_ids || []).filter((id) => realAccountIds.has(id)));
     setEfTargetText(
       emergencyFundStatus?.target_amount ? String(emergencyFundStatus.target_amount) : ''
     );
@@ -750,6 +770,42 @@ export default function Goal() {
     setMilestonesResult(null);
     setMilestonesError(null);
   }
+
+  // Phase 38 Step 4: the two Goal Settings toggles (settings/goal.js) this
+  // tab itself needs to obey - `{}` while loading (and any key never
+  // explicitly set) reads as "show"/`round_ups_enabled !== false`, same
+  // "current behavior unchanged until a user opens Settings" convention
+  // budget.js's own budgetSettings already established. useFocusEffect (not
+  // a plain mount-only useEffect) so a change made in Settings and then
+  // backed out of applies the moment this tab regains focus, without
+  // needing an app restart.
+  const [goalSettings, setGoalSettings] = useState({});
+
+  async function fetchGoalSettings() {
+    try {
+      const res = await apiFetch('/settings');
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const nextSettings = (await res.json()).goal_settings || {};
+      setGoalSettings((prev) => {
+        // The cached round-ups total (below) is scoped to whichever
+        // account was selected when it was fetched - if Settings changed
+        // which account counts, that cached total is now for the wrong
+        // account and must be invalidated, not shown stale.
+        if (prev.round_ups_account_id !== nextSettings.round_ups_account_id) {
+          setRoundUpsResult(null);
+        }
+        return nextSettings;
+      });
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchGoalSettings();
+    }, [])
+  );
 
   // Phase 31 (Round-Ups v1, 2026-08-25): simulation/tracking only - this
   // app has no real money-movement capability (see server/roundUps.js's
@@ -1502,6 +1558,7 @@ export default function Goal() {
                   )}
                 </View>
 
+                {goalSettings.round_ups_enabled !== false && (
                 <View style={[styles.card, goalStyles.cardMargin]}>
                   <View style={goalStyles.projectionsHeaderRow}>
                     <MaterialIcons name="toll" size={18} color={colors.dark} />
@@ -1536,6 +1593,7 @@ export default function Goal() {
                     </View>
                   )}
                 </View>
+                )}
               </>
             ) : (
               <View style={[styles.card, goalStyles.cardMargin, goalStyles.insightCard]}>
@@ -1553,6 +1611,7 @@ export default function Goal() {
             )}
 
             {goalProgress &&
+              goalSettings.show_advisor_tip !== false &&
               (() => {
                 const tip = computeGoalAdvisorTip({ goalProgress, subscriptionAudit, budgetStatus });
                 if (!tip) return null;
@@ -1572,9 +1631,6 @@ export default function Goal() {
             {(() => {
               const estimate = emergencyFundStatus?.essential_expense_estimate;
               const refusalMessage = estimate ? emergencyEstimateRefusalMessage(estimate) : null;
-              const depositoryAccounts = (accounts?.accounts || []).filter(
-                (a) => a.type === 'depository'
-              );
               const isConfigured =
                 emergencyFundStatus?.enabled &&
                 emergencyFundStatus?.target_amount &&

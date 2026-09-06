@@ -8,6 +8,7 @@ const { INTERVALS, AMOUNT_TOLERANCE_RATIO } = require('./recurring');
 const { AVG_DAYS_PER_MONTH } = require('./goalProgress');
 const { getRecurringMonthComparison } = require('./recurringMonthComparison');
 const { nextExpectedIncome, toDateOnly } = require('./recurringSchedule');
+const { getSettings } = require('./settings');
 
 const MS_PER_DAY = 86_400_000;
 
@@ -18,8 +19,35 @@ const MS_PER_DAY = 86_400_000;
 // (see detectForkedPriceJumps) rather than staying clustered together, so
 // this only needs to catch drift too small to have forked. Tunable - no
 // real data has validated this number yet, same as OVERSPEND_THRESHOLD_RATIO/
-// MIN_DAYS_ELAPSED in alerts.js.
+// MIN_DAYS_ELAPSED in alerts.js. This is also the "medium"/default value of
+// Phase 38 Step 5's price-creep sensitivity setting, below - unchanged
+// behavior for a user who's never opened Settings.
 const PRICE_CREEP_MIN_RATIO = 0.05;
+
+// Phase 38 Step 5 (Recurring Settings): the brief called for a "price-
+// creep/price-jump alert sensitivity" setting. Deliberately only
+// price-CREEP (this ratio) is made adjustable, not price-jump detection -
+// a forked price "jump" (detectForkedPriceJumps, below) is inherently tied
+// to AMOUNT_TOLERANCE_RATIO, the same boundary recurring.js uses to decide
+// whether two charges are even the same recurring series at all. That
+// constant is foundational to series identity across this whole app
+// (mortgage detection, subscription clustering, next_expected_date
+// tracking - see Phase 40's mortgage-tolerance write-up in CLAUDE.md) -
+// making it user-adjustable as an "alert sensitivity" would let a Settings
+// toggle silently change what counts as the same subscription everywhere
+// else, a much bigger and riskier surface than one alert threshold.
+// Price-creep has no such entanglement (it only ever adds/removes a
+// finding, never changes series identity), so it's the one made
+// adjustable here.
+const PRICE_CREEP_SENSITIVITY_RATIOS = {
+  low: 0.1,
+  medium: PRICE_CREEP_MIN_RATIO,
+  high: 0.03,
+};
+
+function priceCreepRatioForSensitivity(sensitivity) {
+  return PRICE_CREEP_SENSITIVITY_RATIOS[sensitivity] ?? PRICE_CREEP_MIN_RATIO;
+}
 
 function round2(n) {
   return Math.round(n * 100) / 100;
@@ -61,7 +89,7 @@ function isValidAmount(amount) {
 // valid transactions after filtering is skipped, not flagged. Decreases are
 // deliberately not flagged - not a "creep" concern, a candidate for a later
 // step's own framing, not this one.
-function detectIntraSeriesCreep(series, transactions) {
+function detectIntraSeriesCreep(series, transactions, minRatio = PRICE_CREEP_MIN_RATIO) {
   const valid = (transactions || [])
     .filter((t) => isValidAmount(t.amount))
     .slice()
@@ -73,7 +101,7 @@ function detectIntraSeriesCreep(series, transactions) {
   if (latest.amount <= earliest.amount) return null;
 
   const ratio = (latest.amount - earliest.amount) / earliest.amount;
-  if (ratio < PRICE_CREEP_MIN_RATIO) return null;
+  if (ratio < minRatio) return null;
 
   return {
     series_id: series.id,
@@ -182,7 +210,12 @@ function detectForkedPriceJumps(activeById, lapsedById) {
 // recurring.js) series, and both price-creep cases (which still span every
 // active spend series regardless of group - a price hike on a bill or a
 // habitual purchase is just as worth surfacing as one on a subscription).
-function computeSubscriptionAudit({ series = [], transactionsBySeriesId = new Map(), now = new Date() }) {
+function computeSubscriptionAudit({
+  series = [],
+  transactionsBySeriesId = new Map(),
+  now = new Date(),
+  priceCreepMinRatio = PRICE_CREEP_MIN_RATIO,
+}) {
   const nowMs = utcDateOnlyMs(now);
   // Category alone isn't a reliable enough spend filter: Plaid represents
   // money coming IN as a negative amount regardless of category (see
@@ -270,7 +303,7 @@ function computeSubscriptionAudit({ series = [], transactionsBySeriesId = new Ma
 
   const gradual_increases = [];
   for (const s of activeById.values()) {
-    const entry = detectIntraSeriesCreep(s, transactionsBySeriesId.get(s.id));
+    const entry = detectIntraSeriesCreep(s, transactionsBySeriesId.get(s.id), priceCreepMinRatio);
     if (entry) gradual_increases.push(entry);
   }
 
@@ -428,11 +461,18 @@ async function getSubscriptionAudit(userId, { now } = {}) {
     }
   }
 
+  // Phase 38 Step 5: the user's own price-creep sensitivity setting -
+  // unset (never opened Settings) reads as 'medium', the exact same
+  // PRICE_CREEP_MIN_RATIO every caller got before this setting existed.
+  const { recurring_settings: recurringSettings } = await getSettings(userId);
+  const priceCreepMinRatio = priceCreepRatioForSensitivity(recurringSettings?.price_creep_sensitivity);
+
   const resolvedNow = now || new Date();
   const audit = computeSubscriptionAudit({
     series: series || [],
     transactionsBySeriesId,
     now: resolvedNow,
+    priceCreepMinRatio,
   });
 
   // Real, separate query (needs its own date-range lookup the audit above
@@ -454,4 +494,6 @@ module.exports = {
   getSubscriptionAudit,
   computeRecurringGlance,
   PRICE_CREEP_MIN_RATIO,
+  PRICE_CREEP_SENSITIVITY_RATIOS,
+  priceCreepRatioForSensitivity,
 };

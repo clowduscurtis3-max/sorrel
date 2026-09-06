@@ -1,9 +1,26 @@
+import { useEffect, useState } from 'react';
+import { View, ActivityIndicator } from 'react-native';
 import { Tabs } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppDataProvider } from '../_lib/appData';
-import { colors } from '../_lib/styles';
+import { apiFetch } from '../_lib/api';
+import { styles, colors } from '../_lib/styles';
 import { isNightBackdrop } from '../_components/Illustrations';
+
+// Phase 38 Step 8 (cross-cutting settings: tab visibility/reorder,
+// default landing tab). React Navigation's tab navigator expects a
+// stable set/order of screens - changing which <Tabs.Screen>s exist (or
+// their order) *after* the navigator has already mounted is the kind of
+// thing this app's own history already warns about getting careless
+// with (see this file's own Phase 14 comment on the Modal-vs-(tabs)
+// unmount collision it used to have to work around). Rather than mount
+// <Tabs> immediately and reshuffle it once a settings fetch resolves,
+// this waits for that one fetch first (same "gate render on a resolved
+// value" discipline the root _layout.js already uses for session/goal)
+// so <Tabs> only ever mounts once, already in its final shape - a brief
+// loading spinner on cold start, not a visible tab-bar reshuffle later.
+const DEFAULT_TAB_ORDER = ['index', 'budget', 'recurring', 'goal'];
 
 // Phase 7 Step 1: tab shell, originally exactly four tabs (Home/Budget/
 // Recurring/Goal) with account-level actions living in a plain <Modal>
@@ -34,6 +51,14 @@ const TAB_ICONS = {
   account: 'person',
 };
 
+const TAB_TITLES = {
+  index: 'Home',
+  budget: 'Budget',
+  recurring: 'Recurring',
+  goal: 'Goal',
+  account: 'Account',
+};
+
 export default function TabsLayout() {
   // Floating pill tab bar (2026-08-27), matching the user's own reference
   // mockup exactly: a rounded, inset-from-the-edges bar rather than a
@@ -57,9 +82,64 @@ export default function TabsLayout() {
   const insets = useSafeAreaInsets();
   const tabBarBottom = 12 + insets.bottom;
 
+  // null while loading (fetch not yet resolved) - see this file's own
+  // header comment for why <Tabs> waits for this instead of mounting
+  // immediately and reshuffling later. Fetched once per app session (not
+  // on every focus - unlike a Settings screen, there's no "come back to
+  // this screen" moment for the tab bar itself to refresh from; a change
+  // made in Settings -> General applies the next time the app is
+  // launched, same as sessionTimeoutPreference-style device state
+  // elsewhere in this app that reads once at a natural boundary rather
+  // than continuously).
+  const [generalSettings, setGeneralSettings] = useState(null);
+
+  useEffect(() => {
+    apiFetch('/settings')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setGeneralSettings(data?.general_settings || {}))
+      .catch((err) => {
+        console.error(err);
+        setGeneralSettings({}); // fail open to defaults, never block the app on this
+      });
+  }, []);
+
+  // 'account' is deliberately excluded from both hiding and reordering
+  // here - per the brief, "Account itself should probably not be
+  // hideable, since Settings lives inside it." Always rendered last,
+  // matching Settings -> General's own fixed-position display of it.
+  // hidden_tabs stripped of any stored 'account' value defensively (a
+  // bad/tampered setting should never be able to hide the one tab that
+  // leads back to Settings itself). Safe to compute even while
+  // `generalSettings` is still null (the `|| {}` below) - only the
+  // final <Tabs> vs. spinner render decision actually depends on
+  // whether the fetch has resolved yet.
+  const hiddenTabs = ((generalSettings || {}).hidden_tabs || []).filter((t) => t !== 'account');
+  const savedOrder = (generalSettings || {}).tab_order;
+  const reorderableTabs =
+    Array.isArray(savedOrder) && DEFAULT_TAB_ORDER.every((t) => savedOrder.includes(t))
+      ? savedOrder
+      : DEFAULT_TAB_ORDER;
+  const orderedTabNames = [...reorderableTabs, 'account'];
+
+  const visibleTabNames = orderedTabNames.filter((t) => t === 'account' || !hiddenTabs.includes(t));
+  const defaultLandingTab = visibleTabNames.includes((generalSettings || {}).default_landing_tab)
+    ? generalSettings.default_landing_tab
+    : 'index';
+
   return (
+    // AppDataProvider mounts (and starts its own account/goal/audit
+    // fetches) immediately regardless of whether the settings fetch
+    // above has resolved yet - only <Tabs> itself waits, so this
+    // Step 8 addition doesn't push AppDataProvider's own fetches
+    // later than they used to start.
     <AppDataProvider>
+      {!generalSettings ? (
+        <View style={[styles.container, styles.centered]}>
+          <ActivityIndicator size="large" />
+        </View>
+      ) : (
       <Tabs
+        initialRouteName={defaultLandingTab}
         screenOptions={({ route }) => ({
           // headerShown: false everywhere (2026-08-24, explicit user
           // request) - the tab bar's own icon+label already identifies
@@ -113,12 +193,24 @@ export default function TabsLayout() {
           },
         })}
       >
-        <Tabs.Screen name="index" options={{ title: 'Home' }} />
-        <Tabs.Screen name="budget" options={{ title: 'Budget' }} />
-        <Tabs.Screen name="recurring" options={{ title: 'Recurring' }} />
-        <Tabs.Screen name="goal" options={{ title: 'Goal' }} />
-        <Tabs.Screen name="account" options={{ title: 'Account' }} />
+        {orderedTabNames.map((name) => (
+          <Tabs.Screen
+            key={name}
+            name={name}
+            options={{
+              title: TAB_TITLES[name],
+              // href: null is Expo Router's supported way to remove a
+              // screen from the tab bar UI while keeping it mounted in
+              // the navigator - not conditionally omitting the
+              // <Tabs.Screen> itself, which would change the screen SET
+              // this navigator manages (the exact "stable set of
+              // screens" concern this file's own header comment flags).
+              href: hiddenTabs.includes(name) ? null : undefined,
+            }}
+          />
+        ))}
       </Tabs>
+      )}
     </AppDataProvider>
   );
 }

@@ -13,9 +13,9 @@ import BiometricLock from './_components/BiometricLock';
 import MfaChallenge from './_components/MfaChallenge';
 import GoalCheckError from './_components/GoalCheckError';
 import { getBiometricLockEnabled } from './_lib/biometricPreference';
+import { getSessionTimeoutMinutes } from './_lib/sessionTimeoutPreference';
 import { getAuthenticatorAssuranceLevel } from './_lib/mfa';
 import {
-  LOCK_AFTER_BACKGROUND_MS,
   SIGN_OUT_AFTER_BACKGROUND_MS,
   RESUME_SETTLE_DEBOUNCE_MS,
   RESUME_MAX_CHURN_WAIT_MS,
@@ -455,7 +455,21 @@ export default function RootLayout() {
     if (!Number.isFinite(backgroundedAt)) return;
     const elapsed = Date.now() - backgroundedAt;
 
-    if (elapsed < LOCK_AFTER_BACKGROUND_MS) return; // short elapsed: no-op
+    // Phase 38 Step 6 (Session Timeout setting): adjustable replacement
+    // for the previously-hardcoded LOCK_AFTER_BACKGROUND_MS. 'Off'
+    // (null) means the user explicitly disabled this shorter re-lock
+    // check - per direct user decision, that does NOT also disable the
+    // harder SIGN_OUT_AFTER_BACKGROUND_MS backstop below, so the
+    // early-return threshold becomes that same 30-minute mark instead:
+    // nothing happens before it, and once elapsed reaches it, this
+    // function proceeds past the return into the exact same "elapsed >=
+    // SIGN_OUT_AFTER_BACKGROUND_MS" branch below that already forces a
+    // sign-out regardless of canLock - no separate off-handling needed
+    // past this one line.
+    const sessionTimeoutMinutes = await getSessionTimeoutMinutes();
+    const lockAfterMs =
+      sessionTimeoutMinutes === null ? SIGN_OUT_AFTER_BACKGROUND_MS : sessionTimeoutMinutes * 60 * 1000;
+    if (elapsed < lockAfterMs) return; // short elapsed: no-op
 
     // Determine biometric availability directly, live, rather than trusting
     // the `biometricAvailable` state - on a cold relaunch (the real Phase

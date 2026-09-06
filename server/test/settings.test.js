@@ -21,5 +21,6 @@ test('SETTINGS_SECTIONS covers every tab this phase scopes a settings screen for
     'recurring_settings',
     'account_settings',
     'notification_settings',
+    'general_settings',
   ]);
 });

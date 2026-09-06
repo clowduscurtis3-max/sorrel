@@ -12,6 +12,10 @@ const SETTINGS_SECTIONS = [
   'recurring_settings',
   'account_settings',
   'notification_settings',
+  // Phase 38 Step 8: whole-app preferences (tab visibility/reorder,
+  // default landing tab) that don't belong to any single existing tab's
+  // own settings screen.
+  'general_settings',
 ];
 
 function emptySettings() {

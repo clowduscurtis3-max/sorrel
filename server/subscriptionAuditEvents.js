@@ -1,5 +1,6 @@
 const supabaseAdmin = require('./supabaseAdmin');
 const { getSubscriptionAudit, PRICE_CREEP_MIN_RATIO } = require('./subscriptionAudit');
+const { getSettings } = require('./settings');
 
 const EVENT_TYPES = ['subscription_price_creep', 'subscription_price_jump', 'subscription_lapsed'];
 
@@ -182,7 +183,17 @@ async function recomputeSubscriptionAuditEvents(userId) {
     audit,
   });
 
-  if (toInsert.length > 0) {
+  // Phase 38 Step 7 (Notification Settings): one granular toggle for all
+  // three subscription-finding event types together (price creep/jump/
+  // lapsed), matching the brief's own "subscription findings" as a
+  // single item, not three separate ones. Reconciliation above still
+  // runs unconditionally (so toResolve below can still clear anything
+  // already queued the moment this is turned off), only the insert of
+  // brand-new findings is gated.
+  const { notification_settings: notificationSettings } = await getSettings(userId);
+  const subscriptionFindingsEnabled = notificationSettings?.subscription_findings_enabled !== false;
+
+  if (subscriptionFindingsEnabled && toInsert.length > 0) {
     const { error } = await supabaseAdmin
       .from('notification_events')
       .insert(toInsert.map((e) => ({ user_id: userId, ...e })));

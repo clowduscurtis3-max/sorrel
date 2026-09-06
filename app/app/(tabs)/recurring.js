@@ -5,7 +5,7 @@ import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
-import { formatDecimal, formatDateMDY } from '../_lib/api';
+import { apiFetch, formatDecimal, formatDateMDY } from '../_lib/api';
 import { styles, colors } from '../_lib/styles';
 import { useAppData } from '../_lib/appData';
 import { iconForCategory } from '../_lib/categoryIcons';
@@ -61,6 +61,28 @@ function buildGroups(audit) {
       label: 'Other Recurring Charges',
       icon: 'more-horiz',
       entries: audit.other_recurring,
+    },
+  ];
+}
+
+// Phase 38 Step 5 (Recurring Settings, default_grouping: 'flat'): the same
+// three real buckets above, combined into one list instead of three
+// separate cards - sorted by monthly cost (highest first) so the order is
+// still meaningful, not just DB insertion order. Reuses GroupCard/
+// RecurringRow entirely unchanged (a "group" of one is still a group) -
+// each row's own category icon (RecurringRow) is what still tells bills
+// apart from subscriptions here, not a section header.
+function buildFlatGroup(audit) {
+  if (!audit) return [];
+  const all = [...audit.recurring_bills, ...audit.subscriptions, ...audit.other_recurring].sort(
+    (a, b) => b.monthly_equivalent_amount - a.monthly_equivalent_amount
+  );
+  return [
+    {
+      key: 'all_recurring',
+      label: 'All Recurring Charges',
+      icon: 'receipt-long',
+      entries: all,
     },
   ];
 }
@@ -206,9 +228,28 @@ export default function Recurring() {
   const router = useRouter();
   const { subscriptionAudit, refetchSubscriptionAudit } = useAppData();
 
+  // Phase 38 Step 5: the Recurring Settings default_grouping toggle this
+  // tab itself needs to obey - `{}` while loading (and unset) reads as
+  // 'grouped', the pre-existing behavior, same "current behavior unchanged
+  // until Settings is opened" convention every other Settings toggle in
+  // this app already follows.
+  const [recurringSettings, setRecurringSettings] = useState({});
+
+  async function fetchRecurringSettings() {
+    try {
+      const res = await apiFetch('/settings');
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const data = await res.json();
+      setRecurringSettings(data.recurring_settings || {});
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   useFocusEffect(
     useCallback(() => {
       refetchSubscriptionAudit();
+      fetchRecurringSettings();
     }, [])
   );
 
@@ -222,7 +263,11 @@ export default function Recurring() {
     setExpandedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
   }
 
-  const groups = useMemo(() => buildGroups(subscriptionAudit), [subscriptionAudit]);
+  const isFlat = recurringSettings.default_grouping === 'flat';
+  const groups = useMemo(
+    () => (isFlat ? buildFlatGroup(subscriptionAudit) : buildGroups(subscriptionAudit)),
+    [subscriptionAudit, isFlat]
+  );
   const hasAnyMatch = useMemo(
     () => groups.some((g) => g.entries.some((e) => matchesFilters(e, query, intervalFilter))),
     [groups, query, intervalFilter]

@@ -1,8 +1,61 @@
 const supabaseAdmin = require('./supabaseAdmin');
 const { currentMonthRange } = require('./budget');
-const { getGoalProgress } = require('./goalProgress');
+const { getGoalProgress, AVG_DAYS_PER_MONTH } = require('./goalProgress');
+const { getSettings } = require('./settings');
 
 const GOAL_MILESTONE_THRESHOLDS = [25, 50, 75, 100];
+
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}
+
+// Phase 38 Step 4 (Auto-Save reminder frequency setting). Converts the
+// real monthly figure goalProgress.js already computes
+// (monthly_savings_needed) into a per-occurrence amount for a shorter
+// cadence - same divide-a-monthly-figure approach scenario.js's own
+// OCCURRENCES_PER_MONTH already uses for recurring-commitment cost, not a
+// second formula. "monthly" (and any unrecognized value) is 1, i.e. no
+// scaling - the pre-existing behavior.
+const FREQUENCY_DIVISOR = {
+  weekly: AVG_DAYS_PER_MONTH / 7,
+  biweekly: AVG_DAYS_PER_MONTH / 14,
+  monthly: 1,
+};
+
+const FREQUENCY_COPY = {
+  weekly: 'this week',
+  biweekly: 'over the next two weeks',
+  monthly: 'this period',
+};
+
+function startOfIsoWeek(date) {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const day = d.getUTCDay();
+  d.setUTCDate(d.getUTCDate() + (day === 0 ? -6 : 1 - day));
+  return d;
+}
+
+// Arbitrary but fixed Monday anchor (predates this feature) so a biweekly
+// window's boundary is stable across recomputes rather than silently
+// drifting relative to whenever this function first happens to run.
+const BIWEEKLY_ANCHOR_MS = Date.UTC(2026, 0, 5);
+
+// Returns the period-start string a savings reminder should dedup against
+// for a given frequency, or null for 'monthly' (and any unrecognized
+// value) - those callers already have the real budget-period start from
+// currentMonthRange() and should use that instead of a second calculation
+// that could quietly disagree with it.
+function reminderPeriodStart(frequency, now = new Date()) {
+  if (frequency === 'weekly') {
+    return startOfIsoWeek(now).toISOString().slice(0, 10);
+  }
+  if (frequency === 'biweekly') {
+    const periodMs = 14 * 86400000;
+    const periodIndex = Math.floor((now.getTime() - BIWEEKLY_ANCHOR_MS) / periodMs);
+    return new Date(BIWEEKLY_ANCHOR_MS + periodIndex * periodMs).toISOString().slice(0, 10);
+  }
+  return null;
+}
 
 // Pure, no I/O - diffs the currently-active overspend alerts (already
 // computed and persisted by recomputeOverspendAlerts in alerts.js) against
@@ -58,6 +111,71 @@ function reconcileOverspendEvents({ existingEvents, activeAlerts, periodStart })
 
   for (const [category, existing] of existingByCategory) {
     if (existing.status === 'pending' && !activeByCategory.has(category)) {
+      toResolve.push(existing.id);
+    }
+  }
+
+  return { toInsert, toUpdate, toResolve };
+}
+
+// Pure, no I/O - same "ongoing condition, insert/reopen/resolve" shape as
+// reconcileOverspendEvents above, keyed by linked account instead of
+// budget category (reuses the `category` column as a generic per-user
+// sub-key, same as overspend already does - not literally a budget
+// category for this event type). Deliberately NOT period-scoped: a low
+// balance isn't a "this budget period" concept, it's a persistent state -
+// fires once when a configured account first drops below its own
+// threshold, stays quiet while it remains low, and resolves (allowing a
+// fresh fire later) once the balance recovers back above it. An account
+// with no configured threshold (not present in `thresholds`) never
+// fires - never guesses a default the user didn't actually set. A
+// missing/non-numeric real balance is skipped, never treated as "$0 low
+// balance" - matches this app's own "insufficient_data over a fabricated
+// number" rule elsewhere (goalProgress.js, emergencyFund.js).
+function reconcileLowBalanceEvents({ existingEvents, accounts, thresholds }) {
+  const existingByAccount = new Map(existingEvents.map((e) => [e.category, e]));
+  const belowThresholdAccountIds = new Set();
+
+  const toInsert = [];
+  const toUpdate = [];
+  const toResolve = [];
+
+  for (const account of accounts || []) {
+    const threshold = thresholds[account.plaid_account_id];
+    if (typeof threshold !== 'number' || !Number.isFinite(threshold)) continue;
+
+    const balance = account.available_balance ?? account.current_balance;
+    if (typeof balance !== 'number' || !Number.isFinite(balance)) continue;
+    if (balance >= threshold) continue;
+
+    belowThresholdAccountIds.add(account.plaid_account_id);
+    const existing = existingByAccount.get(account.plaid_account_id);
+    const dedupKey = `low_balance:${account.plaid_account_id}`;
+    const accountLabel = account.name || 'An account';
+    const title = `${accountLabel} balance is low`;
+    const body = `${accountLabel} is at $${balance.toFixed(2)}, below your $${threshold.toFixed(2)} threshold.`;
+    const data = { account_id: account.plaid_account_id, balance: round2(balance), threshold: round2(threshold) };
+
+    if (!existing) {
+      toInsert.push({
+        event_type: 'low_balance',
+        dedup_key: dedupKey,
+        category: account.plaid_account_id,
+        period_start: null,
+        status: 'pending',
+        title,
+        body,
+        data,
+      });
+    } else if (existing.status === 'resolved') {
+      toUpdate.push({ id: existing.id, patch: { status: 'pending', title, body, data, resolved_at: null } });
+    } else if (existing.status === 'pending') {
+      toUpdate.push({ id: existing.id, patch: { title, body, data } });
+    }
+  }
+
+  for (const [accountId, existing] of existingByAccount) {
+    if (existing.status === 'pending' && !belowThresholdAccountIds.has(accountId)) {
       toResolve.push(existing.id);
     }
   }
@@ -125,19 +243,35 @@ function reconcileGoalMilestoneEvents({ existingEvents, progress, targetSignatur
 // logic. That's the whole extensibility seam this phase's brief asked
 // for - not a speculative abstraction layer, just a real data field
 // already shaped for the future consumer to read.
-function reconcileSavingsReminderEvents({ existingEvents, goalProgress, targetSignature, periodStart }) {
+function reconcileSavingsReminderEvents({
+  existingEvents,
+  goalProgress,
+  targetSignature,
+  periodStart,
+  frequency = 'monthly',
+}) {
+  // Phase 38 Step 4: user turned reminders off entirely.
+  if (frequency === 'off') return { toInsert: [] };
   if (!goalProgress?.has_target || !goalProgress.projections) return { toInsert: [] };
   // Already reached - nothing left to nudge toward this period.
   if (goalProgress.saved_amount >= goalProgress.target_amount) return { toInsert: [] };
 
-  const amount = goalProgress.projections.monthly_savings_needed;
+  const monthlyAmount = goalProgress.projections.monthly_savings_needed;
   // Non-positive (the deadline has already passed - computeGoalProjections
   // returns the undivided remainder in that case, still a real number, but
   // "move $X this period to stay on pace" stops being an honest framing
   // once there's no "this period" pace left to stay on) or missing
   // entirely - never queue a reminder built on a number that doesn't mean
   // what the copy below claims it means.
-  if (!(amount > 0) || goalProgress.projections.deadline_passed) return { toInsert: [] };
+  if (!(monthlyAmount > 0) || goalProgress.projections.deadline_passed) return { toInsert: [] };
+
+  // Scale the real monthly figure down to whatever cadence the user picked
+  // (Phase 38 Step 4) - "move $440 this week" would overshoot a monthly
+  // pace roughly 4x if left unscaled, so a shorter cadence must divide the
+  // monthly amount, never just relabel it.
+  const divisor = FREQUENCY_DIVISOR[frequency] || FREQUENCY_DIVISOR.monthly;
+  const amount = round2(monthlyAmount / divisor);
+  const periodLabel = FREQUENCY_COPY[frequency] || FREQUENCY_COPY.monthly;
 
   const dedupKey = `savings_reminder:${targetSignature}:${periodStart}`;
   if (existingEvents.some((e) => e.dedup_key === dedupKey)) return { toInsert: [] };
@@ -151,7 +285,7 @@ function reconcileSavingsReminderEvents({ existingEvents, goalProgress, targetSi
         period_start: periodStart,
         status: 'pending',
         title: 'Time to move money toward your goal',
-        body: `Moving about $${amount.toFixed(2)} toward your goal this period would keep it on pace for its target date.`,
+        body: `Moving about $${amount.toFixed(2)} toward your goal ${periodLabel} would keep it on pace for its target date.`,
         data: {
           suggested_amount: amount,
           target_amount: goalProgress.target_amount,
@@ -214,6 +348,88 @@ async function recomputeNotificationEvents(userId) {
     if (error) throw error;
   }
 
+  // Phase 38 Step 7 (Notification Settings): per-feature on/off +
+  // low-balance threshold. Fetched once, ahead of the goal-dependent
+  // section below (which returns early when there's no goal) - low
+  // balance and the overspend/subscription-findings toggles must all
+  // still work for a user who's never set a goal at all.
+  const { notification_settings: notificationSettings } = await getSettings(userId);
+  const overspendPaceEnabled = notificationSettings?.overspend_pace_enabled !== false;
+  const goalMilestonesEnabled = notificationSettings?.goal_milestones_enabled !== false;
+  const lowBalanceThresholds = notificationSettings?.low_balance_thresholds || {};
+
+  // Real bug this ordering avoids: reconcileOverspendEvents/its apply
+  // block above already ran regardless of this toggle - if disabled,
+  // any already-queued pending overspend events must be resolved here,
+  // not just skipped from being inserted fresh next time.
+  if (!overspendPaceEnabled && (existingOverspend || []).some((e) => e.status === 'pending')) {
+    const { error } = await supabaseAdmin
+      .from('notification_events')
+      .update({ status: 'resolved', resolved_at: new Date().toISOString() })
+      .eq('user_id', userId)
+      .eq('event_type', 'overspend_pace')
+      .eq('status', 'pending');
+    if (error) throw error;
+  }
+
+  {
+    // Real bug found live, 2026-09-06: this used to be gated on
+    // `Object.keys(lowBalanceThresholds).length > 0`, skipping the whole
+    // block (including the reconcile call) whenever nothing was
+    // currently configured - which meant clearing a previously-set
+    // threshold back to "off" left its already-pending alert stuck
+    // pending forever, since nothing ever ran to resolve it. Runs
+    // unconditionally now, same as every other event type's own
+    // reconcile call in this function - reconcileLowBalanceEvents
+    // itself already no-ops cheaply per-account when a given account
+    // has no configured threshold.
+    const [{ data: accounts, error: accountsError }, { data: existingLowBalance, error: lowBalanceError }] =
+      await Promise.all([
+        supabaseAdmin
+          .from('accounts')
+          .select('plaid_account_id, name, available_balance, current_balance')
+          .eq('user_id', userId),
+        supabaseAdmin
+          .from('notification_events')
+          .select('id, category, status')
+          .eq('user_id', userId)
+          .eq('event_type', 'low_balance'),
+      ]);
+    if (accountsError) throw accountsError;
+    if (lowBalanceError) throw lowBalanceError;
+
+    const {
+      toInsert: lowBalanceInsert,
+      toUpdate: lowBalanceUpdate,
+      toResolve: lowBalanceResolve,
+    } = reconcileLowBalanceEvents({
+      existingEvents: existingLowBalance || [],
+      accounts: accounts || [],
+      thresholds: lowBalanceThresholds,
+    });
+
+    if (lowBalanceInsert.length > 0) {
+      const { error } = await supabaseAdmin
+        .from('notification_events')
+        .insert(lowBalanceInsert.map((e) => ({ user_id: userId, ...e })));
+      if (error) throw error;
+    }
+    for (const { id, patch } of lowBalanceUpdate) {
+      const { error } = await supabaseAdmin
+        .from('notification_events')
+        .update({ ...patch, updated_at: new Date().toISOString() })
+        .eq('id', id);
+      if (error) throw error;
+    }
+    if (lowBalanceResolve.length > 0) {
+      const { error } = await supabaseAdmin
+        .from('notification_events')
+        .update({ status: 'resolved', resolved_at: new Date().toISOString() })
+        .in('id', lowBalanceResolve);
+      if (error) throw error;
+    }
+  }
+
   // Goal milestones - no goal, or a goal with no hard target, means nothing
   // to reconcile here (matches computeGoalProgress's own has_target branch).
   const { data: goal } = await supabaseAdmin
@@ -239,7 +455,7 @@ async function recomputeNotificationEvents(userId) {
     targetSignature,
   });
 
-  if (milestoneInserts.length > 0) {
+  if (goalMilestonesEnabled && milestoneInserts.length > 0) {
     const { error } = await supabaseAdmin
       .from('notification_events')
       .insert(milestoneInserts.map((e) => ({ user_id: userId, ...e })));
@@ -247,21 +463,34 @@ async function recomputeNotificationEvents(userId) {
   }
 
   // Savings reminder (Phase 32) - reuses the exact same progress/
-  // targetSignature/period_start already fetched above for milestones, no
-  // second DB read for goal state.
+  // targetSignature already fetched above for milestones, no second DB
+  // read for goal state. Phase 38 Step 4: the user's chosen cadence
+  // (goal_settings.auto_save_reminder_frequency) decides both the dedup
+  // period (a shorter cadence needs its own, shorter period_start, not
+  // the monthly budget period every other reminder uses) and how the
+  // suggested amount gets scaled - see reconcileSavingsReminderEvents.
+  const { goal_settings: goalSettings } = await getSettings(userId);
+  const reminderFrequency = ['weekly', 'biweekly', 'monthly', 'off'].includes(
+    goalSettings?.auto_save_reminder_frequency
+  )
+    ? goalSettings.auto_save_reminder_frequency
+    : 'monthly';
+  const reminderPeriod = reminderPeriodStart(reminderFrequency, new Date()) || period_start;
+
   const { data: existingReminders, error: reminderError } = await supabaseAdmin
     .from('notification_events')
     .select('dedup_key')
     .eq('user_id', userId)
     .eq('event_type', 'savings_reminder')
-    .eq('period_start', period_start);
+    .eq('period_start', reminderPeriod);
   if (reminderError) throw reminderError;
 
   const { toInsert: reminderInserts } = reconcileSavingsReminderEvents({
     existingEvents: existingReminders || [],
     goalProgress: progress,
     targetSignature,
-    periodStart: period_start,
+    frequency: reminderFrequency,
+    periodStart: reminderPeriod,
   });
 
   if (reminderInserts.length > 0) {
@@ -276,5 +505,7 @@ module.exports = {
   reconcileOverspendEvents,
   reconcileGoalMilestoneEvents,
   reconcileSavingsReminderEvents,
+  reconcileLowBalanceEvents,
   recomputeNotificationEvents,
+  reminderPeriodStart,
 };

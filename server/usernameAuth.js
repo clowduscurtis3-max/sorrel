@@ -24,6 +24,7 @@ class InvalidUsernameError extends Error {}
 class InvalidPasswordError extends Error {}
 class InvalidCredentialsError extends Error {}
 class AccountAlreadyHasUsernameError extends Error {}
+class NoUsernameSetError extends Error {}
 
 const USERNAME_PATTERN = /^[a-zA-Z0-9_]{3,20}$/;
 const MIN_PASSWORD_LENGTH = 8;
@@ -252,8 +253,41 @@ async function signinUsername({ username, password }) {
   return signInWithEmail(userData.user.email, password);
 }
 
+// Phase 38 Step 6 (Account & Security Settings: change password). Only
+// meaningful for a user who's actually set up username/password
+// (findProfileById check below) - a Google-only account has no password
+// of its own to change here. Requires the CURRENT password, not just an
+// already-authenticated session token, as a real second factor against
+// a hijacked/stale session trying to lock the real owner out - verified
+// by reusing signInWithEmail (the exact same real Supabase Auth check
+// sign-in itself uses), not a second, parallel verification that could
+// disagree with what actually authenticates.
+async function changePassword({ userId, currentPassword, newPassword }) {
+  validateNewPassword(newPassword);
+
+  const profile = await findProfileById(userId);
+  if (!profile) {
+    throw new NoUsernameSetError('Set up a username and password first before changing it.');
+  }
+
+  const { data: userData, error: userError } = await supabaseAdmin.auth.admin.getUserById(userId);
+  if (userError || !userData?.user?.email) {
+    throw new Error('Could not verify this account.');
+  }
+
+  // Throws InvalidCredentialsError if currentPassword is wrong - never
+  // reaches the actual change below in that case.
+  await signInWithEmail(userData.user.email, currentPassword);
+
+  const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+    password: newPassword,
+  });
+  if (updateError) throw updateError;
+}
+
 module.exports = {
   signup,
+  changePassword,
   linkUsernamePassword,
   getUsernameStatus,
   signinUsername,
@@ -264,4 +298,5 @@ module.exports = {
   InvalidPasswordError,
   InvalidCredentialsError,
   AccountAlreadyHasUsernameError,
+  NoUsernameSetError,
 };

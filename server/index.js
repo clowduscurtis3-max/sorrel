@@ -38,6 +38,7 @@ const {
 const { getBudgetHistory } = require('./budgetHistory');
 const { getHomeChanges } = require('./homeChanges');
 const { SETTINGS_SECTIONS, getSettings, patchSettings } = require('./settings');
+const { getTransactionsCsv, getBudgetHistoryCsv, getNetWorthCsv } = require('./csvExport');
 const { getMonthlyReview } = require('./monthlyReview');
 const { detectRecurringTransactions, INTERVALS } = require('./recurring');
 const { recomputeOverspendAlerts } = require('./alerts');
@@ -92,6 +93,7 @@ const { getHomeAffordability } = require('./homeAffordability');
 const { logRecommendationEvent, VALID_TYPES, VALID_STATUSES } = require('./recommendationEvents');
 const {
   signup,
+  changePassword,
   linkUsernamePassword,
   getUsernameStatus,
   signinUsername,
@@ -102,7 +104,9 @@ const {
   InvalidPasswordError,
   InvalidCredentialsError,
   AccountAlreadyHasUsernameError,
+  NoUsernameSetError,
 } = require('./usernameAuth');
+const { deleteUserAccount } = require('./accountDeletion');
 
 // Where we send the system browser once Gmail linking finishes, so the app
 // (watching for this scheme via WebBrowser.openAuthSessionAsync) resolves.
@@ -236,6 +240,32 @@ app.get('/auth/username-status', requireUser, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load username status' });
+  }
+});
+
+// Phase 38 Step 6 (Account & Security Settings: change password). Same
+// "trust the caller's own session token, never the request body" rule
+// as /auth/link-username above - req.userId is who this changes the
+// password FOR, current_password is only ever used to verify, never to
+// pick whose account this is.
+app.post('/auth/change-password', requireUser, async (req, res) => {
+  const { current_password, new_password } = req.body || {};
+  try {
+    await changePassword({
+      userId: req.userId,
+      currentPassword: current_password,
+      newPassword: new_password,
+    });
+    res.json({ success: true });
+  } catch (err) {
+    if (err instanceof InvalidCredentialsError) {
+      return res.status(401).json({ error: 'Current password is incorrect.' });
+    }
+    if (err instanceof InvalidPasswordError || err instanceof NoUsernameSetError) {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Failed to change password' });
   }
 });
 
@@ -401,7 +431,7 @@ app.post('/exchange-token', requireUser, async (req, res) => {
       if (existingItem.item_id === item_id) {
         const { error } = await supabaseAdmin
           .from('plaid_items')
-          .update({ access_token: encrypt(access_token), status: 'active' })
+          .update({ access_token: encrypt(access_token), status: 'active', needs_relink: false })
           .eq('id', existingItem.id);
         if (error) throw error;
 
@@ -580,6 +610,27 @@ app.delete('/plaid-items/:id', requireUser, async (req, res) => {
   }
 });
 
+// Phase 38 Step 6 (Account & Security Settings: delete account).
+// Permanently wipes this user's real Supabase Auth account and every
+// row tied to it (see accountDeletion.js's own header for the full
+// table-by-table reasoning). `requireUser` alone (a cryptographically
+// verified session token) is the same trust boundary this app already
+// uses for other sensitive account-identity actions (POST
+// /auth/link-username, POST /auth/change-password) - no extra
+// server-side re-auth here, since a Google-only account has no password
+// to re-verify. The real "are you sure" friction is a client-side
+// confirmation step (Settings' own UI - type a confirmation phrase),
+// per the brief's own "confirmation step required" instruction.
+app.post('/account/delete', requireUser, async (req, res) => {
+  try {
+    await deleteUserAccount(req.userId);
+    res.json({ success: true });
+  } catch (err) {
+    logError('Failed to delete account:', err);
+    res.status(500).json({ error: 'Failed to delete account. Please try again.' });
+  }
+});
+
 // Phase 8 Step 1: lets the client enumerate this user's linked Items
 // (institution name, status) - needed for Step 3's account menu to let a
 // user identify which institution they're managing/re-linking/
@@ -588,7 +639,7 @@ app.get('/plaid-items', requireUser, async (req, res) => {
   try {
     const { data: items, error } = await supabaseAdmin
       .from('plaid_items')
-      .select('id, institution_id, institution_name, institution_logo, status, created_at')
+      .select('id, institution_id, institution_name, institution_logo, status, needs_relink, created_at')
       .eq('user_id', req.userId)
       .order('created_at', { ascending: true });
     if (error) throw error;
@@ -788,7 +839,13 @@ app.get('/goal/milestones', requireUser, async (req, res) => {
 // period only.
 app.get('/goal/round-ups', requireUser, async (req, res) => {
   try {
-    const result = await getRoundUpEstimate(req.userId);
+    // Phase 38 Step 4: goal_settings.round_ups_account_id (Settings ->
+    // Goal Settings) narrows the simulation to one linked account -
+    // unset (the default) keeps summing every account, unchanged.
+    const { goal_settings: goalSettings } = await getSettings(req.userId);
+    const result = await getRoundUpEstimate(req.userId, {
+      accountId: goalSettings?.round_ups_account_id || null,
+    });
     res.json({ result });
   } catch (err) {
     console.error(err);
@@ -1055,12 +1112,36 @@ async function syncUserData(userId, { skipSync = false } = {}) {
       // than sequentially. refreshAccountBalances catches its own failure
       // and never rejects, so it can't affect syncTransactionsLocked via
       // Promise.all.
-      await Promise.all([
-        syncTransactionsLocked(item.id, userId, accessToken, item.cursor),
-        refreshAccountBalances(userId, item.id, accessToken).catch((err) => {
-          logError(`Account balance refresh failed for Item ${item.id} (non-fatal):`, err);
-        }),
-      ]);
+      try {
+        await Promise.all([
+          syncTransactionsLocked(item.id, userId, accessToken, item.cursor),
+          refreshAccountBalances(userId, item.id, accessToken).catch((err) => {
+            logError(`Account balance refresh failed for Item ${item.id} (non-fatal):`, err);
+          }),
+        ]);
+      } catch (err) {
+        // Phase 38 Step 6 (Account & Security Settings: connection
+        // health). The one real, common reason a bank actually needs
+        // re-linking (a stale login - password change, revoked
+        // permission, etc.) - previously just logged and skipped like
+        // any other per-Item failure, with no queryable trace anywhere
+        // that this specific Item is the one that's broken. `needs_relink`
+        // is a plain new column, deliberately NOT reusing `status` (which
+        // several other queries filter on `= 'active'` to decide what to
+        // sync/display at all - flipping it here would silently hide this
+        // Item's accounts instead of just flagging them). Cleared back to
+        // false on a successful re-link exchange (POST /exchange-token,
+        // above), not on just any successful sync - a re-link is the real
+        // "this is fixed now" signal, not incidental.
+        if (err.response?.data?.error_code === 'ITEM_LOGIN_REQUIRED') {
+          const { error: flagError } = await supabaseAdmin
+            .from('plaid_items')
+            .update({ needs_relink: true })
+            .eq('id', item.id);
+          if (flagError) logError(`Failed to flag Item ${item.id} as needing re-link (non-fatal):`, flagError);
+        }
+        throw err;
+      }
     })
   );
 
@@ -1143,6 +1224,32 @@ app.get('/transactions', requireUser, async (req, res) => {
   }
 });
 
+// Phase 38 Step 6 (Account & Security Settings: manual "sync now").
+// Reuses syncUserData/syncTransactionsLocked entirely unchanged - this is
+// the exact same full sync GET /transactions already runs by default
+// (skipSync: false), just without also re-transferring the whole
+// transaction list back down for a caller that only wants the sync
+// itself to happen. Same error handling as GET /transactions for the two
+// real failure modes that can occur here.
+app.post('/admin/sync-now', requireUser, async (req, res) => {
+  try {
+    await syncUserData(req.userId);
+    res.json({ ok: true });
+  } catch (err) {
+    if (err instanceof NoLinkedAccountError) {
+      return res.status(404).json({ error: 'No linked bank account' });
+    }
+    if (err instanceof DecryptionError) {
+      return res.status(409).json({
+        error: 'Your bank connection needs to be re-linked.',
+        code: 'RELINK_REQUIRED',
+      });
+    }
+    logError('Failed to sync now:', err);
+    res.status(500).json({ error: 'Failed to sync' });
+  }
+});
+
 // Re-runs categorization over every transaction this user already has
 // stored, not just new deltas from a sync. Needed because
 // categorizeTransactions() only ever runs on Plaid's added/modified
@@ -1201,6 +1308,51 @@ app.post('/admin/recategorize', requireUser, async (req, res) => {
   }
 });
 
+// Extracted from PATCH /transactions/:transaction_id/category (Step 7,
+// 2026-08-17) so Phase 38 Step 8's Transaction Rules screen can apply the
+// exact same "correct every other transaction from this merchant, except
+// ones the user already manually categorized on purpose" logic when
+// editing a rule directly - not a second, slightly-different copy that
+// could drift from the original. `excludeTransactionId` is optional
+// (null when there's no specific transaction this edit originated from,
+// as with a rule edited straight from Settings).
+async function applyMerchantCategoryRetroactively(userId, merchantKey, category, excludeTransactionId) {
+  let query = supabaseAdmin
+    .from('transactions')
+    .select('transaction_id, merchant_name, name, category_reasoning')
+    .eq('user_id', userId);
+  if (excludeTransactionId) query = query.neq('transaction_id', excludeTransactionId);
+  const { data: sameMerchant, error: sameMerchantError } = await query;
+  if (sameMerchantError) {
+    console.error('Failed to look up same-merchant transactions:', sameMerchantError);
+    return 0;
+  }
+
+  const matchingIds = (sameMerchant || [])
+    .filter(
+      (t) =>
+        normalizeMerchantKey(t.merchant_name || t.name) === merchantKey &&
+        t.category_reasoning !== 'Manually categorized by user.'
+    )
+    .map((t) => t.transaction_id);
+  if (matchingIds.length === 0) return 0;
+
+  const { error: retroError } = await supabaseAdmin
+    .from('transactions')
+    .update({
+      category,
+      category_confidence: 'high',
+      category_reasoning: 'Matches your manual correction for this merchant.',
+    })
+    .eq('user_id', userId)
+    .in('transaction_id', matchingIds);
+  if (retroError) {
+    console.error('Failed to retroactively apply merchant category correction:', retroError);
+    return 0;
+  }
+  return matchingIds.length;
+}
+
 // Step 6: lets the user correct a category the AI wasn't confident about
 // (or resolve an Uncategorized one) instead of forcing them to live with a
 // guess. Scoped to transaction_id AND user_id so one user can't touch
@@ -1256,52 +1408,150 @@ app.patch('/transactions/:transaction_id/category', requireUser, async (req, res
       // this merchant (categorizeTransactions reads it on the next sync,
       // see categorize.js) - every already-synced transaction from the
       // same merchant, already sitting in the list, stayed exactly as it
-      // was. Retroactively applies the correction to this user's other
-      // transactions that share the same merchant, excluding any that
-      // were already manually categorized by the user themselves - a
-      // deliberate prior manual choice for a specific transaction (e.g.
-      // one "Amazon" purchase filed under Shopping, another under
-      // Electronics on purpose) is never silently overwritten by a later
-      // correction elsewhere; only machine-categorized ones (whatever
-      // their confidence) get brought in line.
-      const { data: sameMerchant, error: sameMerchantError } = await supabaseAdmin
-        .from('transactions')
-        .select('transaction_id, merchant_name, name, category_reasoning')
-        .eq('user_id', req.userId)
-        .neq('transaction_id', req.params.transaction_id);
-      if (sameMerchantError) {
-        console.error('Failed to look up same-merchant transactions:', sameMerchantError);
-      } else {
-        const matchingIds = (sameMerchant || [])
-          .filter(
-            (t) =>
-              normalizeMerchantKey(t.merchant_name || t.name) === merchantKey &&
-              t.category_reasoning !== 'Manually categorized by user.'
-          )
-          .map((t) => t.transaction_id);
-        if (matchingIds.length > 0) {
-          const { error: retroError } = await supabaseAdmin
-            .from('transactions')
-            .update({
-              category,
-              category_confidence: 'high',
-              category_reasoning: 'Matches your manual correction for this merchant.',
-            })
-            .eq('user_id', req.userId)
-            .in('transaction_id', matchingIds);
-          if (retroError) {
-            console.error('Failed to retroactively apply merchant category correction:', retroError);
-          } else {
-            retroactivelyUpdated = matchingIds.length;
-          }
-        }
-      }
+      // was. See applyMerchantCategoryRetroactively's own header for the
+      // "never overwrite a deliberate per-transaction choice" rule.
+      retroactivelyUpdated = await applyMerchantCategoryRetroactively(
+        req.userId,
+        merchantKey,
+        category,
+        req.params.transaction_id
+      );
     }
 
     res.json({ success: true, retroactively_updated: retroactivelyUpdated });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to update category' });
+  }
+});
+
+// Phase 38 Step 8 (Transaction Rules): view/edit/bulk-manage the
+// merchant_category_preferences this app already builds one at a time
+// from the transaction-correction flow above, instead of only ever
+// setting them inline on a transaction. A "rule" here is exactly one row
+// of that table - merchant_key is opaque to the client (the same
+// normalizeMerchantKey output already used everywhere else), so this
+// also returns a real display name (the most recent transaction from
+// that merchant, if any still exist) rather than the raw key.
+app.get('/merchant-preferences', requireUser, async (req, res) => {
+  try {
+    const { data: prefs, error } = await supabaseAdmin
+      .from('merchant_category_preferences')
+      .select('merchant_key, category, updated_at')
+      .eq('user_id', req.userId)
+      .order('updated_at', { ascending: false });
+    if (error) throw error;
+
+    const { data: transactions, error: txError } = await supabaseAdmin
+      .from('transactions')
+      .select('merchant_name, name, date')
+      .eq('user_id', req.userId)
+      .order('date', { ascending: false });
+    if (txError) throw txError;
+
+    // Most-recent real transaction per merchant_key, for a human-readable
+    // label - a rule for a merchant with no transactions left (all
+    // deleted/unlinked since) falls back to the raw key rather than
+    // hiding the rule or fabricating a name.
+    const labelByKey = new Map();
+    for (const t of transactions || []) {
+      const key = normalizeMerchantKey(t.merchant_name || t.name);
+      if (key && !labelByKey.has(key)) labelByKey.set(key, t.merchant_name || t.name);
+    }
+
+    res.json({
+      rules: (prefs || []).map((p) => ({
+        merchant_key: p.merchant_key,
+        display_name: labelByKey.get(p.merchant_key) || p.merchant_key,
+        category: p.category,
+        updated_at: p.updated_at,
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load transaction rules' });
+  }
+});
+
+// Edits a rule directly (not tied to any one transaction) - same
+// upsert-then-retroactively-apply behavior as correcting a transaction's
+// category inline, reusing applyMerchantCategoryRetroactively so the two
+// paths can't disagree with each other. No excludeTransactionId here -
+// there's no specific transaction this edit originated from.
+app.patch('/merchant-preferences', requireUser, async (req, res) => {
+  const { merchant_key, category } = req.body || {};
+  if (!merchant_key || typeof merchant_key !== 'string') {
+    return res.status(400).json({ error: 'merchant_key is required' });
+  }
+  if (!FRIENDLY_CATEGORIES.includes(category)) {
+    return res.status(400).json({ error: `category must be one of: ${FRIENDLY_CATEGORIES.join(', ')}` });
+  }
+  try {
+    const { error } = await supabaseAdmin
+      .from('merchant_category_preferences')
+      .upsert(
+        { user_id: req.userId, merchant_key, category, updated_at: new Date().toISOString() },
+        { onConflict: 'user_id,merchant_key' }
+      );
+    if (error) throw error;
+
+    const retroactivelyUpdated = await applyMerchantCategoryRetroactively(req.userId, merchant_key, category, null);
+    res.json({ success: true, retroactively_updated: retroactivelyUpdated });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update rule' });
+  }
+});
+
+// Deletes a rule entirely - future purchases from this merchant go back
+// to normal AI categorization. Deliberately does NOT retroactively
+// re-categorize already-corrected transactions back to a guess - a
+// human already reviewed and fixed those, undoing that would be a real
+// regression, not a neutral "reset."
+app.delete('/merchant-preferences/:merchant_key', requireUser, async (req, res) => {
+  try {
+    const { error } = await supabaseAdmin
+      .from('merchant_category_preferences')
+      .delete()
+      .eq('user_id', req.userId)
+      .eq('merchant_key', req.params.merchant_key);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to delete rule' });
+  }
+});
+
+// Phase 38 Step 8 (Data export). Read-only, no new AI/Plaid work - just
+// formatting data this app already has (see csvExport.js's own header
+// for why this is CSV only, not CSV/PDF as the brief's text listed). The
+// client hands the returned string straight to React Native's own Share
+// API - no file-system write, no new native module, no rebuild.
+app.get('/export/transactions', requireUser, async (req, res) => {
+  try {
+    res.type('text/csv').send(await getTransactionsCsv(req.userId));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to export transactions' });
+  }
+});
+
+app.get('/export/budget-history', requireUser, async (req, res) => {
+  try {
+    res.type('text/csv').send(await getBudgetHistoryCsv(req.userId));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to export budget history' });
+  }
+});
+
+app.get('/export/net-worth', requireUser, async (req, res) => {
+  try {
+    res.type('text/csv').send(await getNetWorthCsv(req.userId));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to export net worth' });
   }
 });
 

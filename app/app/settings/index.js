@@ -15,6 +15,8 @@ const SECTIONS = [
   { path: '/settings/recurring', title: 'Recurring', icon: 'autorenew' },
   { path: '/settings/account', title: 'Account & Security', icon: 'shield' },
   { path: '/settings/notifications', title: 'Notifications', icon: 'notifications-none' },
+  { path: '/settings/general', title: 'General', icon: 'tune' },
+  { path: '/settings/transaction-rules', title: 'Transaction Rules', icon: 'rule' },
 ];
 
 export default function Settings() {

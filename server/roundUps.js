@@ -48,15 +48,21 @@ function computeRoundUpTotal(transactions) {
 // getGoalProgress - all business logic lives in the pure function above.
 // Scoped to the current budget period (same "this period" framing every
 // other dollar figure on the Goal/Budget/Recurring tabs already uses),
-// not an arbitrary lookback window.
-async function getRoundUpEstimate(userId, { now } = {}) {
+// not an arbitrary lookback window. `accountId` (Phase 38 Step 4,
+// goal_settings.round_ups_account_id) narrows the simulation to one
+// linked account instead of every transaction across all of them - the
+// default (null/undefined) keeps the original all-accounts behavior.
+async function getRoundUpEstimate(userId, { now, accountId } = {}) {
   const { period_start } = currentMonthRange(now);
 
-  const { data: transactions, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from('transactions')
     .select('amount, category')
     .eq('user_id', userId)
     .gte('date', period_start);
+  if (accountId) query = query.eq('account_id', accountId);
+
+  const { data: transactions, error } = await query;
   if (error) throw error;
 
   return { ...computeRoundUpTotal(transactions || []), period_start };

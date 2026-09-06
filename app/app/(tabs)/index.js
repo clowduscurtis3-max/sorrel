@@ -61,14 +61,17 @@ function formatGoalType(goalType) {
 // Phase 8 Step 4 follow-up: a plain time-of-day greeting, requested
 // directly by the user - goalProgress's own message (already shown right
 // below this) reads as a status line, not a greeting, so it wasn't filling
-// this role on its own. First name only, from whatever Google Sign-In
-// populated (session.user.user_metadata.full_name) - falls back to no name
-// at all rather than guessing one from the email address, same "never
-// fabricate" instinct as everywhere else in this app.
+// this role on its own. First name only, preferring the user's own
+// editable display name (Phase 38 Step 6, Settings -> Account & Security)
+// over whatever Google Sign-In originally populated
+// (session.user.user_metadata.full_name) - falls back to no name at all
+// rather than guessing one from the email address, same "never fabricate"
+// instinct as everywhere else in this app.
 function greeting(session) {
   const hour = new Date().getHours();
   const timeOfDay = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
-  const firstName = session?.user?.user_metadata?.full_name?.split(' ')[0];
+  const name = session?.user?.user_metadata?.display_name || session?.user?.user_metadata?.full_name;
+  const firstName = name?.split(' ')[0];
   return firstName ? `Good ${timeOfDay}, ${firstName}.` : `Good ${timeOfDay}.`;
 }
 

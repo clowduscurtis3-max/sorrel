@@ -6,8 +6,6 @@ import {
   Image,
   ActivityIndicator,
   Alert,
-  Switch,
-  TextInput,
   StyleSheet,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
@@ -21,8 +19,6 @@ import { apiFetch, apiErrorMessage, GMAIL_REDIRECT } from '../_lib/api';
 import { styles, colors } from '../_lib/styles';
 import { useSessionContext } from '../_lib/session';
 import { useAppData } from '../_lib/appData';
-import { getBiometricLockEnabled, setBiometricLockEnabled } from '../_lib/biometricPreference';
-import { listVerifiedTotpFactors, enrollTotp, verifyTotpEnrollment, unenrollTotp } from '../_lib/mfa';
 import { AppBackdrop, TopEdgeFade, isNightBackdrop } from '../_components/Illustrations';
 import PrimaryButton from '../_components/PrimaryButton';
 import SorrelWordmark from '../_components/SorrelWordmark';
@@ -71,38 +67,6 @@ export default function Account() {
   const [error, setError] = useState(null);
   const [signingOut, setSigningOut] = useState(false);
   const [actioningItemId, setActioningItemId] = useState(null);
-  const [biometricLockEnabled, setBiometricLockEnabledState] = useState(true);
-
-  // Username/password linking (2026-08-25, the authenticated replacement
-  // for the account-takeover bug fixed in server/usernameAuth.js -
-  // POST /auth/link-username trusts this screen's own session token, never
-  // a typed email). `null` while the initial status fetch is in flight, so
-  // this card doesn't flash the setup form before we know it's unnecessary.
-  const [usernameStatus, setUsernameStatus] = useState(null);
-  const [showUsernameForm, setShowUsernameForm] = useState(false);
-  const [newUsername, setNewUsername] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [showNewPassword, setShowNewPassword] = useState(false);
-  const [linkingUsername, setLinkingUsername] = useState(false);
-  const [usernameError, setUsernameError] = useState(null);
-
-  // Two-factor authentication (Phase 21, 2026-08-25) - entirely client-
-  // driven via Supabase Auth's own MFA client (_lib/mfa.js), no new
-  // backend route needed the way username/password linking needed one -
-  // that flow had to be server-authenticated specifically to fix a real
-  // account-takeover bug (see server/usernameAuth.js); enrolling/verifying/
-  // removing your OWN TOTP factor from your OWN already-authenticated
-  // session has no equivalent trust gap to close. `null` while the initial
-  // factor-list fetch is in flight, mirrors usernameStatus's own
-  // don't-flash-the-wrong-state-first reasoning.
-  const [mfaFactors, setMfaFactors] = useState(null);
-  const [showMfaSetup, setShowMfaSetup] = useState(false);
-  const [enrollingMfa, setEnrollingMfa] = useState(false);
-  const [mfaEnrollment, setMfaEnrollment] = useState(null); // { id, totp: { secret } }
-  const [mfaCode, setMfaCode] = useState('');
-  const [verifyingMfa, setVerifyingMfa] = useState(false);
-  const [mfaError, setMfaError] = useState(null);
-  const [disablingMfa, setDisablingMfa] = useState(false);
 
   // Kept for Animated.ScrollView's own onScroll wiring below - no longer
   // drives the backdrop (AppBackdrop is a static full-screen layer, not
@@ -134,146 +98,12 @@ export default function Account() {
     }
   }
 
-  async function fetchUsernameStatus() {
-    try {
-      const res = await apiFetch('/auth/username-status');
-      if (!res.ok) throw new Error('SERVER_ERROR');
-      const data = await res.json();
-      setUsernameStatus(data);
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  async function fetchMfaFactors() {
-    try {
-      setMfaFactors(await listVerifiedTotpFactors());
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
   useFocusEffect(
     useCallback(() => {
       fetchGmailStatus();
-      fetchUsernameStatus();
-      fetchMfaFactors();
       refetchPlaidItems();
-      getBiometricLockEnabled().then(setBiometricLockEnabledState);
     }, [])
   );
-
-  async function startMfaEnrollment() {
-    setEnrollingMfa(true);
-    setMfaError(null);
-    try {
-      const data = await enrollTotp();
-      setMfaEnrollment(data);
-      setShowMfaSetup(true);
-    } catch (err) {
-      console.error(err);
-      setMfaError('Could not start two-factor setup. Try again.');
-    } finally {
-      setEnrollingMfa(false);
-    }
-  }
-
-  function cancelMfaSetup() {
-    // Real bug avoided, not fixed after the fact: leaving an
-    // enrolled-but-never-verified factor behind on Supabase's side after a
-    // cancel doesn't count as real 2FA (this app's own "verified factors
-    // only" filter, listVerifiedTotpFactors, already excludes it from
-    // showing as enabled) - harmless, and Supabase itself never surfaces
-    // it via getAuthenticatorAssuranceLevel either, so it's left to be
-    // silently superseded by whatever the user tries next rather than
-    // needing an explicit cleanup call here.
-    setShowMfaSetup(false);
-    setMfaEnrollment(null);
-    setMfaCode('');
-    setMfaError(null);
-  }
-
-  async function submitMfaVerification() {
-    if (!mfaEnrollment || mfaCode.trim().length !== 6) return;
-    setVerifyingMfa(true);
-    setMfaError(null);
-    try {
-      await verifyTotpEnrollment(mfaEnrollment.id, mfaCode.trim());
-      setShowMfaSetup(false);
-      setMfaEnrollment(null);
-      setMfaCode('');
-      await fetchMfaFactors();
-    } catch (err) {
-      console.error(err);
-      setMfaError('That code didn’t work - check your authenticator app and try again.');
-    } finally {
-      setVerifyingMfa(false);
-    }
-  }
-
-  function handleDisableMfa() {
-    if (!mfaFactors || mfaFactors.length === 0) return;
-    Alert.alert(
-      'Turn off two-factor authentication?',
-      'Signing in will no longer require a code from your authenticator app.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Turn off',
-          style: 'destructive',
-          onPress: async () => {
-            setDisablingMfa(true);
-            setMfaError(null);
-            try {
-              await unenrollTotp(mfaFactors[0].id);
-              await fetchMfaFactors();
-            } catch (err) {
-              console.error(err);
-              setMfaError('Could not turn off two-factor authentication. Try again.');
-            } finally {
-              setDisablingMfa(false);
-            }
-          },
-        },
-      ]
-    );
-  }
-
-  async function handleToggleBiometricLock(nextEnabled) {
-    setBiometricLockEnabledState(nextEnabled);
-    await setBiometricLockEnabled(nextEnabled);
-  }
-
-  async function submitLinkUsername() {
-    setUsernameError(null);
-    if (newUsername.trim().length < 3) {
-      setUsernameError('Username must be at least 3 characters.');
-      return;
-    }
-    if (newPassword.length < 8) {
-      setUsernameError('Password must be at least 8 characters.');
-      return;
-    }
-    setLinkingUsername(true);
-    try {
-      const res = await apiFetch('/auth/link-username', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: newUsername.trim(), password: newPassword }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to set up username and password.');
-      setShowUsernameForm(false);
-      setNewUsername('');
-      setNewPassword('');
-      await fetchUsernameStatus();
-    } catch (err) {
-      console.error(err);
-      setUsernameError(err.message || apiErrorMessage(err));
-    } finally {
-      setLinkingUsername(false);
-    }
-  }
 
   async function linkGmail() {
     setGmailLinking(true);
@@ -533,9 +363,25 @@ export default function Account() {
                       </Text>
                     </View>
                   )}
-                  <Text style={accountStyles.bankName} numberOfLines={1}>
-                    {item.institution_name || 'Linked bank account'}
-                  </Text>
+                  <View style={accountStyles.bankNameCol}>
+                    <Text style={accountStyles.bankName} numberOfLines={1}>
+                      {item.institution_name || 'Linked bank account'}
+                    </Text>
+                    {/* Phase 38 Step 6: real connection health, not just a
+                        generic RE-LINK button regardless of actual status -
+                        needs_relink is only ever set true by a genuine
+                        Plaid ITEM_LOGIN_REQUIRED error during sync
+                        (syncUserData, server/index.js), cleared on a
+                        successful re-link exchange. */}
+                    <Text
+                      style={[
+                        accountStyles.bankHealthText,
+                        item.needs_relink && accountStyles.bankHealthTextWarning,
+                      ]}
+                    >
+                      {item.needs_relink ? 'Needs re-link' : 'Connected'}
+                    </Text>
+                  </View>
                 </View>
 
                 {actioningItemId === item.id ? (
@@ -543,13 +389,24 @@ export default function Account() {
                 ) : (
                   <View style={[accountStyles.outlineButtonRow, accountStyles.bankActionSpacing]}>
                     <Pressable
-                      style={accountStyles.outlineButton}
+                      style={[accountStyles.outlineButton, item.needs_relink && accountStyles.outlineButtonWarning]}
                       onPress={() => relinkItem(item)}
                       accessibilityRole="button"
                       accessibilityLabel={`Re-link ${item.institution_name || 'bank'}`}
                     >
-                      <MaterialIcons name="link" size={16} color={colors.primary} />
-                      <Text style={accountStyles.outlineButtonText}>RE-LINK</Text>
+                      <MaterialIcons
+                        name="link"
+                        size={16}
+                        color={item.needs_relink ? colors.warningText : colors.primary}
+                      />
+                      <Text
+                        style={[
+                          accountStyles.outlineButtonText,
+                          item.needs_relink && accountStyles.outlineButtonTextWarning,
+                        ]}
+                      >
+                        RE-LINK
+                      </Text>
                     </Pressable>
                     <Pressable
                       style={accountStyles.outlineButton}
@@ -625,187 +482,6 @@ export default function Account() {
               <Text style={accountStyles.outlineButtonText}>GET ITEMIZED RECEIPTS (OPTIONAL)</Text>
             </Pressable>
           )}
-        </View>
-
-        {usernameStatus && (
-          <View style={[styles.card, accountStyles.cardMargin]}>
-            {usernameStatus.has_username ? (
-              <View style={accountStyles.iconRow}>
-                <View style={accountStyles.iconCircle}>
-                  <MaterialIcons name="badge" size={18} color={colors.dark} />
-                </View>
-                <Text style={accountStyles.iconRowText}>
-                  Signed in with username:{'\n'}
-                  <Text style={accountStyles.iconRowTextBold}>{usernameStatus.username}</Text>
-                </Text>
-              </View>
-            ) : showUsernameForm ? (
-              <>
-                <Text style={styles.smallText}>
-                  Optional: add a username and password as a second way to sign in, alongside
-                  Google.
-                </Text>
-                <View style={accountStyles.formFieldRow}>
-                  <MaterialIcons name="person" size={18} color={colors.dark} />
-                  <TextInput
-                    style={accountStyles.formFieldInput}
-                    placeholder="Username"
-                    placeholderTextColor={colors.placeholder}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    value={newUsername}
-                    onChangeText={setNewUsername}
-                  />
-                </View>
-                <View style={accountStyles.formFieldRow}>
-                  <MaterialIcons name="lock-outline" size={18} color={colors.dark} />
-                  <TextInput
-                    style={accountStyles.formFieldInput}
-                    placeholder="Password"
-                    placeholderTextColor={colors.placeholder}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    secureTextEntry={!showNewPassword}
-                    value={newPassword}
-                    onChangeText={setNewPassword}
-                  />
-                  <Pressable
-                    onPress={() => setShowNewPassword((v) => !v)}
-                    accessibilityRole="button"
-                    accessibilityLabel={showNewPassword ? 'Hide password' : 'Show password'}
-                  >
-                    <MaterialIcons
-                      name={showNewPassword ? 'visibility-off' : 'visibility'}
-                      size={18}
-                      color={colors.dark}
-                    />
-                  </Pressable>
-                </View>
-                {usernameError && <Text style={styles.errorText}>{usernameError}</Text>}
-                {linkingUsername ? (
-                  <ActivityIndicator style={accountStyles.addAccountSpacing} />
-                ) : (
-                  <View style={accountStyles.addAccountSpacing}>
-                    <PrimaryButton title="SAVE USERNAME & PASSWORD" onPress={submitLinkUsername} />
-                  </View>
-                )}
-                <Pressable
-                  onPress={() => {
-                    setShowUsernameForm(false);
-                    setUsernameError(null);
-                    setNewUsername('');
-                    setNewPassword('');
-                  }}
-                  accessibilityRole="button"
-                >
-                  <Text style={accountStyles.textLink}>Cancel</Text>
-                </Pressable>
-              </>
-            ) : (
-              <Pressable
-                style={[accountStyles.outlineButton, accountStyles.outlineButtonFull]}
-                onPress={() => setShowUsernameForm(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Set up username and password (optional)"
-              >
-                <MaterialIcons name="badge" size={16} color={colors.primary} />
-                <Text style={accountStyles.outlineButtonText}>SET UP USERNAME & PASSWORD (OPTIONAL)</Text>
-              </Pressable>
-            )}
-          </View>
-        )}
-
-        {mfaFactors && (
-          <View style={[styles.card, accountStyles.cardMargin]}>
-            {mfaFactors.length > 0 ? (
-              <>
-                <View style={accountStyles.iconRow}>
-                  <View style={accountStyles.iconCircle}>
-                    <MaterialIcons name="verified-user" size={18} color={colors.dark} />
-                  </View>
-                  <Text style={accountStyles.iconRowText}>Two-factor authentication is on</Text>
-                </View>
-                {mfaError && <Text style={styles.errorText}>{mfaError}</Text>}
-                {disablingMfa ? (
-                  <ActivityIndicator style={accountStyles.addAccountSpacing} />
-                ) : (
-                  <Pressable
-                    style={[accountStyles.outlineButton, accountStyles.outlineButtonFull, accountStyles.addAccountSpacing]}
-                    onPress={handleDisableMfa}
-                    accessibilityRole="button"
-                    accessibilityLabel="Turn off two-factor authentication"
-                  >
-                    <Text style={accountStyles.outlineButtonText}>TURN OFF</Text>
-                  </Pressable>
-                )}
-              </>
-            ) : showMfaSetup && mfaEnrollment ? (
-              <>
-                <Text style={styles.smallText}>
-                  Open your authenticator app (Google Authenticator, Authy, etc.), choose "Enter a
-                  setup key" / "Enter code manually," and enter this secret:
-                </Text>
-                <Text style={accountStyles.mfaSecret} selectable>
-                  {mfaEnrollment.totp.secret}
-                </Text>
-                <Text style={styles.smallText}>Then enter the 6-digit code it generates:</Text>
-                <View style={accountStyles.formFieldRow}>
-                  <MaterialIcons name="pin" size={18} color={colors.dark} />
-                  <TextInput
-                    style={accountStyles.formFieldInput}
-                    placeholder="123456"
-                    placeholderTextColor={colors.placeholder}
-                    keyboardType="number-pad"
-                    maxLength={6}
-                    value={mfaCode}
-                    onChangeText={(t) => setMfaCode(t.replace(/[^0-9]/g, '').slice(0, 6))}
-                  />
-                </View>
-                {mfaError && <Text style={styles.errorText}>{mfaError}</Text>}
-                {verifyingMfa ? (
-                  <ActivityIndicator style={accountStyles.addAccountSpacing} />
-                ) : (
-                  <View style={accountStyles.addAccountSpacing}>
-                    <PrimaryButton title="VERIFY & TURN ON" onPress={submitMfaVerification} />
-                  </View>
-                )}
-                <Pressable onPress={cancelMfaSetup} accessibilityRole="button">
-                  <Text style={accountStyles.textLink}>Cancel</Text>
-                </Pressable>
-              </>
-            ) : enrollingMfa ? (
-              <ActivityIndicator />
-            ) : (
-              <>
-                <Pressable
-                  style={[accountStyles.outlineButton, accountStyles.outlineButtonFull]}
-                  onPress={startMfaEnrollment}
-                  accessibilityRole="button"
-                  accessibilityLabel="Set up two-factor authentication (optional)"
-                >
-                  <MaterialIcons name="verified-user" size={16} color={colors.primary} />
-                  <Text style={accountStyles.outlineButtonText}>SET UP TWO-FACTOR AUTHENTICATION (OPTIONAL)</Text>
-                </Pressable>
-                {mfaError && <Text style={styles.errorText}>{mfaError}</Text>}
-              </>
-            )}
-          </View>
-        )}
-
-        <View
-          style={[styles.card, accountStyles.cardMargin, accountStyles.faceIdRow]}
-        >
-          <View style={[accountStyles.iconRow, accountStyles.iconRowGrow]}>
-            <View style={accountStyles.iconCircle}>
-              <MaterialIcons name="fingerprint" size={18} color={colors.dark} />
-            </View>
-            <Text style={accountStyles.iconRowText}>Require Face ID / Fingerprint to unlock</Text>
-          </View>
-          <Switch
-            value={biometricLockEnabled}
-            onValueChange={handleToggleBiometricLock}
-            trackColor={{ false: colors.sage, true: colors.primary }}
-          />
         </View>
 
         <View style={accountStyles.signOutSpacing}>
@@ -920,11 +596,22 @@ const accountStyles = StyleSheet.create({
     fontWeight: '700',
     color: colors.background,
   },
-  bankName: {
+  bankNameCol: {
     flex: 1,
+    gap: 2,
+  },
+  bankName: {
     fontSize: 15,
     fontWeight: '600',
     color: colors.darkest,
+  },
+  bankHealthText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.positive,
+  },
+  bankHealthTextWarning: {
+    color: colors.warningText,
   },
   bankActionSpacing: {
     marginTop: 2,
@@ -946,6 +633,13 @@ const accountStyles = StyleSheet.create({
     paddingVertical: 10,
     minHeight: 40,
   },
+  outlineButtonWarning: {
+    borderColor: colors.warning,
+    backgroundColor: colors.background,
+  },
+  outlineButtonTextWarning: {
+    color: colors.warningText,
+  },
   outlineButtonFull: {
     marginTop: 4,
   },
@@ -962,45 +656,6 @@ const accountStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-  },
-  // Only for iconRow's use inside faceIdRow (a row container, not a
-  // column card) - without this, iconRow has no flexGrow along the row's
-  // main axis, so it sizes to its own text's natural width instead of
-  // sharing the row with the Switch, pushing the Switch off the card's
-  // edge. Scoped here rather than added to iconRow itself: iconRow's
-  // other uses (Gmail/itemized-receipts cards) sit inside a column card,
-  // where the default cross-axis stretch already gives it the card's
-  // full width - flex:1 there would additionally affect vertical sizing
-  // along the column's main axis, which those cards don't need.
-  iconRowGrow: {
-    flex: 1,
-  },
-  formFieldRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: colors.background,
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    marginTop: 8,
-  },
-  formFieldInput: {
-    flex: 1,
-    fontSize: 14,
-    color: colors.darkest,
-  },
-  mfaSecret: {
-    fontSize: 16,
-    fontWeight: '700',
-    letterSpacing: 1.5,
-    color: colors.darkest,
-    backgroundColor: colors.background,
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    marginTop: 8,
-    textAlign: 'center',
   },
   iconCircle: {
     width: 32,
@@ -1019,11 +674,6 @@ const accountStyles = StyleSheet.create({
   iconRowTextBold: {
     fontWeight: '700',
     color: colors.darkest,
-  },
-  faceIdRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
   },
   signOutSpacing: {
     marginHorizontal: 16,
