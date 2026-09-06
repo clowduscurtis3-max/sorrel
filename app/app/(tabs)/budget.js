@@ -92,9 +92,26 @@ export default function Budget() {
   // has resolved, and fetchCategoryTransactions needs budgetStatus's
   // period_start/period_end to filter correctly (opening with it still
   // null would silently show an empty transaction list).
+  //
+  // Code review, 2026-09-05: the original version of this effect depended
+  // on the whole budgetStatus object, not just categoryParam - but
+  // setBudgetStatus(data) produces a brand new object on every refetch
+  // (focus, regenerate, reset), so any of those re-fired this effect on
+  // the still-present router param and silently reopened a detail view
+  // the user had already backed out of, directly contradicting this
+  // comment's own "doesn't get immediately reopened" claim.
+  // lastAutoOpenedCategoryRef makes that claim actually true: once a given
+  // categoryParam value has triggered an open, later budgetStatus
+  // refetches (or a category-detail transaction re-fetch's own state
+  // churn) can no longer re-trigger it - only a genuinely new categoryParam
+  // value (e.g. tapping a different Financial Health tile) can.
   const { category: categoryParam } = useLocalSearchParams();
+  const lastAutoOpenedCategoryRef = useRef(null);
   useEffect(() => {
-    if (categoryParam && budgetStatus) openCategory(categoryParam);
+    if (!categoryParam || !budgetStatus) return;
+    if (lastAutoOpenedCategoryRef.current === categoryParam) return;
+    lastAutoOpenedCategoryRef.current = categoryParam;
+    openCategory(categoryParam);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [categoryParam, budgetStatus]);
 
@@ -163,16 +180,34 @@ export default function Budget() {
   // work for a view most visits never open. Filtered client-side to this
   // category and the current budget period (budgetStatus.period_start/
   // period_end, already fetched); GET /transactions itself already
-  // syncs/returns every field this view needs, no new backend route.
+  // returns every field this view needs, no new backend route.
+  //
+  // Code review, 2026-09-05: this used to hit plain GET /transactions,
+  // which runs a full live Plaid sync (every linked Item) on every single
+  // call - real ongoing cost/rate-limit exposure just to show a
+  // client-side filter over data that's typically only seconds/minutes
+  // stale (Home's own poll or focus-refetch already keeps it current).
+  // `?sync=false` reads straight from the DB instead - still real data,
+  // never fabricated, just not forcing a redundant resync on every tap.
   async function fetchCategoryTransactions(category) {
     setCategoryTxError(null);
     try {
-      const res = await apiFetch('/transactions');
+      const res = await apiFetch('/transactions?sync=false');
       // 404 means "no linked bank account yet" (GET /transactions' own
       // NoLinkedAccountError handling) - not a real error here, just an
       // empty list.
       if (res.status === 404) {
         setCategoryTransactions([]);
+        return;
+      }
+      // Same re-link case Home's own fetchTransactions already handles -
+      // a decrypt failure across every linked Item reads the same way
+      // here: nothing to show, with the specific reason surfaced instead
+      // of falling through to a generic error.
+      if (res.status === 409) {
+        const body = await res.json().catch(() => ({}));
+        setCategoryTransactions([]);
+        setCategoryTxError(body.error || 'Your bank connection needs to be re-linked.');
         return;
       }
       if (!res.ok) throw new Error('SERVER_ERROR');
@@ -572,7 +607,21 @@ export default function Budget() {
                     </View>
                   )}
 
-                  <Text style={budgetLocalStyles.categoryDetailSectionLabel}>
+                  {/* Code review, 2026-09-05: these two sit directly on
+                      AppBackdrop (unlike the rows/cards around them, which
+                      are opaque and don't need this), but were missing the
+                      same onBackdropTextColor adaptation the back
+                      arrow/title two lines up already use - the exact
+                      contrast bug class CLAUDE.md already documents fixing
+                      twice elsewhere (Recurring's Filters pill,
+                      colors.placeholder), reproduced here in a screen that
+                      didn't exist yet either of those times. */}
+                  <Text
+                    style={[
+                      budgetLocalStyles.categoryDetailSectionLabel,
+                      onBackdropTextColor && { color: onBackdropTextColor },
+                    ]}
+                  >
                     TRANSACTIONS {categoryTransactions ? `(${categoryTransactions.length})` : ''}
                   </Text>
 
@@ -581,7 +630,9 @@ export default function Budget() {
                   ) : categoryTransactions === null ? (
                     <ActivityIndicator />
                   ) : categoryTransactions.length === 0 ? (
-                    <Text style={styles.smallText}>No transactions in this category this period.</Text>
+                    <Text style={[styles.smallText, onBackdropTextColor && { color: onBackdropTextColor }]}>
+                      No transactions in this category this period.
+                    </Text>
                   ) : (
                     categoryTransactions.map((t) => (
                       <View key={t.transaction_id} style={[styles.card, budgetLocalStyles.categoryDetailTxRow]}>

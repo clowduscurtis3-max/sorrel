@@ -15,11 +15,16 @@ import { statusForCategory } from '../_lib/homeSummary';
 // closes this modal and deep-links into Budget's own category detail view
 // (the categoryParam flow already built for the Financial Health tiles),
 // so "lighter" doesn't mean "dead end."
+// neutral must match index.js's own STATUS_COLOR (colors.muted) - the
+// Financial Health tiles on the same screen use that mapping for the
+// identical "neutral" severity, and a code-review pass (2026-09-05)
+// caught this file using colors.sage instead, a real inconsistency
+// visible by opening this modal right next to the tile it describes.
 const STATUS_COLOR = {
   ok: colors.positive,
   warning: colors.warning,
   severe: colors.error,
-  neutral: colors.sage,
+  neutral: colors.muted,
 };
 
 export default function SpentSoFarModal({ visible, onClose, budgetStatus, alerts, spendStats, onSelectCategory }) {

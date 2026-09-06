@@ -303,42 +303,62 @@ export default function Home() {
   const insight = computeInsight(alerts, goalProgress);
   const monthName = new Date().toLocaleDateString('en-US', { month: 'long' });
 
+  // Code review, 2026-09-05: with the 30s poll below plus pull-to-refresh
+  // plus the AppState foreground-resume refresh all able to call this,
+  // nothing previously stopped two calls from overlapping - if a slower
+  // call's response happened to land after a faster, later-fired one, its
+  // stale data would silently overwrite the newer set. fetchInFlightRef
+  // dedupes exactly the way the backend's own syncTransactionsLocked
+  // already does for concurrent syncs: an overlapping call just awaits the
+  // one already in flight instead of starting (and racing) a second real
+  // request.
+  const fetchTransactionsInFlightRef = useRef(null);
   async function fetchTransactions({ silent = false, suppressErrorBanner = false } = {}) {
-    if (!silent) setLoadingTransactions(true);
-    setError(null);
+    if (fetchTransactionsInFlightRef.current) return fetchTransactionsInFlightRef.current;
+    const run = async () => {
+      if (!silent) setLoadingTransactions(true);
+      setError(null);
+      try {
+        const res = await apiFetch('/transactions');
+        if (res.status === 404) {
+          setLinked(false);
+          setTransactions([]);
+          return;
+        }
+        // The backend's connection to this bank account can't be decrypted
+        // (e.g. linked before encryption was added, or after a key
+        // rotation) - reuse the "not linked" empty state rather than a
+        // dead-end error, since re-linking is the actual fix.
+        if (res.status === 409) {
+          const body = await res.json().catch(() => ({}));
+          setLinked(false);
+          setTransactions([]);
+          setError(body.error || 'Your bank connection needs to be re-linked.');
+          return;
+        }
+        if (!res.ok) throw new Error('SERVER_ERROR');
+        const data = await res.json();
+        setTransactions(data.transactions || []);
+        setLinked(true);
+      } catch (err) {
+        console.error(err);
+        // suppressErrorBanner: used by the AppState foreground-resume refresh
+        // below - the OS network stack sometimes hasn't reconnected yet at
+        // the exact moment the app becomes active, so this call can fail
+        // transiently and succeed moments later on its own. Existing data
+        // just stays visible until the next successful sync. Pull-to-refresh
+        // (also `silent`, but user-initiated) still surfaces real errors.
+        if (!suppressErrorBanner) setError(apiErrorMessage(err));
+      } finally {
+        if (!silent) setLoadingTransactions(false);
+      }
+    };
+    const promise = run();
+    fetchTransactionsInFlightRef.current = promise;
     try {
-      const res = await apiFetch('/transactions');
-      if (res.status === 404) {
-        setLinked(false);
-        setTransactions([]);
-        return;
-      }
-      // The backend's connection to this bank account can't be decrypted
-      // (e.g. linked before encryption was added, or after a key
-      // rotation) - reuse the "not linked" empty state rather than a
-      // dead-end error, since re-linking is the actual fix.
-      if (res.status === 409) {
-        const body = await res.json().catch(() => ({}));
-        setLinked(false);
-        setTransactions([]);
-        setError(body.error || 'Your bank connection needs to be re-linked.');
-        return;
-      }
-      if (!res.ok) throw new Error('SERVER_ERROR');
-      const data = await res.json();
-      setTransactions(data.transactions || []);
-      setLinked(true);
-    } catch (err) {
-      console.error(err);
-      // suppressErrorBanner: used by the AppState foreground-resume refresh
-      // below - the OS network stack sometimes hasn't reconnected yet at
-      // the exact moment the app becomes active, so this call can fail
-      // transiently and succeed moments later on its own. Existing data
-      // just stays visible until the next successful sync. Pull-to-refresh
-      // (also `silent`, but user-initiated) still surfaces real errors.
-      if (!suppressErrorBanner) setError(apiErrorMessage(err));
+      return await promise;
     } finally {
-      if (!silent) setLoadingTransactions(false);
+      fetchTransactionsInFlightRef.current = null;
     }
   }
 

@@ -978,7 +978,19 @@ class NoLinkedAccountError extends Error {}
 // (GET /transactions) and the unattended background job (runBackgroundSync,
 // below) run identical logic instead of two copies drifting apart over
 // time.
-async function syncUserData(userId) {
+// `skipSync: true` (GET /transactions?sync=false, added for Budget's
+// per-category-tap fetch and any other read that only needs whatever's
+// already in the DB) skips every live-network step below - the Plaid
+// transactionsSync/balance-refresh calls, the Gmail scan, and the
+// recurring/audit recompute - while still doing the cheap, local-only
+// decrypt check needed to preserve the exact same 404/409 semantics a
+// caller already depends on. This exists because GET /transactions was
+// being hit far more often than a real sync was needed (a 30s Home poll,
+// plus once per Budget category tap) - each call was a full live sync
+// across every linked Item, not a cache read, real ongoing cost/rate-limit
+// exposure on a Plaid Trial-plan account for data that, in the read-only
+// case, was already fresh from a sync moments earlier elsewhere.
+async function syncUserData(userId, { skipSync = false } = {}) {
   const { data: items, error } = await supabaseAdmin
     .from('plaid_items')
     .select('id, access_token, cursor')
@@ -986,6 +998,25 @@ async function syncUserData(userId) {
     .eq('status', 'active');
   if (error) throw error;
   if (!items || items.length === 0) throw new NoLinkedAccountError('No linked bank account');
+
+  if (skipSync) {
+    let decryptFailures = 0;
+    for (const item of items) {
+      try {
+        decrypt(item.access_token);
+      } catch (err) {
+        if (err instanceof DecryptionError) {
+          decryptFailures += 1;
+          continue;
+        }
+        throw err;
+      }
+    }
+    if (decryptFailures === items.length) {
+      throw new DecryptionError('All linked Items failed to decrypt - re-link required');
+    }
+    return;
+  }
 
   // Phase 8 Step 1: each Item is synced independently, in parallel - a
   // decrypt failure or a Plaid-side error for one Item must never prevent
@@ -1083,7 +1114,7 @@ async function syncUserData(userId) {
 
 app.get('/transactions', requireUser, async (req, res) => {
   try {
-    await syncUserData(req.userId);
+    await syncUserData(req.userId, { skipSync: req.query.sync === 'false' });
 
     const { data: transactions, error: txError } = await supabaseAdmin
       .from('transactions')

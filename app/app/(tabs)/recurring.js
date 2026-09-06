@@ -249,7 +249,18 @@ export default function Recurring() {
     scrollRef.current?.scrollTo({ y: groupsY.current, animated: true });
   }
 
+  // Code review, 2026-09-05: the savings card this scrolls to only renders
+  // when potential_savings_total > 0, so savingsY.current was left at its
+  // default 0 (scrolling to the very top, not anywhere meaningful) any
+  // time a period genuinely has no price-creep/price-jump findings - a
+  // normal, common state, not an edge case. Falls back to the same target
+  // as scrollToGroups in that case, since the recurring-charges list is
+  // the next most relevant section to land on.
   function scrollToSavings() {
+    if (!subscriptionAudit?.glance?.potential_savings_total) {
+      scrollRef.current?.scrollTo({ y: groupsY.current, animated: true });
+      return;
+    }
     setShowSavings(true);
     scrollRef.current?.scrollTo({ y: savingsY.current, animated: true });
   }
