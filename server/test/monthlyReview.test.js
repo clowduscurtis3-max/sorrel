@@ -26,7 +26,7 @@ test('computeMonthlyReview: income/spend/saved are computed correctly', () => {
   const result = computeMonthlyReview({
     period: period('2026-07-01', '2026-07-31', 4000, { Dining: 300, Groceries: 200 }),
     prior: null,
-    goalProgress: null,
+    goals: [],
   });
   assert.equal(result.income, 4000);
   assert.equal(result.spend, 500);
@@ -39,7 +39,7 @@ test('computeMonthlyReview: passes the period\'s own per-category status through
   // before reaching the client - the Home "Monthly Review" detail view
   // needs it for its own per-category breakdown.
   const p = period('2026-07-01', '2026-07-31', 4000, { Dining: 300, Groceries: 200 });
-  const result = computeMonthlyReview({ period: p, prior: null, goalProgress: null });
+  const result = computeMonthlyReview({ period: p, prior: null, goals: [] });
   assert.deepEqual(result.status, p.status);
 });
 
@@ -47,7 +47,7 @@ test('computeMonthlyReview: no prior period means no biggest move and no note', 
   const result = computeMonthlyReview({
     period: period('2026-07-01', '2026-07-31', 4000, { Dining: 300 }),
     prior: null,
-    goalProgress: null,
+    goals: [],
   });
   assert.equal(result.biggest_move, null);
   assert.equal(result.note, null);
@@ -57,7 +57,7 @@ test('computeMonthlyReview: flags the category with the largest absolute swing, 
   const result = computeMonthlyReview({
     period: period('2026-07-01', '2026-07-31', 4000, { Dining: 300, Groceries: 150 }),
     prior: period('2026-06-01', '2026-06-30', 3800, { Dining: 320, Groceries: 400 }),
-    goalProgress: null,
+    goals: [],
   });
   assert.equal(result.biggest_move.category, 'Groceries');
   assert.equal(result.biggest_move.delta, -250);
@@ -69,7 +69,7 @@ test('computeMonthlyReview: a category with zero actual change is never flagged 
   const result = computeMonthlyReview({
     period: period('2026-07-01', '2026-07-31', 4000, { Dining: 300 }),
     prior: period('2026-06-01', '2026-06-30', 3800, { Dining: 300 }),
-    goalProgress: null,
+    goals: [],
   });
   assert.equal(result.biggest_move, null);
   assert.equal(result.note, null);
@@ -79,35 +79,48 @@ test('computeMonthlyReview: a category present only in the current period counts
   const result = computeMonthlyReview({
     period: period('2026-07-01', '2026-07-31', 4000, { Dining: 100, Subscriptions: 60 }),
     prior: period('2026-06-01', '2026-06-30', 3800, { Dining: 90 }),
-    goalProgress: null,
+    goals: [],
   });
   assert.equal(result.biggest_move.category, 'Subscriptions');
   assert.equal(result.biggest_move.delta, 60);
   assert.equal(result.biggest_move.direction, 'up');
 });
 
-test('computeMonthlyReview: goal_pace passes through on_pace/message unchanged, null when no goal', () => {
+test('computeMonthlyReview: goals passes through a lightweight per-goal summary, empty when no goals', () => {
+  const goalFixture = {
+    id: 'goal-1',
+    goal_type: 'savings',
+    notes: 'Buy a car',
+    percent_complete: 62,
+    saved_amount: 6200,
+    target_amount: 10000,
+    message: '$6200.00 of $10000.00 saved toward Buy a car (62%).',
+  };
   const withGoal = computeMonthlyReview({
     period: period('2026-07-01', '2026-07-31', 4000, { Dining: 300 }),
     prior: null,
-    goalProgress: { on_pace: true, message: 'On pace for around 2026-12-01.' },
+    goals: [goalFixture],
   });
-  assert.deepEqual(withGoal.goal_pace, { on_pace: true, message: 'On pace for around 2026-12-01.' });
+  assert.deepEqual(withGoal.goals, [goalFixture]);
 
-  const withoutGoal = computeMonthlyReview({
+  const withoutGoals = computeMonthlyReview({
     period: period('2026-07-01', '2026-07-31', 4000, { Dining: 300 }),
     prior: null,
-    goalProgress: null,
+    goals: [],
   });
-  assert.equal(withoutGoal.goal_pace, null);
+  assert.deepEqual(withoutGoals.goals, []);
 });
 
-test('computeMonthlyReview: a goal with no target still passes its on_pace: undefined through as null', () => {
+test('computeMonthlyReview: several goals each get their own summary entry, in order', () => {
   const result = computeMonthlyReview({
     period: period('2026-07-01', '2026-07-31', 4000, { Dining: 300 }),
     prior: null,
-    goalProgress: { has_target: false, message: 'No net change yet since setting your goal.' },
+    goals: [
+      { id: 'goal-1', goal_type: 'savings', notes: 'Car', percent_complete: 30, saved_amount: 300, target_amount: 1000, message: 'a' },
+      { id: 'goal-2', goal_type: 'debt', notes: 'Card', percent_complete: 80, saved_amount: 800, target_amount: 1000, message: 'b' },
+    ],
   });
-  assert.equal(result.goal_pace.on_pace, null);
-  assert.equal(result.goal_pace.message, 'No net change yet since setting your goal.');
+  assert.equal(result.goals.length, 2);
+  assert.equal(result.goals[0].id, 'goal-1');
+  assert.equal(result.goals[1].id, 'goal-2');
 });

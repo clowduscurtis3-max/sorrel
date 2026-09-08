@@ -1,6 +1,7 @@
 const supabaseAdmin = require('./supabaseAdmin');
 const { computeBudgetStatus, currentMonthRange } = require('./budget');
-const { computeNetSaved } = require('./goalProgress');
+const { getGoalsProgress } = require('./goalProgress');
+const { getAccountPaces, computeGoalRealizedPace } = require('./goalPace');
 
 // Phase 5 Step 1: the read-only DB half of the scenario engine - the same
 // pure-function / thin-wrapper split this codebase already uses everywhere
@@ -23,13 +24,21 @@ const { computeNetSaved } = require('./goalProgress');
 // Postgres `numeric` can surface as a string through PostgREST depending on
 // magnitude and driver version. Every existing caller in this project has
 // been getting real numbers back, but the scenario engine's guards are
-// strict on purpose (computeGoalProgress ignores a target_amount that isn't
-// typeof 'number'), so a silent string here would quietly downgrade a goal
-// to "no target" instead of failing loudly. Coerced once, at the boundary.
+// strict on purpose, so a silent string here would quietly downgrade
+// something to a "not set" state instead of failing loudly. Coerced once,
+// at the boundary.
 function num(value) {
   return value == null ? null : Number(value);
 }
 
+// Phase 42 (multi-goal tracking, 2026-09-08): a user can have several
+// active goals now, not one - `context.goal`/`goalCreatedAt`/
+// `netSavedSinceGoal` (the old net-cash-flow model) are replaced by
+// `context.goals`, an array of balance-tracked progress objects
+// (getGoalsProgress, server/goalProgress.js) each carrying a real,
+// reconstructed `realized_pace` (server/goalPace.js) - the same math
+// server/scenario.js's computeGoalImpact needs to project a finish date
+// per goal.
 async function loadScenarioContext(userId, now = new Date()) {
   // Derived from the same `now` the engine will reason with. Reading the wall
   // clock here instead lets context.now and context.period disagree, which
@@ -40,7 +49,7 @@ async function loadScenarioContext(userId, now = new Date()) {
     { data: budgets, error: budgetError },
     { data: actuals, error: actualsError },
     { data: recurringSeries, error: recurringError },
-    { data: goal, error: goalError },
+    goalsProgress,
   ] = await Promise.all([
     supabaseAdmin
       .from('budgets')
@@ -58,20 +67,12 @@ async function loadScenarioContext(userId, now = new Date()) {
         'id, display_name, category, interval, typical_amount, last_seen_date, next_expected_date, occurrence_count'
       )
       .eq('user_id', userId),
-    supabaseAdmin
-      .from('user_goals')
-      .select('goal_type, target_amount, target_timeframe_months, notes, created_at')
-      .eq('user_id', userId)
-      .maybeSingle(),
+    getGoalsProgress(userId),
   ]);
 
   if (budgetError) throw budgetError;
   if (actualsError) throw actualsError;
   if (recurringError) throw recurringError;
-  // A user with no goal row is a normal, supported state (the engine falls
-  // back to the "smarter spending" framing), so an absent row is not an
-  // error - maybeSingle returns null data without setting error.
-  if (goalError) throw goalError;
 
   const normalizedBudgets = (budgets || []).map((b) => ({
     ...b,
@@ -82,32 +83,16 @@ async function loadScenarioContext(userId, now = new Date()) {
     actual_amount: num(a.actual_amount),
   }));
 
-  let normalizedGoal = null;
-  let goalCreatedAt = null;
-  let netSavedSinceGoal = null;
-
-  if (goal) {
-    normalizedGoal = {
-      ...goal,
-      target_amount: num(goal.target_amount),
-      target_timeframe_months: num(goal.target_timeframe_months),
-    };
-    goalCreatedAt = new Date(goal.created_at);
-
-    // Same window and same arithmetic as getGoalProgress: only transactions
-    // dated on/after the goal was set count toward it, via the shared
-    // computeNetSaved helper.
-    const { data: transactions, error: txError } = await supabaseAdmin
-      .from('transactions')
-      .select('amount, category')
-      .eq('user_id', userId)
-      .gte('date', goalCreatedAt.toISOString().slice(0, 10));
-    if (txError) throw txError;
-
-    netSavedSinceGoal = computeNetSaved(
-      (transactions || []).map((t) => ({ ...t, amount: num(t.amount) }))
-    );
-  }
+  // One shared account-pace fetch across every active goal's linked
+  // accounts, not one query per goal - same "don't repeat the same query
+  // per item" discipline getGoalsProgress's own accounts fetch already
+  // follows.
+  const allAccountIds = [...new Set(goalsProgress.flatMap((g) => g.account_ids || []))];
+  const accountPaces = await getAccountPaces(userId, allAccountIds, now);
+  const goals = goalsProgress.map((g) => ({
+    ...g,
+    realized_pace: computeGoalRealizedPace({ accountIds: g.account_ids, accountPaces }),
+  }));
 
   return {
     now,
@@ -122,9 +107,7 @@ async function loadScenarioContext(userId, now = new Date()) {
       ...s,
       typical_amount: num(s.typical_amount),
     })),
-    goal: normalizedGoal,
-    goalCreatedAt,
-    netSavedSinceGoal,
+    goals,
   };
 }
 

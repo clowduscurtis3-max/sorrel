@@ -25,19 +25,67 @@ const { MIN_DAYS_FOR_PROJECTION } = require('../goalProgress');
 
 const NOW = new Date('2026-08-11T12:00:00Z');
 
+// Phase 42 (multi-goal tracking, 2026-09-08): evaluateScenario/
+// findMaxComfortableAmount now read context.goals (balance-tracked, see
+// scenario.test.js's own goalFixture header comment) - but
+// projectAffordableDate/calculateGoalPace/computeGoalMilestones below
+// still read the old goal/goalCreatedAt/netSavedSinceGoal shape directly
+// (not yet rewritten - Phase 42's own plan covers that separately). This
+// derives an equivalent context.goals entry from the legacy fields so
+// every existing goal/goalCreatedAt/netSavedSinceGoal fixture in this file
+// keeps exercising real goal-impact behavior under the new model too,
+// without a second parallel set of fixtures - `insufficient_history` mirrors
+// the same MIN_DAYS_FOR_PROJECTION-style elapsed-days gate these legacy
+// fixtures were already written around.
+function goalsFromLegacy({ goal, goalCreatedAt, netSavedSinceGoal, now }) {
+  if (!goal) return [];
+  const saved = netSavedSinceGoal ?? 0;
+  const hasTarget = typeof goal.target_amount === 'number' && goal.target_amount > 0;
+  const daysElapsed = goalCreatedAt ? Math.floor((now - goalCreatedAt) / 86400000) : -1;
+  const monthsElapsed = goalCreatedAt ? (now - goalCreatedAt) / (1000 * 60 * 60 * 24 * 30.44) : 0;
+  const insufficientHistory = daysElapsed < MIN_DAYS_FOR_PROJECTION;
+  const realizedPace = insufficientHistory
+    ? { insufficient_history: true, days_of_history: Math.max(0, daysElapsed) }
+    : { insufficient_history: false, monthly_pace: monthsElapsed > 0 ? saved / monthsElapsed : 0 };
+
+  return [
+    {
+      id: 'legacy-goal',
+      goal_type: goal.goal_type || 'savings',
+      notes: null,
+      verb: goal.goal_type === 'debt' ? 'freed up' : 'saved',
+      has_target: hasTarget,
+      saved_amount: saved,
+      target_amount: hasTarget ? goal.target_amount : null,
+      percent_complete: hasTarget ? Math.min(100, Math.max(0, (saved / goal.target_amount) * 100)) : null,
+      account_ids: ['legacy-acc'],
+      missing_account_ids: [],
+      no_accounts_linked: false,
+      projections: null,
+      message: '',
+      realized_pace: realizedPace,
+    },
+  ];
+}
+
 function contextWith(overrides = {}) {
   const budgets = overrides.budgets ?? [];
   const actuals = overrides.actuals ?? [];
+  const now = overrides.now ?? NOW;
+  const goal = overrides.goal === undefined ? null : overrides.goal;
+  const goalCreatedAt = overrides.goalCreatedAt === undefined ? null : overrides.goalCreatedAt;
+  const netSavedSinceGoal = overrides.netSavedSinceGoal === undefined ? null : overrides.netSavedSinceGoal;
   return {
-    now: overrides.now ?? NOW,
+    now,
     period: overrides.period ?? { period_start: '2026-08-01', period_end: '2026-08-31' },
     budgets,
     actuals,
     budgetStatus: computeBudgetStatus({ budgets, actuals }),
     recurringSeries: overrides.recurringSeries ?? [],
-    goal: overrides.goal === undefined ? null : overrides.goal,
-    goalCreatedAt: overrides.goalCreatedAt === undefined ? null : overrides.goalCreatedAt,
-    netSavedSinceGoal: overrides.netSavedSinceGoal === undefined ? null : overrides.netSavedSinceGoal,
+    goal,
+    goalCreatedAt,
+    netSavedSinceGoal,
+    goals: overrides.goals === undefined ? goalsFromLegacy({ goal, goalCreatedAt, netSavedSinceGoal, now }) : overrides.goals,
   };
 }
 
@@ -334,20 +382,35 @@ test('findMaxComfortableAmount: adding a goal on top of the same budget/income c
 
 // ---------------------------------------------------------------------------
 // projectAffordableDate
+//
+// Phase 42 (multi-goal tracking, 2026-09-08): projects from each of the
+// user's goals' own real, reconstructed realized pace (server/goalPace.js)
+// toward a hypothetical target - used by affordabilityChat.js's
+// `project_affordable_date` chat tool, which has no way to know which goal
+// the user means, so it answers per goal (context.goals array in,
+// { available, goals: [...] } out) rather than assuming a single one.
 // ---------------------------------------------------------------------------
 
-function goalContext(overrides = {}) {
-  return contextWith({
-    goal: {
-      goal_type: 'savings',
-      target_amount: 10000,
-      target_timeframe_months: null,
-      created_at: '2026-01-01T00:00:00Z',
-    },
-    goalCreatedAt: new Date('2026-01-01T00:00:00Z'),
-    netSavedSinceGoal: 1200,
-    now: NOW,
+function goalProgressFixture(overrides = {}) {
+  return {
+    id: 'goal-1',
+    goal_type: 'savings',
+    notes: null,
+    has_target: true,
+    saved_amount: 1200,
+    target_amount: 10000,
+    account_ids: ['acc-1'],
+    no_accounts_linked: false,
+    realized_pace: { insufficient_history: false, monthly_pace: 166.67 },
     ...overrides,
+  };
+}
+
+function goalContext(overrides = {}) {
+  const goal = overrides.goal === undefined ? goalProgressFixture() : overrides.goal;
+  return contextWith({
+    now: overrides.now ?? NOW,
+    goals: overrides.goals !== undefined ? overrides.goals : goal ? [goal] : [],
   });
 }
 
@@ -359,68 +422,93 @@ test('projectAffordableDate: rejects a non-positive or non-numeric target', () =
 });
 
 test('projectAffordableDate: no goal set is insufficient_data, not a guessed anchor', () => {
-  const context = contextWith({});
+  const context = goalContext({ goals: [] });
   const result = projectAffordableDate({ context, targetAmount: 500 });
   assert.equal(result.available, false);
   assert.equal(result.reason, 'no_goal');
+  assert.deepEqual(result.goals, []);
+});
+
+test('projectAffordableDate: a goal with no linked accounts reports so honestly, not a guessed anchor', () => {
+  const context = goalContext({ goal: goalProgressFixture({ no_accounts_linked: true, account_ids: [] }) });
+  const result = projectAffordableDate({ context, targetAmount: 5000 });
+  assert.equal(result.available, false);
+  assert.equal(result.goals[0].reason, 'no_accounts_linked');
 });
 
 test('projectAffordableDate: target already met by what has been saved', () => {
-  const context = goalContext({ netSavedSinceGoal: 1200 });
+  const context = goalContext({ goal: goalProgressFixture({ saved_amount: 1200 }) });
   const result = projectAffordableDate({ context, targetAmount: 1000 });
   assert.equal(result.available, true);
-  assert.equal(result.status, 'already_affordable');
+  assert.equal(result.goals[0].status, 'already_affordable');
 });
 
 test('projectAffordableDate: target exactly equal to what has been saved counts as affordable', () => {
-  const context = goalContext({ netSavedSinceGoal: 500 });
+  const context = goalContext({ goal: goalProgressFixture({ saved_amount: 500 }) });
   const result = projectAffordableDate({ context, targetAmount: 500 });
   assert.equal(result.available, true);
-  assert.equal(result.status, 'already_affordable');
+  assert.equal(result.goals[0].status, 'already_affordable');
 });
 
-test('projectAffordableDate: zero or negative observed saving rate is insufficient_history', () => {
-  for (const saved of [0, -50]) {
-    const context = goalContext({ netSavedSinceGoal: saved });
+test('projectAffordableDate: a goal whose linked accounts don\'t clear the realized-pace history gate is insufficient_history', () => {
+  const context = goalContext({
+    goal: goalProgressFixture({ realized_pace: { insufficient_history: true, days_of_history: 3 } }),
+  });
+  const result = projectAffordableDate({ context, targetAmount: 5000 });
+  assert.equal(result.available, false);
+  assert.equal(result.goals[0].reason, 'insufficient_history');
+});
+
+test('projectAffordableDate: a non-positive realized pace has no projectable date', () => {
+  for (const monthly_pace of [0, -50]) {
+    const context = goalContext({
+      goal: goalProgressFixture({ saved_amount: 0, realized_pace: { insufficient_history: false, monthly_pace } }),
+    });
     const result = projectAffordableDate({ context, targetAmount: 5000 });
     assert.equal(result.available, false);
-    assert.equal(result.reason, 'insufficient_history');
+    assert.equal(result.goals[0].reason, 'no_projectable_date');
   }
 });
 
-test('projectAffordableDate: not enough elapsed history yet, even with a positive saved amount', () => {
+test('projectAffordableDate: projects a real date from the real realized pace, matching projectFinishDate exactly', () => {
   const context = goalContext({
-    goalCreatedAt: new Date('2026-08-10T00:00:00Z'), // 1 day before NOW, under MIN_DAYS_FOR_PROJECTION
-    netSavedSinceGoal: 50,
+    goal: goalProgressFixture({ saved_amount: 1200, realized_pace: { insufficient_history: false, monthly_pace: 166.67 } }),
   });
-  assert.ok(MIN_DAYS_FOR_PROJECTION > 1);
   const result = projectAffordableDate({ context, targetAmount: 5000 });
-  assert.equal(result.available, false);
-  assert.equal(result.reason, 'insufficient_history');
-});
-
-test('projectAffordableDate: projects a real date from the observed pace, matching projectFinishDate exactly', () => {
-  // goalCreatedAt 2026-01-01, now 2026-08-11 -> ~7.2 months elapsed;
-  // $1,200 saved -> pace ~= $166.67/month. Target $5,000 needs
-  // (5000-1200)/166.67 =~ 22.8 months of runway from now.
-  const context = goalContext({ netSavedSinceGoal: 1200 });
-  const result = projectAffordableDate({ context, targetAmount: 5000 });
+  const goal = result.goals[0];
   assert.equal(result.available, true);
-  assert.equal(result.status, 'projected');
-  assert.match(result.projected_date, /^\d{4}-\d{2}-\d{2}$/);
-  assert.ok(result.days_from_now > 0);
-  assert.equal(result.monthly_pace, Math.round((1200 / ((NOW - new Date('2026-01-01T00:00:00Z')) / (1000 * 60 * 60 * 24 * 30.44))) * 100) / 100);
+  assert.equal(goal.status, 'projected');
+  assert.match(goal.projected_date, /^\d{4}-\d{2}-\d{2}$/);
+  assert.ok(goal.days_from_now > 0);
+  assert.equal(goal.monthly_pace, 166.67);
+
+  const { projectFinishDate } = require('../goalProgress');
+  const expected = projectFinishDate({ saved: 1200, target: 5000, monthlyPace: 166.67, now: NOW });
+  assert.equal(goal.projected_date, expected.toISOString().slice(0, 10));
 });
 
 test('projectAffordableDate: an astronomically distant target has no realistic projected date', () => {
   const context = goalContext({
-    goalCreatedAt: new Date('2016-08-11T00:00:00Z'), // 10 years of history
-    netSavedSinceGoal: 0.01, // effectively zero pace over that long a window
-    now: NOW,
+    goal: goalProgressFixture({ saved_amount: 0.01, realized_pace: { insufficient_history: false, monthly_pace: 0.0001 } }),
   });
   const result = projectAffordableDate({ context, targetAmount: 1e9 });
   assert.equal(result.available, false);
-  assert.equal(result.reason, 'no_projectable_date');
+  assert.equal(result.goals[0].reason, 'no_projectable_date');
+});
+
+test('projectAffordableDate: answers per goal when the user has several, not just one', () => {
+  const context = goalContext({
+    goals: [
+      goalProgressFixture({ id: 'goal-1', saved_amount: 1200, realized_pace: { insufficient_history: false, monthly_pace: 166.67 } }),
+      goalProgressFixture({ id: 'goal-2', no_accounts_linked: true, account_ids: [] }),
+    ],
+  });
+  const result = projectAffordableDate({ context, targetAmount: 5000 });
+  assert.equal(result.available, true); // at least one goal answered
+  assert.equal(result.goals.length, 2);
+  assert.equal(result.goals[0].available, true);
+  assert.equal(result.goals[1].available, false);
+  assert.equal(result.goals[1].reason, 'no_accounts_linked');
 });
 
 // ---------------------------------------------------------------------------
@@ -431,44 +519,44 @@ test('projectAffordableDate: an astronomically distant target has no realistic p
 // HYPOTHETICAL pace toward the real, already-set target. No "not enough
 // history" guard applies here (see the function's own comment) since a
 // pace the user just typed in has no history to distrust in the first
-// place - these tests exist to pin that difference down explicitly, not
-// just re-run projectAffordableDate's own cases.
+// place. Phase 42: decoupled from the whole scenario context - takes one
+// already-resolved goal's progress directly (the caller, POST
+// /goal/calculator, resolves which goal by id first).
 // ---------------------------------------------------------------------------
 
 test('calculateGoalPace: rejects a non-positive or non-numeric hypothetical amount', () => {
-  const context = goalContext();
+  const goalProgress = goalProgressFixture();
   for (const bad of [0, -50, NaN, Infinity, '100', null, undefined]) {
     assert.throws(
-      () => calculateGoalPace({ context, hypotheticalMonthlyAmount: bad }),
+      () => calculateGoalPace({ goalProgress, hypotheticalMonthlyAmount: bad, now: NOW }),
       ScenarioValidationError
     );
   }
 });
 
 test('calculateGoalPace: no goal (or no target_amount) set is unavailable, not a guessed target', () => {
-  for (const goal of [null, { goal_type: 'general', target_amount: null }]) {
-    const context = goalContext({ goal, netSavedSinceGoal: 1200 });
-    const result = calculateGoalPace({ context, hypotheticalMonthlyAmount: 200 });
+  for (const goalProgress of [null, goalProgressFixture({ has_target: false, target_amount: null })]) {
+    const result = calculateGoalPace({ goalProgress, hypotheticalMonthlyAmount: 200, now: NOW });
     assert.equal(result.available, false);
     assert.equal(result.reason, 'no_target');
   }
 });
 
 test('calculateGoalPace: target already met by what has been saved, regardless of the hypothetical pace', () => {
-  const context = goalContext({ netSavedSinceGoal: 10000 }); // goalContext's own target_amount is 10000
-  const result = calculateGoalPace({ context, hypotheticalMonthlyAmount: 1 });
+  const goalProgress = goalProgressFixture({ saved_amount: 10000, target_amount: 10000 });
+  const result = calculateGoalPace({ goalProgress, hypotheticalMonthlyAmount: 1, now: NOW });
   assert.equal(result.available, true);
   assert.equal(result.status, 'already_reached');
 });
 
 test('calculateGoalPace: projects a real date from the hypothetical pace, matching projectFinishDate exactly, not the realized pace', () => {
-  // goalContext's target_amount is 10000. $1,200 saved, a hypothetical
-  // $500/month -> (10000-1200)/500 = 17.6 months of runway from now -
-  // deliberately a different number than the realized pace elsewhere in
-  // this file would produce, to confirm this is really using the
-  // hypothetical, not silently falling back to history.
-  const context = goalContext({ netSavedSinceGoal: 1200 });
-  const result = calculateGoalPace({ context, hypotheticalMonthlyAmount: 500 });
+  // saved $1,200 against a $10,000 target, a hypothetical $500/month ->
+  // (10000-1200)/500 = 17.6 months of runway from now - deliberately a
+  // different number than the fixture's own realized pace (166.67/month)
+  // would produce, to confirm this really uses the hypothetical, not
+  // silently falling back to the realized rate.
+  const goalProgress = goalProgressFixture({ saved_amount: 1200, target_amount: 10000 });
+  const result = calculateGoalPace({ goalProgress, hypotheticalMonthlyAmount: 500, now: NOW });
   assert.equal(result.available, true);
   assert.equal(result.status, 'projected');
   assert.equal(result.hypothetical_monthly_amount, 500);
@@ -480,19 +568,19 @@ test('calculateGoalPace: projects a real date from the hypothetical pace, matchi
   assert.equal(result.projected_date, expected.toISOString().slice(0, 10));
 });
 
-test('calculateGoalPace: does NOT require any elapsed history, unlike projectAffordableDate - a hypothetical pace typed in today is still projectable today', () => {
-  const context = goalContext({
-    goalCreatedAt: NOW, // goal set today - projectAffordableDate would refuse this
-    netSavedSinceGoal: 0,
+test('calculateGoalPace: does NOT require any realized history, unlike projectAffordableDate - a hypothetical pace typed in today is still projectable today', () => {
+  const goalProgress = goalProgressFixture({
+    saved_amount: 0,
+    realized_pace: { insufficient_history: true, days_of_history: 0 }, // projectAffordableDate would refuse this
   });
-  const result = calculateGoalPace({ context, hypotheticalMonthlyAmount: 300 });
+  const result = calculateGoalPace({ goalProgress, hypotheticalMonthlyAmount: 300, now: NOW });
   assert.equal(result.available, true);
   assert.equal(result.status, 'projected');
 });
 
 test('calculateGoalPace: an absurdly tiny hypothetical pace against a huge target has no realistic projected date', () => {
-  const context = goalContext({ goal: { goal_type: 'savings', target_amount: 1e9 }, netSavedSinceGoal: 0 });
-  const result = calculateGoalPace({ context, hypotheticalMonthlyAmount: 0.001 });
+  const goalProgress = goalProgressFixture({ saved_amount: 0, target_amount: 1e9 });
+  const result = calculateGoalPace({ goalProgress, hypotheticalMonthlyAmount: 0.001, now: NOW });
   assert.equal(result.available, false);
   assert.equal(result.reason, 'no_projectable_date');
 });
@@ -500,28 +588,39 @@ test('calculateGoalPace: an absurdly tiny hypothetical pace against a huge targe
 // ---------------------------------------------------------------------------
 // computeGoalMilestones (Phase 28, Savings Planner v1 - 2026-08-25)
 //
-// Every checkpoint is exactly projectAffordableDate called at a fraction of
-// the real target - these tests confirm that composition holds exactly
-// (not just "produces something"), and pin down the one genuinely new edge
-// case this adds: a fractional checkpoint rounding to zero for a tiny
-// target, which projectAffordableDate's own ScenarioValidationError guard
-// would otherwise throw on.
+// Phase 42 (2026-09-08) - REBUILT as hypothetical-pace-driven (see the
+// function's own header comment for the full "why"): each checkpoint is
+// now projectFinishDate at a fraction of the real target, driven by the
+// same user-supplied hypothetical monthly amount the Goal Calculator
+// takes - not a realized pace. These tests confirm that composition holds
+// exactly, and pin down the one genuinely new edge case this adds: a
+// fractional checkpoint rounding to zero for a tiny target.
 // ---------------------------------------------------------------------------
 
+test('computeGoalMilestones: rejects a non-positive or non-numeric hypothetical amount', () => {
+  const goalProgress = goalProgressFixture();
+  for (const bad of [0, -50, NaN, Infinity, '100', null, undefined]) {
+    assert.throws(
+      () => computeGoalMilestones({ goalProgress, hypotheticalMonthlyAmount: bad, now: NOW }),
+      ScenarioValidationError
+    );
+  }
+});
+
 test('computeGoalMilestones: no goal (or no target_amount) set is unavailable, not a guessed checkpoint list', () => {
-  for (const goal of [null, { goal_type: 'general', target_amount: null }]) {
-    const context = goalContext({ goal, netSavedSinceGoal: 1200 });
-    const result = computeGoalMilestones({ context });
+  for (const goalProgress of [null, goalProgressFixture({ has_target: false, target_amount: null })]) {
+    const result = computeGoalMilestones({ goalProgress, hypotheticalMonthlyAmount: 200, now: NOW });
     assert.equal(result.available, false);
     assert.equal(result.reason, 'no_target');
   }
 });
 
 test('computeGoalMilestones: four checkpoints at exactly 25/50/75/100% of the real target', () => {
-  const context = goalContext({ netSavedSinceGoal: 1200 }); // target_amount 10000
-  const result = computeGoalMilestones({ context });
+  const goalProgress = goalProgressFixture({ saved_amount: 1200, target_amount: 10000 });
+  const result = computeGoalMilestones({ goalProgress, hypotheticalMonthlyAmount: 500, now: NOW });
   assert.equal(result.available, true);
   assert.equal(result.target_amount, 10000);
+  assert.equal(result.hypothetical_monthly_amount, 500);
   assert.deepEqual(
     result.milestones.map((m) => m.percent),
     [25, 50, 75, 100]
@@ -532,11 +631,16 @@ test('computeGoalMilestones: four checkpoints at exactly 25/50/75/100% of the re
   );
 });
 
-test('computeGoalMilestones: each checkpoint matches a direct projectAffordableDate call at that same fractional amount', () => {
-  const context = goalContext({ netSavedSinceGoal: 1200 });
-  const result = computeGoalMilestones({ context });
+test('computeGoalMilestones: each checkpoint matches a direct calculateGoalPace call at that same fractional target', () => {
+  const goalProgress = goalProgressFixture({ saved_amount: 1200, target_amount: 10000 });
+  const result = computeGoalMilestones({ goalProgress, hypotheticalMonthlyAmount: 500, now: NOW });
   for (const milestone of result.milestones) {
-    const direct = projectAffordableDate({ context, targetAmount: milestone.amount });
+    if (milestone.reason === 'target_too_small') continue;
+    const direct = calculateGoalPace({
+      goalProgress: goalProgressFixture({ saved_amount: 1200, target_amount: milestone.amount }),
+      hypotheticalMonthlyAmount: 500,
+      now: NOW,
+    });
     assert.deepEqual(
       { available: milestone.available, status: milestone.status, projected_date: milestone.projected_date },
       { available: direct.available, status: direct.status, projected_date: direct.projected_date }
@@ -545,34 +649,31 @@ test('computeGoalMilestones: each checkpoint matches a direct projectAffordableD
 });
 
 test('computeGoalMilestones: the 100% checkpoint is identical in shape to projecting the real target directly', () => {
-  const context = goalContext({ netSavedSinceGoal: 1200 });
-  const result = computeGoalMilestones({ context });
+  const goalProgress = goalProgressFixture({ saved_amount: 1200, target_amount: 10000 });
+  const result = computeGoalMilestones({ goalProgress, hypotheticalMonthlyAmount: 500, now: NOW });
   const fullTarget = result.milestones.find((m) => m.percent === 100);
-  const direct = projectAffordableDate({ context, targetAmount: 10000 });
+  const direct = calculateGoalPace({ goalProgress, hypotheticalMonthlyAmount: 500, now: NOW });
   assert.equal(fullTarget.amount, 10000);
   assert.equal(fullTarget.available, direct.available);
   assert.equal(fullTarget.projected_date, direct.projected_date);
 });
 
-test('computeGoalMilestones: checkpoints already covered by what has been saved report already_affordable individually', () => {
+test('computeGoalMilestones: checkpoints already covered by what has been saved report already_reached individually', () => {
   // target 10000, saved 6000 -> 25% ($2,500) and 50% ($5,000) are already
   // met; 75% ($7,500) and 100% ($10,000) are not.
-  const context = goalContext({ netSavedSinceGoal: 6000 });
-  const result = computeGoalMilestones({ context });
+  const goalProgress = goalProgressFixture({ saved_amount: 6000, target_amount: 10000 });
+  const result = computeGoalMilestones({ goalProgress, hypotheticalMonthlyAmount: 500, now: NOW });
   const byPercent = Object.fromEntries(result.milestones.map((m) => [m.percent, m]));
-  assert.equal(byPercent[25].status, 'already_affordable');
-  assert.equal(byPercent[50].status, 'already_affordable');
-  assert.notEqual(byPercent[75].status, 'already_affordable');
-  assert.notEqual(byPercent[100].status, 'already_affordable');
+  assert.equal(byPercent[25].status, 'already_reached');
+  assert.equal(byPercent[50].status, 'already_reached');
+  assert.notEqual(byPercent[75].status, 'already_reached');
+  assert.notEqual(byPercent[100].status, 'already_reached');
 });
 
 test('computeGoalMilestones: a fractional checkpoint rounding to zero for a tiny target is reported explicitly, never thrown', () => {
-  const context = goalContext({
-    goal: { goal_type: 'savings', target_amount: 0.01 },
-    netSavedSinceGoal: 0,
-  });
-  assert.doesNotThrow(() => computeGoalMilestones({ context }));
-  const result = computeGoalMilestones({ context });
+  const goalProgress = goalProgressFixture({ saved_amount: 0, target_amount: 0.01 });
+  assert.doesNotThrow(() => computeGoalMilestones({ goalProgress, hypotheticalMonthlyAmount: 10, now: NOW }));
+  const result = computeGoalMilestones({ goalProgress, hypotheticalMonthlyAmount: 10, now: NOW });
   assert.equal(result.available, true);
   const tiny = result.milestones.find((m) => m.percent === 25);
   assert.equal(tiny.amount, 0);

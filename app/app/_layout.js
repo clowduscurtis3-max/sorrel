@@ -105,22 +105,27 @@ function navigateForNotification(router, data) {
 // (tabs)/_layout.js instead of a route, so this layout no longer needs
 // Stack's per-screen presentation options at all - a bare Slot is back to
 // being sufficient, same as it was through sub-step 1.6.
-// `goal === null` means "confirmed absent" (a real 404 from the backend) -
-// `goal === undefined` means "not determined yet" and must NEVER be treated
-// the same way. Found 2026-08-22 chasing a real bug: an anomalous extra
-// gate re-initialization (root cause not fully pinned - the Android
-// Activity itself provably does not recreate, confirmed via `adb logcat`
-// lifecycle events, so this is a JS/React-level re-run, not a native one)
-// could let `ready` go true one render before a freshly-refired
-// `fetchGoal()` had a chance to resolve, landing an already-has-a-goal
-// user on /goal-intake anyway because the stale initial `goal` value
-// looked identical to a genuine "no goal" result. Distinguishing the two
-// values closes this regardless of why the extra re-init happens - an
-// undetermined goal can no longer be mistaken for a confirmed-absent one.
-function requiredRoute(session, goal, currentSegment) {
+// `goals === undefined` means "not determined yet" and must NEVER be
+// treated the same as a confirmed answer. Found 2026-08-22 chasing a real
+// bug: an anomalous extra gate re-initialization (root cause not fully
+// pinned - the Android Activity itself provably does not recreate,
+// confirmed via `adb logcat` lifecycle events, so this is a JS/React-level
+// re-run, not a native one) could let `ready` go true one render before a
+// freshly-refired `fetchGoal()` had a chance to resolve, landing an
+// already-has-goals user on /goal-intake anyway because the stale initial
+// value looked identical to a genuine "no goals" result. Distinguishing
+// the two closes this regardless of why the extra re-init happens - an
+// undetermined state can no longer be mistaken for a confirmed-empty one.
+//
+// Phase 42 (multi-goal tracking, 2026-09-08): `goal` (object/null) is now
+// `goals` (array) - GET /goal always returns 200 `{goals: []}` now
+// (never a 404), so "confirmed absent" is `goals.length === 0`, not a
+// separate null state. Same three-way discipline as before, just
+// re-expressed: undetermined / confirmed-empty / confirmed-present.
+function requiredRoute(session, goals, currentSegment) {
   if (!session) return currentSegment === 'sign-in' ? null : '/sign-in';
-  if (goal === undefined) return null;
-  if (goal === null) return currentSegment === 'goal-intake' ? null : '/goal-intake';
+  if (goals === undefined) return null;
+  if (goals.length === 0) return currentSegment === 'goal-intake' ? null : '/goal-intake';
   if (currentSegment === 'sign-in') return '/';
   return null;
 }
@@ -136,10 +141,10 @@ function Splash() {
 export default function RootLayout() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
-  // `undefined` = not yet determined this session, `null` = confirmed
-  // absent (a real 404), an object = confirmed present. See
+  // `undefined` = not yet determined this session, `[]` = confirmed no
+  // active goals, a non-empty array = confirmed present. See
   // `requiredRoute`'s own comment for why these must never be conflated.
-  const [goal, setGoal] = useState(undefined);
+  const [goals, setGoals] = useState(undefined);
   const [checkingGoal, setCheckingGoal] = useState(true);
   // Set only when the *initial* goal check fails outright (network error,
   // backend down, a non-404 error status) - see fetchGoal()'s own comment
@@ -246,13 +251,11 @@ export default function RootLayout() {
     }
     try {
       const res = await apiFetch('/goal');
-      if (res.status === 404) {
-        setGoal(null);
-        initialGoalCheckedRef.current = true;
-        return;
-      }
+      // Phase 42: GET /goal always returns 200 {goals: []} now - "no goals
+      // yet" is a normal empty-array result, never a 404 to special-case.
       if (!res.ok) throw new Error('SERVER_ERROR');
-      setGoal(await res.json());
+      const data = await res.json();
+      setGoals(data.goals || []);
       initialGoalCheckedRef.current = true;
     } catch (err) {
       console.error(err);
@@ -272,7 +275,7 @@ export default function RootLayout() {
       // readiness and a real error both matter again), not mistaken for a
       // refetch of the previous session's already-known goal.
       initialGoalCheckedRef.current = false;
-      setGoal(undefined);
+      setGoals(undefined);
       setCheckingGoal(false);
       setGoalCheckFailed(false);
       // Phase 20: also reset the biometric-unlock gate on sign-out, so the
@@ -797,13 +800,13 @@ export default function RootLayout() {
     await supabase.auth.signOut();
   }
 
-  // `goal === undefined` is included alongside `checkingGoal` on purpose,
+  // `goals === undefined` is included alongside `checkingGoal` on purpose,
   // not redundant with it - see `requiredRoute`'s comment above for the
   // real bug this closes (an anomalous extra gate re-init could see
   // `checkingGoal` already false before a freshly-refired `fetchGoal()`
-  // had a chance to resolve `goal` past its initial undetermined value).
-  const ready = !loading && !(session && (checkingGoal || goal === undefined));
-  const target = ready ? requiredRoute(session, goal, segments[0]) : null;
+  // had a chance to resolve `goals` past its initial undetermined value).
+  const ready = !loading && !(session && (checkingGoal || goals === undefined));
+  const target = ready ? requiredRoute(session, goals, segments[0]) : null;
 
   useEffect(() => {
     if (target) router.replace(target);
@@ -1001,7 +1004,7 @@ export default function RootLayout() {
         ) : biometricLocked ? (
           <BiometricLock onRetry={attemptBiometricAuth} />
         ) : (
-          <SessionContext.Provider value={{ session, goal, refetchGoal: fetchGoal, signOut }}>
+          <SessionContext.Provider value={{ session, goals, refetchGoal: fetchGoal, signOut }}>
             <Slot />
           </SessionContext.Provider>
         )}

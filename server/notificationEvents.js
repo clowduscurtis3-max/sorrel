@@ -1,6 +1,6 @@
 const supabaseAdmin = require('./supabaseAdmin');
 const { currentMonthRange } = require('./budget');
-const { getGoalProgress, AVG_DAYS_PER_MONTH } = require('./goalProgress');
+const { getGoalsProgress, AVG_DAYS_PER_MONTH } = require('./goalProgress');
 const { getSettings } = require('./settings');
 
 const GOAL_MILESTONE_THRESHOLDS = [25, 50, 75, 100];
@@ -210,6 +210,7 @@ function reconcileGoalMilestoneEvents({ existingEvents, progress, targetSignatur
       title: threshold === 100 ? 'Goal reached' : `${threshold}% of the way to your goal`,
       body: progress.message,
       data: {
+        goal_id: progress.id,
         threshold,
         percent_complete: progress.percent_complete,
         saved_amount: progress.saved_amount,
@@ -287,6 +288,7 @@ function reconcileSavingsReminderEvents({
         title: 'Time to move money toward your goal',
         body: `Moving about $${amount.toFixed(2)} toward your goal ${periodLabel} would keep it on pace for its target date.`,
         data: {
+          goal_id: goalProgress.id,
           suggested_amount: amount,
           target_amount: goalProgress.target_amount,
           saved_amount: goalProgress.saved_amount,
@@ -430,74 +432,82 @@ async function recomputeNotificationEvents(userId) {
     }
   }
 
-  // Goal milestones - no goal, or a goal with no hard target, means nothing
-  // to reconcile here (matches computeGoalProgress's own has_target branch).
-  const { data: goal } = await supabaseAdmin
-    .from('user_goals')
-    .select('goal_type, target_amount, target_timeframe_months')
-    .eq('user_id', userId)
-    .single();
-  if (!goal || goal.target_amount == null) return;
+  // Phase 42 (multi-goal tracking, 2026-09-08): a user can have several
+  // active goals now - reconciled per goal, no early return for "no goal"
+  // since that's now just "zero goals to loop over." goal.id is folded
+  // into targetSignature (was type|target|timeframe only) - besides
+  // disambiguating between this user's several goals, it also closes a
+  // latent bug the single-goal version had: two goals sharing the exact
+  // same type/target/timeframe would otherwise collide on one dedup key.
+  const goalsProgress = await getGoalsProgress(userId);
+  const goalsWithTarget = goalsProgress.filter((g) => g.has_target);
 
-  const progress = await getGoalProgress(userId);
-  const targetSignature = `${goal.goal_type}|${goal.target_amount}|${goal.target_timeframe_months ?? ''}`;
-
-  const { data: existingMilestones, error: milestoneError } = await supabaseAdmin
-    .from('notification_events')
-    .select('dedup_key')
-    .eq('user_id', userId)
-    .eq('event_type', 'goal_milestone');
-  if (milestoneError) throw milestoneError;
-
-  const { toInsert: milestoneInserts } = reconcileGoalMilestoneEvents({
-    existingEvents: existingMilestones || [],
-    progress,
-    targetSignature,
-  });
-
-  if (goalMilestonesEnabled && milestoneInserts.length > 0) {
-    const { error } = await supabaseAdmin
+  if (goalsWithTarget.length > 0) {
+    const { data: existingMilestones, error: milestoneError } = await supabaseAdmin
       .from('notification_events')
-      .insert(milestoneInserts.map((e) => ({ user_id: userId, ...e })));
-    if (error) throw error;
-  }
+      .select('dedup_key')
+      .eq('user_id', userId)
+      .eq('event_type', 'goal_milestone');
+    if (milestoneError) throw milestoneError;
 
-  // Savings reminder (Phase 32) - reuses the exact same progress/
-  // targetSignature already fetched above for milestones, no second DB
-  // read for goal state. Phase 38 Step 4: the user's chosen cadence
-  // (goal_settings.auto_save_reminder_frequency) decides both the dedup
-  // period (a shorter cadence needs its own, shorter period_start, not
-  // the monthly budget period every other reminder uses) and how the
-  // suggested amount gets scaled - see reconcileSavingsReminderEvents.
-  const { goal_settings: goalSettings } = await getSettings(userId);
-  const reminderFrequency = ['weekly', 'biweekly', 'monthly', 'off'].includes(
-    goalSettings?.auto_save_reminder_frequency
-  )
-    ? goalSettings.auto_save_reminder_frequency
-    : 'monthly';
-  const reminderPeriod = reminderPeriodStart(reminderFrequency, new Date()) || period_start;
+    const milestoneInserts = goalsWithTarget.flatMap((goal) => {
+      const targetSignature = `${goal.id}|${goal.goal_type}|${goal.target_amount}|${goal.target_timeframe_months ?? ''}`;
+      return reconcileGoalMilestoneEvents({
+        existingEvents: existingMilestones || [],
+        progress: goal,
+        targetSignature,
+      }).toInsert;
+    });
 
-  const { data: existingReminders, error: reminderError } = await supabaseAdmin
-    .from('notification_events')
-    .select('dedup_key')
-    .eq('user_id', userId)
-    .eq('event_type', 'savings_reminder')
-    .eq('period_start', reminderPeriod);
-  if (reminderError) throw reminderError;
+    if (goalMilestonesEnabled && milestoneInserts.length > 0) {
+      const { error } = await supabaseAdmin
+        .from('notification_events')
+        .insert(milestoneInserts.map((e) => ({ user_id: userId, ...e })));
+      if (error) throw error;
+    }
 
-  const { toInsert: reminderInserts } = reconcileSavingsReminderEvents({
-    existingEvents: existingReminders || [],
-    goalProgress: progress,
-    targetSignature,
-    frequency: reminderFrequency,
-    periodStart: reminderPeriod,
-  });
+    // Savings reminder (Phase 32) - reuses the exact same per-goal progress/
+    // targetSignature already computed above for milestones, no second DB
+    // read for goal state. Phase 38 Step 4: the user's chosen cadence
+    // (goal_settings.auto_save_reminder_frequency) decides both the dedup
+    // period (a shorter cadence needs its own, shorter period_start, not
+    // the monthly budget period every other reminder uses) and how the
+    // suggested amount gets scaled - see reconcileSavingsReminderEvents.
+    // Applies uniformly to every goal (this app has no per-goal reminder
+    // frequency setting) - a real, deliberate scope call, not an oversight.
+    const { goal_settings: goalSettings } = await getSettings(userId);
+    const reminderFrequency = ['weekly', 'biweekly', 'monthly', 'off'].includes(
+      goalSettings?.auto_save_reminder_frequency
+    )
+      ? goalSettings.auto_save_reminder_frequency
+      : 'monthly';
+    const reminderPeriod = reminderPeriodStart(reminderFrequency, new Date()) || period_start;
 
-  if (reminderInserts.length > 0) {
-    const { error } = await supabaseAdmin
+    const { data: existingReminders, error: reminderError } = await supabaseAdmin
       .from('notification_events')
-      .insert(reminderInserts.map((e) => ({ user_id: userId, ...e })));
-    if (error) throw error;
+      .select('dedup_key')
+      .eq('user_id', userId)
+      .eq('event_type', 'savings_reminder')
+      .eq('period_start', reminderPeriod);
+    if (reminderError) throw reminderError;
+
+    const reminderInserts = goalsWithTarget.flatMap((goal) => {
+      const targetSignature = `${goal.id}|${goal.goal_type}|${goal.target_amount}|${goal.target_timeframe_months ?? ''}`;
+      return reconcileSavingsReminderEvents({
+        existingEvents: existingReminders || [],
+        goalProgress: goal,
+        targetSignature,
+        frequency: reminderFrequency,
+        periodStart: reminderPeriod,
+      }).toInsert;
+    });
+
+    if (reminderInserts.length > 0) {
+      const { error } = await supabaseAdmin
+        .from('notification_events')
+        .insert(reminderInserts.map((e) => ({ user_id: userId, ...e })));
+      if (error) throw error;
+    }
   }
 }
 

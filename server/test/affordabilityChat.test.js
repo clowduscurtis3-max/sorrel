@@ -40,9 +40,11 @@ function contextWith(overrides = {}) {
     actuals,
     budgetStatus: computeBudgetStatus({ budgets, actuals }),
     recurringSeries: overrides.recurringSeries ?? [],
-    goal: overrides.goal === undefined ? null : overrides.goal,
-    goalCreatedAt: overrides.goalCreatedAt === undefined ? null : overrides.goalCreatedAt,
-    netSavedSinceGoal: overrides.netSavedSinceGoal === undefined ? null : overrides.netSavedSinceGoal,
+    // Phase 42 (multi-goal tracking, 2026-09-08): projectAffordableDate
+    // now reads context.goals (balance-tracked, real reconstructed pace) -
+    // see affordability.test.js's own goalProgressFixture for the full
+    // shape.
+    goals: overrides.goals ?? [],
   };
 }
 
@@ -350,8 +352,24 @@ test('executeTool find_max_comfortable_amount: takes no user-stated amount, so n
   assert.equal(outcome.result.available, true);
 });
 
+// Phase 42: a single already-computed, balance-tracked goal (see
+// affordability.test.js's own goalProgressFixture for the canonical
+// shape) - this file only needs enough of it to exercise executeTool's
+// own plumbing, not to re-test projectAffordableDate's own math.
+const CHAT_GOAL_FIXTURE = {
+  id: 'g1',
+  goal_type: 'savings',
+  notes: null,
+  has_target: true,
+  saved_amount: 1000,
+  target_amount: 10000,
+  account_ids: ['acc-1'],
+  no_accounts_linked: false,
+  realized_pace: { insufficient_history: false, monthly_pace: 150 },
+};
+
 test('executeTool project_affordable_date: rejects an unverified target amount', async () => {
-  const context = contextWith({ goal: { id: 'g1' }, goalCreatedAt: new Date('2026-01-01'), netSavedSinceGoal: 1000 });
+  const context = contextWith({ goals: [CHAT_GOAL_FIXTURE] });
   const messages = [{ role: 'user', text: 'when could I afford it?' }];
   const outcome = await executeTool(
     'project_affordable_date',
@@ -363,7 +381,7 @@ test('executeTool project_affordable_date: rejects an unverified target amount',
 });
 
 test('executeTool project_affordable_date: a real user-stated target is accepted and projected against the real engine', async () => {
-  const context = contextWith({ goal: { id: 'g1' }, goalCreatedAt: new Date('2026-01-01'), netSavedSinceGoal: 1000 });
+  const context = contextWith({ goals: [CHAT_GOAL_FIXTURE] });
   const messages = [{ role: 'user', text: 'when could I afford $5000?' }];
   const outcome = await executeTool(
     'project_affordable_date',
@@ -371,7 +389,8 @@ test('executeTool project_affordable_date: a real user-stated target is accepted
     { context, messages, today: '2026-08-22' }
   );
   assert.equal(outcome.ok, true);
-  assert.equal(outcome.result.target_amount, 5000);
+  assert.equal(outcome.result.available, true);
+  assert.equal(outcome.result.goals[0].target_amount, 5000);
 });
 
 test('executeTool estimate_financing_payment: rejects a category with no financing-estimate mechanism, before ever checking the amount/term', async () => {

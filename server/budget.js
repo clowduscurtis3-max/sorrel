@@ -128,16 +128,6 @@ function summarizeSpending(transactions, anchorDate = new Date()) {
 }
 
 function describeGoal(goal) {
-  // No dedicated 'general'/sentinel type anymore (goal_type collapse,
-  // 2026-09-01) - "nothing specific to tell Claude" is now detected
-  // directly from the absence of the only two things that would actually
-  // be worth mentioning, regardless of which of the two types it is.
-  if (!goal || (!goal.target_amount && !goal.notes)) {
-    return (
-      'No specific goal was set - optimize for general smarter spending: ' +
-      'trim obvious discretionary waste and build a reasonable savings buffer.'
-    );
-  }
   const parts = [`Goal type: ${goal.goal_type}.`];
   if (goal.target_amount) parts.push(`Target amount: $${goal.target_amount}.`);
   if (goal.target_timeframe_months) {
@@ -145,6 +135,23 @@ function describeGoal(goal) {
   }
   if (goal.notes) parts.push(`Notes: ${goal.notes}`);
   return parts.join(' ');
+}
+
+// Phase 42 (multi-goal tracking, 2026-09-08): a user can have several
+// active goals now - joins each one's own description (unchanged per-goal
+// wording, describeGoal above) for the Claude budget-generation prompt.
+// "Nothing specific to tell Claude" is still detected the same way
+// (absence of the only two things worth mentioning), now per-goal filtered
+// before joining rather than per-user.
+function describeGoals(goals) {
+  const withSomethingToSay = (goals || []).filter((g) => g.target_amount || g.notes);
+  if (withSomethingToSay.length === 0) {
+    return (
+      'No specific goal was set - optimize for general smarter spending: ' +
+      'trim obvious discretionary waste and build a reasonable savings buffer.'
+    );
+  }
+  return withSomethingToSay.map((g) => describeGoal(g)).join(' ');
 }
 
 // Isolated from categorize.js/index.js on purpose (per the phase-2 spec)
@@ -173,11 +180,13 @@ async function generateBudget(userId, target = {}) {
     throw new NoHistoryError('No transaction history to budget from yet - sync transactions first.');
   }
 
-  const { data: goal } = await supabaseAdmin
+  // Phase 42: a user can have several active goals now - .single() would
+  // error the moment a second one exists.
+  const { data: goals } = await supabaseAdmin
     .from('user_goals')
     .select('goal_type, target_amount, target_timeframe_months, notes')
     .eq('user_id', userId)
-    .single();
+    .is('archived_at', null);
 
   // Step 4: a category the user has deliberately set (directly, or by
   // accepting an AI re-balance proposal) is left alone on regeneration -
@@ -267,7 +276,7 @@ async function generateBudget(userId, target = {}) {
           average_monthly_spend_by_category: averages,
           average_monthly_income: averageMonthlyIncome,
           months_of_history_used: monthCount,
-          goal: describeGoal(goal),
+          goal: describeGoals(goals),
           user_fixed_budgets: Object.fromEntries(
             userSetBudgetRows.map((r) => [r.category, r.budgeted_amount])
           ),

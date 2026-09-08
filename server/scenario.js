@@ -1,12 +1,6 @@
 const { SPEND_CATEGORIES, ESSENTIAL_CATEGORIES } = require('./categorize');
 const { computeOverspendAlerts } = require('./alerts');
-const {
-  computeGoalProgress,
-  projectFinishDate,
-  monthsBetween,
-  AVG_DAYS_PER_MONTH,
-  MIN_DAYS_FOR_PROJECTION,
-} = require('./goalProgress');
+const { projectFinishDate, AVG_DAYS_PER_MONTH } = require('./goalProgress');
 const { INTERVAL_DAYS } = require('./recurring');
 const { upcomingObligations, nextExpectedIncome } = require('./recurringSchedule');
 
@@ -110,10 +104,6 @@ function toDateOnlyOrNull(d) {
   if (!(d instanceof Date) || !Number.isFinite(d.getTime())) return null;
   const iso = d.toISOString();
   return /^\d{4}-\d{2}-\d{2}T/.test(iso) ? iso.slice(0, 10) : null;
-}
-
-function isPlainDateString(s) {
-  return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
 function parseDateOnly(s) {
@@ -429,138 +419,190 @@ function computeBudgetImpact({ context, normalized }) {
 // Goal impact
 // ---------------------------------------------------------------------------
 
-// The headline tradeoff for most purchases: what this does to the projected
-// goal date. Both the baseline and the scenario go through the same
-// projection helper extracted from goalProgress.js, so the "before" number
-// here is identical to the one /goal/progress already shows the user - a
-// what-if that disagreed with the live goal panel would destroy trust in
-// both.
-function computeGoalImpact({ context, normalized }) {
-  const { goal, goalCreatedAt, netSavedSinceGoal } = context;
+// Phase 42 (multi-goal tracking, 2026-09-08): goals are balance-tracked
+// against real linked accounts now, not inferred from system-wide net cash
+// flow - see server/goalPace.js's own header for the full "why" and the
+// exact reconstruction math. computeGoalImpact runs this per goal (a user
+// can have several), then picks the single worst-affected one to drive
+// determineStatus/buildTradeoffs/buildLimitations/compareScenarios below -
+// those four functions are UNCHANGED, since they already consume exactly
+// this one-object shape and already handle `available: false` gracefully.
+// The full per-goal array rides alongside on `goals` for
+// AffordabilityQuery.js to render "for each affected goal."
+//
+// Field rename from the old net-cash-flow model: net_saved_before/after ->
+// balance_before/after - the old name described money inferred from
+// spending; this is a real account balance, and keeping the old name would
+// misdescribe what the number now is.
+function computeSingleGoalImpact({ goal, normalized, now }) {
+  const verb = goal.verb;
 
-  if (!goal) {
+  if (goal.no_accounts_linked) {
     return {
+      goal_id: goal.id,
+      goal_type: goal.goal_type,
+      notes: goal.notes,
+      verb,
       available: false,
-      reason: 'no_goal',
-      detail: 'No goal is set, so this is framed around overall spending instead.',
+      reason: 'no_accounts_linked',
+      detail: `${goal.notes || goal.goal_type} has no linked accounts yet, so there's nothing real to check this against.`,
     };
   }
 
-  const hasTarget = typeof goal.target_amount === 'number' && goal.target_amount > 0;
-  // Mirrors computeGoalProgress's own wording rule: a debt goal has only ever
-  // measured net cash surplus, never money actually applied to a balance, so
-  // nothing here may claim debt was repaid.
-  const verb = goal.goal_type === 'debt' ? 'freed up' : 'saved';
-
-  const before = computeGoalProgress({
-    goal,
-    netSaved: netSavedSinceGoal,
-    goalCreatedAt,
-    now: context.now,
-  });
-
-  // A one-time purchase reduces what's been saved. A recurring commitment
-  // instead reduces the *rate* of saving from here on - two genuinely
-  // different shapes of harm, and collapsing them would understate an
-  // ongoing subscription badly. Decided up front because even the branches
-  // that can't project a date still have to report the right one.
-  const isRecurring = normalized.recurrence !== 'once';
-  const savedBefore = before.saved_amount;
-  const savedAfter = isRecurring ? savedBefore : round2(savedBefore - normalized.amount);
-
-  if (!hasTarget) {
+  // A recurring commitment's ongoing effect on a specific balance-tracked
+  // goal can't be honestly assessed - which account would fund it every
+  // period isn't knowable here, and inventing a multi-month drawdown
+  // projection with no real basis would be exactly the fabricated
+  // financial detail this app refuses to produce elsewhere. Checked before
+  // any balance/target math below, since none of it applies to this case.
+  if (normalized.recurrence !== 'once') {
     return {
+      goal_id: goal.id,
+      goal_type: goal.goal_type,
+      notes: goal.notes,
+      verb,
+      available: false,
+      reason: 'recurring_no_realized_pace',
+      detail: `A recurring commitment's effect on ${goal.notes || goal.goal_type} isn't included - which account would cover it each period isn't known.`,
+    };
+  }
+
+  const savedBefore = goal.saved_amount;
+  const savedAfter = round2(savedBefore - normalized.amount);
+
+  if (!goal.has_target) {
+    return {
+      goal_id: goal.id,
+      goal_type: goal.goal_type,
+      notes: goal.notes,
+      verb,
       available: false,
       reason: 'no_target',
-      verb,
-      detail:
-        'This goal has no dollar target, so there is no finish date for this purchase to move.',
-      net_saved_before: savedBefore,
-      net_saved_after: savedAfter,
+      detail: `${goal.notes || goal.goal_type} has no dollar target, so there is no finish date for this purchase to move.`,
+      balance_before: savedBefore,
+      balance_after: savedAfter,
     };
   }
 
-  const monthsElapsed = monthsBetween(goalCreatedAt, context.now);
-  // Kept at full precision for the projection itself and only rounded for
-  // display. Rounding first lets a genuinely positive pace under half a cent
-  // a month collapse to 0.00, which makes projectFinishDate return null and
-  // reports a *one-time* purchase as having stalled the goal - even though a
-  // one-time purchase never touches the pace at all.
-  const paceBefore = monthsElapsed > 0 ? savedBefore / monthsElapsed : null;
-
-  // computeGoalProgress omits projected_date on two different branches:
-  // "too early / nothing saved yet" and "target already reached". They mean
-  // opposite things, so collapsing both into one reason would silently drop
-  // the goal tradeoff for a purchase that pushes a finished goal back under
-  // its target.
+  // Two branches mean opposite things, so collapsing them would silently
+  // drop the goal tradeoff for a purchase that pushes a finished goal back
+  // under its target - same distinction the old net-cash-flow model drew.
   if (savedBefore >= goal.target_amount) {
     return {
+      goal_id: goal.id,
+      goal_type: goal.goal_type,
+      notes: goal.notes,
+      verb,
       available: false,
       reason: 'goal_reached',
-      verb,
-      detail: before.message,
+      detail: goal.message,
       target_amount: goal.target_amount,
-      net_saved_before: savedBefore,
-      net_saved_after: savedAfter,
+      balance_before: savedBefore,
+      balance_after: savedAfter,
       drops_below_target: savedAfter < goal.target_amount,
     };
   }
 
-  if (!before.projected_date || !isPlainDateString(before.projected_date)) {
+  if (goal.realized_pace.insufficient_history) {
     return {
-      available: false,
-      reason: 'no_projection_yet',
+      goal_id: goal.id,
+      goal_type: goal.goal_type,
+      notes: goal.notes,
       verb,
-      detail: before.message,
-      net_saved_before: savedBefore,
-      net_saved_after: savedAfter,
+      available: false,
+      reason: 'insufficient_history',
+      detail: `Not enough real transaction history yet on ${goal.notes || goal.goal_type}'s linked account(s) to project a finish date - the current balance is still shown.`,
+      target_amount: goal.target_amount,
+      balance_before: savedBefore,
+      balance_after: savedAfter,
     };
   }
 
-  // The two cases are modelled differently on purpose, and the distinction
-  // matters more than it first looks:
-  //
-  // - A ONE-TIME purchase changes how much has been saved, not how fast the
-  //   user saves. Pace is held at the realized baseline and only the balance
-  //   moves, so the delay works out to roughly (amount / monthly pace).
-  //   Re-deriving the pace from the reduced balance instead - which is what
-  //   feeding a smaller netSaved back through computeGoalProgress would do -
-  //   double-counts the hit: the money comes off the total AND drags the
-  //   inferred rate down, turning a $50 purchase into a month of delay.
-  //
-  // - A RECURRING commitment genuinely does change the rate, every month,
-  //   for as long as it's held. There the pace drops and the balance doesn't.
-  const paceAfter = isRecurring ? paceBefore - normalized.monthly_equivalent : paceBefore;
+  // A one-time purchase changes how much has been saved, not how fast the
+  // linked account has genuinely been growing - the realized pace (already
+  // observed, server/goalPace.js) is held fixed and only the balance moves.
+  const pace = goal.realized_pace.monthly_pace;
 
-  const dateAfter = projectFinishDate({
-    saved: savedAfter,
-    target: goal.target_amount,
-    monthlyPace: paceAfter,
-    now: context.now,
-  });
+  const dateBefore = projectFinishDate({ saved: savedBefore, target: goal.target_amount, monthlyPace: pace, now });
+  const projectedBefore = toDateOnlyOrNull(dateBefore);
 
+  if (!projectedBefore) {
+    return {
+      goal_id: goal.id,
+      goal_type: goal.goal_type,
+      notes: goal.notes,
+      verb,
+      available: false,
+      reason: 'no_projection_yet',
+      detail: `${goal.notes || goal.goal_type}'s linked account isn't currently gaining ground fast enough to project a finish date.`,
+      target_amount: goal.target_amount,
+      balance_before: savedBefore,
+      balance_after: savedAfter,
+    };
+  }
+
+  const dateAfter = projectFinishDate({ saved: savedAfter, target: goal.target_amount, monthlyPace: pace, now });
   // Null covers both "no pace left to project from" and "the projection ran
   // off the end of the representable calendar" - see toDateOnlyOrNull.
   const projectedAfter = toDateOnlyOrNull(dateAfter);
 
   return {
-    available: true,
-    verb,
+    goal_id: goal.id,
     goal_type: goal.goal_type,
+    notes: goal.notes,
+    verb,
+    available: true,
     target_amount: goal.target_amount,
-    net_saved_before: savedBefore,
-    net_saved_after: savedAfter,
-    projected_date_before: before.projected_date,
+    balance_before: savedBefore,
+    balance_after: savedAfter,
+    projected_date_before: projectedBefore,
     projected_date_after: projectedAfter,
     // Null when the purchase removes the positive pace entirely - there is
-    // no honest "moves N days later" for a goal that stops advancing, and
-    // reporting a number there would be worse than reporting nothing.
-    delay_days: projectedAfter ? daysBetween(before.projected_date, projectedAfter) : null,
+    // no honest "moves N days later" for a goal that stops advancing.
+    delay_days: projectedAfter ? daysBetween(projectedBefore, projectedAfter) : null,
     stalls_goal: projectedAfter === null,
-    monthly_pace_before: round2(paceBefore),
-    monthly_pace_after: round2(paceAfter),
-    on_pace_before: before.on_pace,
+    monthly_pace: round2(pace),
   };
+}
+
+// Higher score = more severe/worthy of being the one goalImpact that drives
+// determineStatus/buildTradeoffs below. Mirrors the priority those
+// functions already check in: a purchase that pushes an already-reached
+// goal back under target first, then a purchase that stalls a goal
+// outright, then ranked by how many days a projected finish date moves.
+function goalImpactSeverityScore(gi) {
+  if (gi.reason === 'goal_reached' && gi.drops_below_target) return 1000;
+  if (gi.available && gi.stalls_goal) return 900;
+  if (gi.available && gi.delay_days != null) return 800 + gi.delay_days;
+  if (gi.available) return 10;
+  return 0;
+}
+
+function computeGoalImpact({ context, normalized }) {
+  const goals = context.goals || [];
+
+  if (goals.length === 0) {
+    return {
+      available: false,
+      reason: 'no_goal',
+      detail: 'No goal is set, so this is framed around overall spending instead.',
+      goals: [],
+    };
+  }
+
+  const perGoal = goals.map((goal) => computeSingleGoalImpact({ goal, normalized, now: context.now }));
+
+  let primary = perGoal[0];
+  let bestScore = goalImpactSeverityScore(primary);
+  for (const gi of perGoal.slice(1)) {
+    const score = goalImpactSeverityScore(gi);
+    if (score > bestScore) {
+      primary = gi;
+      bestScore = score;
+    }
+  }
+
+  return { ...primary, goals: perGoal };
 }
 
 // ---------------------------------------------------------------------------
@@ -628,21 +670,19 @@ function determineConfidence({ cash, budgetImpact, goalImpact }) {
 // commands. "Waiting until X would..." - never "You should wait."
 function buildTradeoffs({ normalized, cash, budgetImpact, goalImpact }) {
   const tradeoffs = [];
-  const noun = normalized.recurrence === 'once' ? 'this purchase' : 'this commitment';
 
+  // goalImpact.available is only ever true for a one-time purchase (Phase
+  // 42: a recurring commitment's goal impact is always `available: false,
+  // reason: 'recurring_no_realized_pace'` - see computeSingleGoalImpact in
+  // scenario.js), so this branch is one-time-purchase wording only, no
+  // recurring/`this commitment` variant to choose between anymore.
   if (goalImpact.available && goalImpact.stalls_goal) {
     tradeoffs.push({
       kind: 'goal',
       severity: 'high',
-      // "a month" only belongs on a recurring commitment - saying it about a
-      // single purchase describes a cost the user never agreed to.
       text:
-        normalized.recurrence === 'once'
-          ? `${money(normalized.amount)} at your current pace pushes the goal out further than ` +
-            `can be projected — it would stop moving meaningfully closer.`
-          : `At ${money(normalized.monthly_equivalent)} a month, ${noun} would absorb ` +
-            `everything currently being ${goalImpact.verb} — your goal would stop moving ` +
-            `closer at the current pace.`,
+        `${money(normalized.amount)} at the current pace pushes the goal out further than ` +
+        `can be projected — it would stop moving meaningfully closer.`,
     });
   } else if (goalImpact.available && goalImpact.delay_days >= MATERIAL_GOAL_DELAY_DAYS) {
     tradeoffs.push({
@@ -733,7 +773,7 @@ function buildTradeoffs({ normalized, cash, budgetImpact, goalImpact }) {
       severity: 'high',
       text:
         `You've already reached your ${money(goalImpact.target_amount)} target — this would put ` +
-        `you back under it, at ${money(goalImpact.net_saved_after)}.`,
+        `you back under it, at ${money(goalImpact.balance_after)}.`,
     });
   }
 
@@ -1099,38 +1139,38 @@ function findMaxComfortableAmount({ context, category = null, date = null, recur
   };
 }
 
-// Answers "given a real target amount, when would the user's own observed
-// saving rate reach it?" - reuses projectFinishDate (goalProgress.js)
-// verbatim rather than a second date-projection formula, and only ever
-// projects from data this app actually has: net-saved-since-goal and the
-// pace derived from it, the same numbers computeGoalImpact/
-// computeGoalProgress already use and the user already sees on the Goal
-// tab. targetAmount must be supplied by the caller (already validated
-// upstream, per Phase 9 Step 2's amount guardrail) - this function never
-// estimates it.
+// Answers "given a real target amount, when would each of the user's
+// goals - at its own real, reconstructed saving rate - reach it?" - reuses
+// projectFinishDate (goalProgress.js) verbatim rather than a second
+// date-projection formula. targetAmount must be supplied by the caller
+// (already validated upstream, per Phase 9 Step 2's amount guardrail) -
+// this function never estimates it.
 //
-// No goal set means no anchored, real observed-rate baseline exists
-// anywhere in this app - returning insufficient_data here is the honest
-// answer, not a reason to invent a since-date that was never asked for.
-function projectAffordableDate({ context, targetAmount }) {
-  if (typeof targetAmount !== 'number' || !Number.isFinite(targetAmount) || targetAmount <= 0) {
-    throw new ScenarioValidationError('targetAmount must be a finite number greater than zero');
-  }
-  const target = round2(targetAmount);
-  const { goal, goalCreatedAt, netSavedSinceGoal, now } = context;
+// Phase 42 (multi-goal tracking, 2026-09-08): a user can have several
+// goals now, each with its own real, reconstructed pace
+// (server/goalPace.js) - this is used by affordabilityChat.js's
+// `project_affordable_date` tool, which has no way to know which goal the
+// user means, so it answers for every active goal and lets the model
+// describe "for your car goal: around DATE; your other goal doesn't have
+// enough history yet" rather than guessing a single one. Per-goal shape
+// mirrors computeSingleGoalImpact's own structure for consistency.
+function projectAffordableDateForGoal({ goal, target, now }) {
+  const base = { goal_id: goal.id, goal_type: goal.goal_type, notes: goal.notes };
 
-  if (!goal) {
+  if (goal.no_accounts_linked) {
     return {
+      ...base,
       available: false,
-      reason: 'no_goal',
-      detail: 'No goal is set, so there is no observed saving rate to project from.',
+      reason: 'no_accounts_linked',
+      detail: `${goal.notes || goal.goal_type} has no linked accounts yet, so there's no real balance to project from.`,
     };
   }
 
-  const saved = round2(netSavedSinceGoal);
+  const saved = round2(goal.saved_amount);
 
   if (saved >= target) {
     return {
+      ...base,
       available: true,
       status: 'already_affordable',
       target_amount: target,
@@ -1139,25 +1179,22 @@ function projectAffordableDate({ context, targetAmount }) {
     };
   }
 
-  const daysElapsed = Math.max(1, Math.floor((now - goalCreatedAt) / MS_PER_DAY));
-  // Same guard computeGoalProgress uses before trusting a rate at all - a
-  // few early transactions shouldn't be enough to swing a projection.
-  if (daysElapsed < MIN_DAYS_FOR_PROJECTION || saved <= 0) {
+  if (goal.realized_pace.insufficient_history) {
     return {
+      ...base,
       available: false,
       reason: 'insufficient_history',
-      detail: 'Not enough observed saving history yet to project a rate.',
+      detail: 'Not enough real transaction history yet on this goal\'s linked account(s) to project a rate.',
     };
   }
 
-  const monthsElapsed = monthsBetween(goalCreatedAt, now);
-  const monthlyPace = saved / monthsElapsed; // > 0, guaranteed by the checks above
-
+  const monthlyPace = goal.realized_pace.monthly_pace;
   const projectedDate = projectFinishDate({ saved, target, monthlyPace, now });
   const projectedDateStr = toDateOnlyOrNull(projectedDate);
 
   if (!projectedDateStr) {
     return {
+      ...base,
       available: false,
       reason: 'no_projectable_date',
       detail: 'The observed saving rate does not support a realistic projected date for this amount.',
@@ -1165,6 +1202,7 @@ function projectAffordableDate({ context, targetAmount }) {
   }
 
   return {
+    ...base,
     available: true,
     status: 'projected',
     target_amount: target,
@@ -1175,6 +1213,26 @@ function projectAffordableDate({ context, targetAmount }) {
   };
 }
 
+function projectAffordableDate({ context, targetAmount }) {
+  if (typeof targetAmount !== 'number' || !Number.isFinite(targetAmount) || targetAmount <= 0) {
+    throw new ScenarioValidationError('targetAmount must be a finite number greater than zero');
+  }
+  const target = round2(targetAmount);
+  const goals = context.goals || [];
+
+  if (goals.length === 0) {
+    return {
+      available: false,
+      reason: 'no_goal',
+      detail: 'No goal is set, so there is no observed saving rate to project from.',
+      goals: [],
+    };
+  }
+
+  const perGoal = goals.map((goal) => projectAffordableDateForGoal({ goal, target, now: context.now }));
+  return { available: perGoal.some((g) => g.available), goals: perGoal };
+}
+
 // Phase 27 (Goal Calculator, 2026-08-25): the complementary direction to
 // server/goalProgress.js's computeGoalProjections. That answers "what pace
 // do I need to hit my target date" (deadline-driven); this answers "what
@@ -1182,14 +1240,19 @@ function projectAffordableDate({ context, targetAmount }) {
 // to that one direction per the phase brief's own resolved open question,
 // so this doesn't become a second, redundant way to ask the Goal
 // Projections card's own question. Reuses projectFinishDate/
-// toDateOnlyOrNull verbatim (same overflow/expanded-year guards
-// projectAffordableDate above already needs) rather than a third copy of
-// this formula - the hypothetical hasn't been observed, so there is no
-// analogous "not enough history yet" guard here (unlike
-// projectAffordableDate's daysElapsed/MIN_DAYS_FOR_PROJECTION check, which
-// exists to distrust a REALIZED pace built from too little data - a
+// toDateOnlyOrNull verbatim (same overflow/expanded-year guards this file's
+// other goal-date math already needs) rather than a third copy of this
+// formula - the hypothetical hasn't been observed, so there is no "not
+// enough history yet" guard here at all (unlike a realized-pace
+// projection, which has to distrust a rate built from too little data - a
 // hypothetical the user just typed in has no history to distrust).
-function calculateGoalPace({ context, hypotheticalMonthlyAmount }) {
+//
+// Phase 42 (multi-goal tracking, 2026-09-08): decoupled from the whole
+// scenario `context` - this never needed budgets/actuals/recurringSeries,
+// only one goal's current balance and target, so it now takes that one
+// goal's already-computed progress directly (the caller, POST
+// /goal/calculator, resolves which goal by id first - see index.js).
+function calculateGoalPace({ goalProgress, hypotheticalMonthlyAmount, now = new Date() }) {
   if (
     typeof hypotheticalMonthlyAmount !== 'number' ||
     !Number.isFinite(hypotheticalMonthlyAmount) ||
@@ -1197,9 +1260,8 @@ function calculateGoalPace({ context, hypotheticalMonthlyAmount }) {
   ) {
     throw new ScenarioValidationError('hypotheticalMonthlyAmount must be a finite number greater than zero');
   }
-  const { goal, netSavedSinceGoal, now } = context;
 
-  if (!goal || typeof goal.target_amount !== 'number' || goal.target_amount <= 0) {
+  if (!goalProgress || !goalProgress.has_target) {
     return {
       available: false,
       reason: 'no_target',
@@ -1207,8 +1269,8 @@ function calculateGoalPace({ context, hypotheticalMonthlyAmount }) {
     };
   }
 
-  const target = round2(goal.target_amount);
-  const saved = round2(netSavedSinceGoal);
+  const target = round2(goalProgress.target_amount);
+  const saved = round2(goalProgress.saved_amount);
 
   if (saved >= target) {
     return {
@@ -1247,24 +1309,37 @@ const MILESTONE_FRACTIONS = [0.25, 0.5, 0.75, 1];
 // Phase 28 (Savings Planner v1, 2026-08-25): computed checkpoints, not
 // persisted custom milestones - per the phase brief's own resolved open
 // question, no milestones table (or equivalent) exists anywhere in this
-// schema, and a computed version needs none. Each checkpoint is exactly
-// projectAffordableDate called at a fraction of the real target amount -
-// same realized-pace projection and the exact same guards (insufficient
-// history, no goal, already reached, unprojectable date) as the single-
-// target case above, run four times rather than a second formula. The
-// 100% checkpoint is deliberately identical in shape to what
-// projectAffordableDate({ targetAmount: goal.target_amount }) would return
-// on its own - no special-casing "the last milestone is really the goal
-// itself."
+// schema, and a computed version needs none.
+//
+// Phase 42 (multi-goal tracking, 2026-09-08) - REBUILT as hypothetical-
+// pace-driven, same direction as calculateGoalPace (Goal Calculator)
+// rather than a realized pace: this app has no per-account historical
+// balance data deep enough yet to trust a realized rate for every goal
+// (see goalPace.js's own header), and a Savings Planner that silently
+// refused half the time would be worse than one that's honestly framed as
+// "if you contributed $X/month" throughout - exactly as explicit, never
+// implying an observed fact. Each checkpoint reuses projectFinishDate
+// directly (the same formula calculateGoalPace already uses), not a
+// second formula. The 100% checkpoint is deliberately identical in shape
+// to what calculateGoalPace({ hypotheticalMonthlyAmount }) against the
+// real target would return on its own - no special-casing "the last
+// milestone is really the goal itself."
 //
 // Each milestone carries its OWN `available` (did this specific
 // checkpoint's projection succeed) - separate in meaning from this
 // function's own top-level `available` (was there a goal/target at all to
 // compute checkpoints against). A caller reading milestones[i].available
 // is asking a different question than reading the wrapper's.
-function computeGoalMilestones({ context }) {
-  const { goal } = context;
-  if (!goal || typeof goal.target_amount !== 'number' || goal.target_amount <= 0) {
+function computeGoalMilestones({ goalProgress, hypotheticalMonthlyAmount, now = new Date() }) {
+  if (
+    typeof hypotheticalMonthlyAmount !== 'number' ||
+    !Number.isFinite(hypotheticalMonthlyAmount) ||
+    hypotheticalMonthlyAmount <= 0
+  ) {
+    throw new ScenarioValidationError('hypotheticalMonthlyAmount must be a finite number greater than zero');
+  }
+
+  if (!goalProgress || !goalProgress.has_target) {
     return {
       available: false,
       reason: 'no_target',
@@ -1272,16 +1347,15 @@ function computeGoalMilestones({ context }) {
     };
   }
 
-  const target = round2(goal.target_amount);
+  const target = round2(goalProgress.target_amount);
+  const saved = round2(goalProgress.saved_amount);
   const milestones = MILESTONE_FRACTIONS.map((fraction) => {
     const amount = round2(target * fraction);
     const percent = Math.round(fraction * 100);
+
     // A fractional checkpoint of a very small target can round to zero
-    // (e.g. 25% of a $0.02 target) - projectAffordableDate's own
-    // ScenarioValidationError guard would throw on a non-positive
-    // targetAmount, which is correct for a caller-supplied target but
-    // wrong here (this is an internal computation, not bad user input) -
-    // handled explicitly rather than letting it throw through .map().
+    // (e.g. 25% of a $0.02 target) - handled explicitly, not thrown, since
+    // this is an internal computation, not bad caller input.
     if (amount <= 0) {
       return {
         percent,
@@ -1291,10 +1365,42 @@ function computeGoalMilestones({ context }) {
         detail: 'This checkpoint rounds to zero for a target this small.',
       };
     }
-    return { percent, amount, ...projectAffordableDate({ context, targetAmount: amount }) };
+
+    if (saved >= amount) {
+      return {
+        percent,
+        amount,
+        available: true,
+        status: 'already_reached',
+        saved_amount: saved,
+        detail: 'This checkpoint has already been reached.',
+      };
+    }
+
+    const projectedDate = projectFinishDate({ saved, target: amount, monthlyPace: hypotheticalMonthlyAmount, now });
+    const projectedDateStr = toDateOnlyOrNull(projectedDate);
+    if (!projectedDateStr) {
+      return {
+        percent,
+        amount,
+        available: false,
+        reason: 'no_projectable_date',
+        detail: 'This hypothetical amount does not support a realistic projected date.',
+      };
+    }
+
+    return {
+      percent,
+      amount,
+      available: true,
+      status: 'projected',
+      saved_amount: saved,
+      projected_date: projectedDateStr,
+      days_from_now: daysBetween(toDateOnly(now), projectedDateStr),
+    };
   });
 
-  return { available: true, target_amount: target, milestones };
+  return { available: true, target_amount: target, hypothetical_monthly_amount: round2(hypotheticalMonthlyAmount), milestones };
 }
 
 module.exports = {

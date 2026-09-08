@@ -1,6 +1,6 @@
 const supabaseAdmin = require('./supabaseAdmin');
 const { monthRange, computeBudgetStatus } = require('./budget');
-const { getGoalProgress } = require('./goalProgress');
+const { getGoalsProgress } = require('./goalProgress');
 
 function round2(n) {
   return Math.round(n * 100) / 100;
@@ -9,14 +9,19 @@ function round2(n) {
 // Pure, no I/O - same discipline as every other compute function in this
 // codebase. Takes two already-fetched periods (each in computeBudgetStatus's
 // own `{ period_start, period_end, status, income }` shape, `status` sorted
-// by category) plus the account's current goal-progress object (reused
+// by category) plus the account's current goals-progress array (reused
 // as-is, not retroactively recomputed as of the reviewed period - this app
 // has no stored historical pace snapshot to recompute against, and
 // inventing one would be new scope this phase doesn't ask for), and returns
 // one period's review. `prior` is optional - the very first reviewable
 // period in an account's history has nothing to diff against, and that's a
 // real state to report honestly, not an error.
-function computeMonthlyReview({ period, prior, goalProgress }) {
+//
+// Phase 42 (multi-goal tracking, 2026-09-08): a user can have several
+// active goals now - `goal_pace` (one goal's on_pace/message, a concept
+// that no longer exists under the balance model) is replaced by `goals`, a
+// lightweight per-goal summary list.
+function computeMonthlyReview({ period, prior, goals }) {
   const spend = round2(period.status.reduce((sum, s) => sum + s.actual, 0));
   const income = round2(period.income);
   const saved = round2(income - spend);
@@ -56,7 +61,15 @@ function computeMonthlyReview({ period, prior, goalProgress }) {
     saved,
     biggest_move: biggestMove,
     note,
-    goal_pace: goalProgress ? { on_pace: goalProgress.on_pace ?? null, message: goalProgress.message } : null,
+    goals: (goals || []).map((g) => ({
+      id: g.id,
+      goal_type: g.goal_type,
+      notes: g.notes,
+      percent_complete: g.percent_complete,
+      saved_amount: g.saved_amount,
+      target_amount: g.target_amount,
+      message: g.message,
+    })),
     // Direct user request: Home's Monthly Review card should open into "a
     // larger window with more details" - this was already computed by
     // getPeriodReview below (via computeBudgetStatus) but silently
@@ -118,15 +131,15 @@ async function getMonthlyReview(userId, monthsAgo = 1) {
   const { period_start, period_end } = monthRange(monthsAgo);
   const priorRange = monthRange(monthsAgo + 1);
 
-  const [period, prior, goalProgress] = await Promise.all([
+  const [period, prior, goals] = await Promise.all([
     getPeriodReview(userId, period_start, period_end),
     getPeriodReview(userId, priorRange.period_start, priorRange.period_end),
-    getGoalProgress(userId),
+    getGoalsProgress(userId),
   ]);
 
   if (!period) return null;
 
-  return computeMonthlyReview({ period, prior, goalProgress });
+  return computeMonthlyReview({ period, prior, goals });
 }
 
 module.exports = {

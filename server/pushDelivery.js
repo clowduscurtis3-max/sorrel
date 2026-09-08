@@ -2,7 +2,7 @@ const supabaseAdmin = require('./supabaseAdmin');
 const { recomputeOverspendAlerts } = require('./alerts');
 const { recomputeNotificationEvents } = require('./notificationEvents');
 const { recomputeSubscriptionAuditEvents } = require('./subscriptionAuditEvents');
-const { getGoalProgress } = require('./goalProgress');
+const { getGoalBalanceProgressById } = require('./goalProgress');
 const { logError } = require('./safeLog');
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
@@ -147,9 +147,13 @@ async function deliverPendingEventsForUserUnlocked(userId, now = new Date()) {
     // the freshest message directly here instead of trusting whatever
     // number was true when it was originally queued.
     let body = event.body;
-    if (event.event_type === 'goal_milestone') {
+    // Phase 42: goal_id now lives in the event's own data payload (see
+    // notificationEvents.js's reconcileGoalMilestoneEvents) - a user can
+    // have several goals now, so refreshing "the" goal without knowing
+    // which one would silently refresh the wrong goal's message.
+    if (event.event_type === 'goal_milestone' && event.data?.goal_id) {
       try {
-        const progress = await getGoalProgress(userId);
+        const progress = await getGoalBalanceProgressById(userId, event.data.goal_id);
         if (progress?.message) body = progress.message;
       } catch (err) {
         logError('Failed to refresh goal progress before delivery (non-fatal, using queued snapshot):', err);

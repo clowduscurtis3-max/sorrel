@@ -2,6 +2,7 @@ const supabaseAdmin = require('./supabaseAdmin');
 const { SPEND_CATEGORIES, ESSENTIAL_CATEGORIES } = require('./categorize');
 const { HISTORY_DAYS } = require('./budget');
 const { computeBalanceProgress } = require('./balanceProgress');
+const { validateOwnedAccountIds } = require('./accountOwnership');
 
 // Foundation step for the emergency-fund recommendation investigated
 // 2026-08-20 (see CLAUDE.md's "Emergency fund recommendation —
@@ -177,26 +178,12 @@ async function getEmergencyFundStatus(userId) {
 }
 
 // Validates account_ids actually belong to this user before persisting -
-// a real security boundary, not just data hygiene: without this check, a
-// malicious/buggy client could reference another user's account row id
-// and this table would silently accept it, since account_ids is a plain
-// array column with no DB-level foreign-key/ownership constraint of its
-// own (a uuid[] can't carry a per-element FK in Postgres).
+// a real security boundary, not just data hygiene (see
+// accountOwnership.js's own header for the full "why"). Extracted there
+// (Phase 42) since goal saves need the identical check now too.
 async function setEmergencyFundConfig(userId, { enabled, targetAmount, accountIds }) {
   const ids = accountIds || [];
-  if (ids.length > 0) {
-    const { data: owned, error } = await supabaseAdmin
-      .from('accounts')
-      .select('id')
-      .eq('user_id', userId)
-      .in('id', ids);
-    if (error) throw error;
-    const ownedIds = new Set((owned || []).map((a) => a.id));
-    const notOwned = ids.filter((id) => !ownedIds.has(id));
-    if (notOwned.length > 0) {
-      throw new Error('One or more selected accounts do not belong to this user');
-    }
-  }
+  await validateOwnedAccountIds(userId, ids);
 
   const { error } = await supabaseAdmin.from('emergency_funds').upsert(
     {

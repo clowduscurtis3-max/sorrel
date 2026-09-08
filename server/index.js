@@ -42,7 +42,8 @@ const { getTransactionsCsv, getBudgetHistoryCsv, getNetWorthCsv } = require('./c
 const { getMonthlyReview } = require('./monthlyReview');
 const { detectRecurringTransactions, INTERVALS } = require('./recurring');
 const { recomputeOverspendAlerts } = require('./alerts');
-const { getGoalProgress } = require('./goalProgress');
+const { getGoalsProgress, getGoalBalanceProgressById } = require('./goalProgress');
+const { validateOwnedAccountIds } = require('./accountOwnership');
 const { getSubscriptionAudit } = require('./subscriptionAudit');
 const { refreshAccountBalances, getAccountsSummary } = require('./accounts');
 const {
@@ -680,19 +681,34 @@ const GOAL_TYPES = [
   'savings',
 ];
 
+// Phase 42 (multi-goal tracking, 2026-09-08): user_goals moved from one
+// row per user to N. GET /goal now returns every active (not archived)
+// goal - an empty array, not a 404, when the user has none, since "no
+// goals yet" is a normal list state, not an error. _layout.js's cold-
+// launch gate reads this shape directly (see its own Phase 42 update).
 app.get('/goal', requireUser, async (req, res) => {
   const { data, error } = await supabaseAdmin
     .from('user_goals')
-    .select('goal_type, target_amount, target_timeframe_months, notes')
+    .select('id, goal_type, target_amount, target_timeframe_months, notes, account_ids, created_at')
     .eq('user_id', req.userId)
-    .single();
+    .is('archived_at', null)
+    .order('created_at', { ascending: true });
 
-  if (error || !data) return res.status(404).json({ error: 'No goal set' });
-  res.json(data);
+  if (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Failed to load goals' });
+  }
+  res.json({ goals: data || [] });
 });
 
+// Optional `id`: present = update that goal (ownership-checked below via
+// the .eq('user_id', ...) on the upsert's own row match - a goal id from
+// another user simply matches zero rows rather than being editable, same
+// discipline as every other by-id update in this app), absent = create a
+// new goal. account_ids validated the same way emergency_funds' own
+// account_ids already are (accountOwnership.js, shared - Phase 42).
 app.post('/goal', requireUser, async (req, res) => {
-  const { goal_type, target_amount, target_timeframe_months, notes } = req.body;
+  const { id, goal_type, target_amount, target_timeframe_months, notes, account_ids } = req.body;
   if (goal_type && !GOAL_TYPES.includes(goal_type)) {
     return res.status(400).json({ error: `goal_type must be one of: ${GOAL_TYPES.join(', ')}` });
   }
@@ -708,20 +724,50 @@ app.post('/goal', requireUser, async (req, res) => {
   ) {
     return res.status(400).json({ error: 'target_timeframe_months must be a positive whole number' });
   }
+  if (account_ids != null && !Array.isArray(account_ids)) {
+    return res.status(400).json({ error: 'account_ids must be an array' });
+  }
 
   try {
-    const { error } = await supabaseAdmin.from('user_goals').upsert(
-      {
-        user_id: req.userId,
-        goal_type: goal_type || 'savings',
-        target_amount: target_amount ?? null,
-        target_timeframe_months: target_timeframe_months ?? null,
-        notes: notes ?? null,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'user_id' }
-    );
-    if (error) throw error;
+    await validateOwnedAccountIds(req.userId, account_ids);
+
+    const row = {
+      user_id: req.userId,
+      goal_type: goal_type || 'savings',
+      target_amount: target_amount ?? null,
+      target_timeframe_months: target_timeframe_months ?? null,
+      notes: notes ?? null,
+      account_ids: account_ids ?? [],
+      // Found by code review: an edit must un-archive - without this, an
+      // archived goal edited by id (e.g. a future "restore" UI flow reusing
+      // this same save path) kept its old archived_at, so the "successful"
+      // edit stayed invisible to GET /goal and getGoalsProgress with no
+      // error surfaced anywhere.
+      archived_at: null,
+      updated_at: new Date().toISOString(),
+    };
+
+    let goalId = id;
+    if (id) {
+      const { data: updated, error } = await supabaseAdmin
+        .from('user_goals')
+        .update(row)
+        .eq('id', id)
+        .eq('user_id', req.userId)
+        .select('id')
+        .maybeSingle();
+      if (error) throw error;
+      if (!updated) return res.status(404).json({ error: 'Goal not found' });
+    } else {
+      const { data: inserted, error } = await supabaseAdmin
+        .from('user_goals')
+        .insert(row)
+        .select('id')
+        .single();
+      if (error) throw error;
+      goalId = inserted.id;
+    }
+
     // Best-effort: a changed target/type can immediately cross (or
     // invalidate) a goal milestone - see the targetSignature logic in
     // server/notificationEvents.js - so this shouldn't wait for the next
@@ -731,24 +777,49 @@ app.post('/goal', requireUser, async (req, res) => {
     } catch (err) {
       logError('Failed to recompute notification events after goal save (non-fatal):', err);
     }
-    res.json({ success: true });
+    res.json({ success: true, id: goalId });
   } catch (err) {
+    if (err.message && err.message.includes('do not belong to this user')) {
+      return res.status(400).json({ error: err.message });
+    }
     console.error(err);
     res.status(500).json({ error: 'Failed to save goal' });
   }
 });
 
+// Soft-complete/retire a goal, per this app's existing propose-don't-
+// destroy discipline elsewhere (matches the account-deletion typed-
+// confirmation precedent's spirit, just lower-stakes). Preserves
+// notification_events/recommendation_events history for this goal rather
+// than deleting it outright.
+app.post('/goal/:id/archive', requireUser, async (req, res) => {
+  try {
+    const { data: updated, error } = await supabaseAdmin
+      .from('user_goals')
+      .update({ archived_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', req.params.id)
+      .eq('user_id', req.userId)
+      .select('id')
+      .maybeSingle();
+    if (error) throw error;
+    if (!updated) return res.status(404).json({ error: 'Goal not found' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to archive goal' });
+  }
+});
+
 // Phase 3 Step 6: goal progress. Stateless read, computed fresh on every
-// call (see getGoalProgress in server/goalProgress.js) rather than
-// persisted like budget_alerts - it's a cheap single query (transactions
-// since the goal was set) and doesn't need to survive until the app is
-// next opened, unlike an alert that has to be caught by a background sync.
+// call (see getGoalsProgress in server/goalProgress.js) rather than
+// persisted like budget_alerts - cheap enough (goals + accounts, no
+// transaction scan anymore under the balance model) and doesn't need to
+// survive until the app is next opened. Phase 42: returns every active
+// goal's progress, not one.
 app.get('/goal/progress', requireUser, async (req, res) => {
   try {
-    const progress = await getGoalProgress(req.userId);
-    if (!progress) return res.status(404).json({ error: 'No goal set' });
-
-    res.json({ progress });
+    const goals = await getGoalsProgress(req.userId);
+    res.json({ goals });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load goal progress' });
@@ -804,8 +875,18 @@ app.post('/emergency-fund', requireUser, async (req, res) => {
 // calculateGoalPace (server/scenario.js) rather than a client-side copy of
 // projectFinishDate's formula, so this can never quietly disagree with the
 // Goal Projections card's own deadline-driven math.
+//
+// Phase 42 (multi-goal tracking, 2026-09-08): a user can have several
+// goals now - `goal_id` is required so this always answers about a real,
+// specific goal, never an ambiguous "the" one. Fetches just that one
+// goal's progress (getGoalBalanceProgressById) instead of the whole
+// scenario context (budgets/actuals/recurringSeries), which this
+// calculation never needed in the first place.
 app.post('/goal/calculator', requireUser, async (req, res) => {
-  const { hypothetical_monthly_amount } = req.body || {};
+  const { goal_id, hypothetical_monthly_amount } = req.body || {};
+  if (typeof goal_id !== 'string' || !goal_id) {
+    return res.status(400).json({ error: 'goal_id is required' });
+  }
   if (
     typeof hypothetical_monthly_amount !== 'number' ||
     !Number.isFinite(hypothetical_monthly_amount) ||
@@ -814,8 +895,9 @@ app.post('/goal/calculator', requireUser, async (req, res) => {
     return res.status(400).json({ error: 'hypothetical_monthly_amount must be a finite number greater than zero' });
   }
   try {
-    const context = await loadScenarioContext(req.userId);
-    const result = calculateGoalPace({ context, hypotheticalMonthlyAmount: hypothetical_monthly_amount });
+    const goalProgress = await getGoalBalanceProgressById(req.userId, goal_id);
+    if (!goalProgress) return res.status(404).json({ error: 'Goal not found' });
+    const result = calculateGoalPace({ goalProgress, hypotheticalMonthlyAmount: hypothetical_monthly_amount });
     res.json({ result });
   } catch (err) {
     console.error(err);
@@ -824,14 +906,27 @@ app.post('/goal/calculator', requireUser, async (req, res) => {
 });
 
 // Phase 28 (Savings Planner v1, 2026-08-25): computed checkpoints (25/50/
-// 75/100% of the real target), each projected via the same realized-pace
-// math projectAffordableDate already uses - stateless read, no new schema
-// (see the phase brief's own resolved open question on persisted custom
-// milestones, deferred).
-app.get('/goal/milestones', requireUser, async (req, res) => {
+// 75/100% of the real target). Phase 42 (2026-09-08): rebuilt as
+// hypothetical-pace-driven (see computeGoalMilestones's own header for the
+// full "why") - now takes the same `goal_id`/`hypothetical_monthly_amount`
+// pair the Goal Calculator does, and is a POST (not GET) since it now
+// takes real input, not just a stateless read of "the" goal.
+app.post('/goal/milestones', requireUser, async (req, res) => {
+  const { goal_id, hypothetical_monthly_amount } = req.body || {};
+  if (typeof goal_id !== 'string' || !goal_id) {
+    return res.status(400).json({ error: 'goal_id is required' });
+  }
+  if (
+    typeof hypothetical_monthly_amount !== 'number' ||
+    !Number.isFinite(hypothetical_monthly_amount) ||
+    hypothetical_monthly_amount <= 0
+  ) {
+    return res.status(400).json({ error: 'hypothetical_monthly_amount must be a finite number greater than zero' });
+  }
   try {
-    const context = await loadScenarioContext(req.userId);
-    const result = computeGoalMilestones({ context });
+    const goalProgress = await getGoalBalanceProgressById(req.userId, goal_id);
+    if (!goalProgress) return res.status(404).json({ error: 'Goal not found' });
+    const result = computeGoalMilestones({ goalProgress, hypotheticalMonthlyAmount: hypothetical_monthly_amount });
     res.json({ result });
   } catch (err) {
     console.error(err);

@@ -16,8 +16,14 @@ import PrimaryButton from './_components/PrimaryButton';
 // - same dual purpose the old branch always had, just as its own route.
 export default function GoalIntake() {
   const router = useRouter();
-  const { goal } = useSessionContext();
-  const form = useGoalForm(goal, { onSaved: () => router.replace('/') });
+  // Phase 42 (multi-goal tracking, 2026-09-08): this screen is only ever
+  // reached via the root gate when `goals.length === 0` (see
+  // requiredRoute in _layout.js) - there is never an existing goal to
+  // prefill here, so useGoalForm always gets `null` (add mode), not the
+  // `goals` array itself.
+  const { goals } = useSessionContext();
+  const hasExistingGoal = goals && goals.length > 0;
+  const form = useGoalForm(null, { onSaved: () => router.replace('/') });
 
   // Atmospheric backdrop (2026-08-31, direct user request) - the first
   // real "welcome" moment after account creation, matching the warm
@@ -44,7 +50,7 @@ export default function GoalIntake() {
           `!form.saving` too, so neither is tappable mid-save. */}
       <View style={styles.topBar}>
         <View>
-          {goal && !form.saving && (
+          {hasExistingGoal && !form.saving && (
             <Pressable onPress={() => router.replace('/')} accessibilityRole="button" hitSlop={8}>
               <Text style={[intakeStyles.cornerLink, onBackdropTextColor && { color: onBackdropTextColor }]}>
                 Cancel
@@ -53,7 +59,7 @@ export default function GoalIntake() {
           )}
         </View>
         <View>
-          {!goal && !form.saving && (
+          {!hasExistingGoal && !form.saving && (
             <Pressable onPress={form.skip} accessibilityRole="button" hitSlop={8}>
               <Text style={[intakeStyles.cornerLink, onBackdropTextColor && { color: onBackdropTextColor }]}>
                 Skip

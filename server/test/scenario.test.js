@@ -43,6 +43,35 @@ const RENT = {
   next_expected_date: '2026-08-24',
 };
 
+// Phase 42 (multi-goal tracking, 2026-09-08): context.goals is now an
+// array of already-computed balance-tracked progress entries (the same
+// shape getGoalsProgress/scenarioContext.js produce), each carrying a
+// `realized_pace` reconstructed from real transaction history
+// (server/goalPace.js) instead of the old net-cash-flow model's
+// netSavedSinceGoal/goalCreatedAt pair. ~510.89/month mirrors the old
+// fixture's own implied pace ($1,200 saved over the same ~2.35 real
+// months this file's NOW/created_at always used), so every dollar/day
+// assertion below still means the same thing it always did.
+function goalFixture(overrides = {}) {
+  return {
+    id: 'goal-1',
+    goal_type: 'savings',
+    notes: null,
+    verb: 'saved',
+    has_target: true,
+    saved_amount: 1200,
+    target_amount: 10000,
+    percent_complete: 12,
+    account_ids: ['acc-1'],
+    missing_account_ids: [],
+    no_accounts_linked: false,
+    projections: null,
+    message: '',
+    realized_pace: { insufficient_history: false, monthly_pace: 510.89 },
+    ...overrides,
+  };
+}
+
 function baseContext(overrides = {}) {
   const budgets = overrides.budgets || [
     { category: 'Dining', budgeted_amount: 300, reasoning: 'Based on recent spend.' },
@@ -66,17 +95,7 @@ function baseContext(overrides = {}) {
     actuals,
     budgetStatus: computeBudgetStatus({ budgets, actuals }),
     recurringSeries: overrides.recurringSeries || [PAYCHECK, RENT],
-    goal:
-      overrides.goal === undefined
-        ? {
-            goal_type: 'savings',
-            target_amount: 10000,
-            target_timeframe_months: 12,
-            created_at: '2026-06-01T00:00:00Z',
-          }
-        : overrides.goal,
-    goalCreatedAt: overrides.goalCreatedAt === undefined ? new Date('2026-06-01T00:00:00Z') : overrides.goalCreatedAt,
-    netSavedSinceGoal: overrides.netSavedSinceGoal === undefined ? 1200 : overrides.netSavedSinceGoal,
+    goals: overrides.goals === undefined ? [goalFixture()] : overrides.goals,
   };
 }
 
@@ -213,11 +232,10 @@ test('a one-time purchase delays the goal by roughly amount / monthly pace', () 
   const goal = result.goal_impact;
   assert.equal(goal.available, true);
 
-  // $1,200 saved over ~2.33 months is ~$514/month. $500 at that pace is
-  // just under a month of delay - and critically NOT the much larger number
-  // that re-deriving the pace from the reduced balance would produce.
-  assert.ok(goal.monthly_pace_before > 500 && goal.monthly_pace_before < 530);
-  assert.equal(goal.monthly_pace_after, goal.monthly_pace_before);
+  // $500 against a ~$510.89/month realized pace is just under a month of
+  // delay - and critically NOT the much larger number that re-deriving the
+  // pace from the reduced balance would produce.
+  assert.equal(goal.monthly_pace, 510.89);
   assert.ok(
     goal.delay_days >= 27 && goal.delay_days <= 32,
     `expected ~29 days of delay, got ${goal.delay_days}`
@@ -235,45 +253,24 @@ test('a trivial purchase barely moves the goal date', () => {
   assert.equal(result.status, 'comfortable');
 });
 
-test('a recurring commitment cuts the savings pace rather than the balance', () => {
+test('a recurring commitment never claims a realized-pace goal impact - the funding account is not knowable', () => {
   const result = evaluateScenario({
     context: baseContext(),
     scenario: { amount: 100, category: 'Subscriptions', recurrence: 'monthly' },
   });
 
   const goal = result.goal_impact;
-  assert.equal(goal.net_saved_after, goal.net_saved_before); // balance untouched
-  assert.ok(
-    Math.abs(goal.monthly_pace_after - (goal.monthly_pace_before - 100)) < 0.01,
-    `pace should drop by the monthly equivalent, got ${goal.monthly_pace_after}`
-  );
-  assert.ok(goal.delay_days > 0);
+  assert.equal(goal.available, false);
+  assert.equal(goal.reason, 'recurring_no_realized_pace');
+  assert.equal(goal.balance_before, undefined);
+  assert.equal(goal.delay_days, undefined);
   assert.ok(result.tradeoffs.some((t) => t.kind === 'recurring'));
-});
-
-test('a recurring commitment larger than the savings pace stalls the goal honestly', () => {
-  const result = evaluateScenario({
-    context: baseContext(),
-    scenario: { amount: 900, category: 'Subscriptions', recurrence: 'monthly' },
-  });
-
-  const goal = result.goal_impact;
-  // No fabricated finish date when nothing is being saved any more.
-  assert.equal(goal.stalls_goal, true);
-  assert.equal(goal.projected_date_after, null);
-  assert.equal(goal.delay_days, null);
-  assert.equal(result.status, 'affordable_with_tradeoff');
-  assert.ok(result.tradeoffs.some((t) => t.kind === 'goal' && t.severity === 'high'));
+  assert.ok(!result.tradeoffs.some((t) => t.kind === 'goal'));
 });
 
 test('a debt goal says "freed up" and never claims debt was repaid', () => {
   const context = baseContext({
-    goal: {
-      goal_type: 'debt',
-      target_amount: 10000,
-      target_timeframe_months: 12,
-      created_at: '2026-06-01T00:00:00Z',
-    },
+    goals: [goalFixture({ goal_type: 'debt', verb: 'freed up' })],
   });
   const result = evaluateScenario({ context, scenario: { amount: 200, category: 'Shopping' } });
 
@@ -284,29 +281,40 @@ test('a debt goal says "freed up" and never claims debt was repaid', () => {
 
 test('a goal with no dollar target falls back to the smarter-spending framing', () => {
   const context = baseContext({
-    goal: { goal_type: 'general', target_amount: null, target_timeframe_months: null, created_at: '2026-06-01T00:00:00Z' },
+    goals: [goalFixture({ has_target: false, target_amount: null, saved_amount: 1000, percent_complete: null })],
   });
   const result = evaluateScenario({ context, scenario: { amount: 200, category: 'Shopping' } });
 
   assert.equal(result.goal_impact.available, false);
   assert.equal(result.goal_impact.reason, 'no_target');
-  assert.equal(result.goal_impact.net_saved_after, 1000);
+  assert.equal(result.goal_impact.balance_after, 800);
   assert.ok(result.limitations.some((l) => /Goal impact isn't included/.test(l)));
 });
 
-test('a brand-new goal has no pace to project from and says so', () => {
+test('a goal whose linked accounts don\'t clear the realized-pace history gate says so honestly', () => {
   const context = baseContext({
-    goalCreatedAt: new Date('2026-08-09T00:00:00Z'), // 2 days old, under the 7-day gate
-    netSavedSinceGoal: 40,
+    goals: [goalFixture({ realized_pace: { insufficient_history: true, days_of_history: 3 } })],
   });
   const result = evaluateScenario({ context, scenario: { amount: 200, category: 'Shopping' } });
 
   assert.equal(result.goal_impact.available, false);
-  assert.equal(result.goal_impact.reason, 'no_projection_yet');
+  assert.equal(result.goal_impact.reason, 'insufficient_history');
 });
 
-test('a goal with no savings yet does not produce a projection', () => {
-  const context = baseContext({ netSavedSinceGoal: -300 });
+test('a goal with no linked accounts at all is reported as such, not silently dropped', () => {
+  const context = baseContext({
+    goals: [goalFixture({ no_accounts_linked: true, account_ids: [] })],
+  });
+  const result = evaluateScenario({ context, scenario: { amount: 100, category: 'Dining' } });
+
+  assert.equal(result.goal_impact.available, false);
+  assert.equal(result.goal_impact.reason, 'no_accounts_linked');
+});
+
+test('a draining account (negative realized pace) does not produce a fabricated projection', () => {
+  const context = baseContext({
+    goals: [goalFixture({ realized_pace: { insufficient_history: false, monthly_pace: -50 } })],
+  });
   const result = evaluateScenario({ context, scenario: { amount: 100, category: 'Dining' } });
 
   assert.equal(result.goal_impact.available, false);
@@ -322,9 +330,7 @@ test('no budget, no goal and no recurring data collapses to insufficient_data', 
     budgets: [],
     actuals: [],
     recurringSeries: [],
-    goal: null,
-    goalCreatedAt: null,
-    netSavedSinceGoal: null,
+    goals: [],
   });
   const result = evaluateScenario({ context, scenario: { amount: 1500 } });
 
