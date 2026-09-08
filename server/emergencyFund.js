@@ -1,6 +1,7 @@
 const supabaseAdmin = require('./supabaseAdmin');
 const { SPEND_CATEGORIES, ESSENTIAL_CATEGORIES } = require('./categorize');
 const { HISTORY_DAYS } = require('./budget');
+const { computeBalanceProgress } = require('./balanceProgress');
 
 // Foundation step for the emergency-fund recommendation investigated
 // 2026-08-20 (see CLAUDE.md's "Emergency fund recommendation —
@@ -132,44 +133,23 @@ function round2(n) {
   return Math.round(n * 100) / 100;
 }
 
-// Pure, no I/O - same isolation style as every other compute function in
-// this app. Sums the current balance (available_balance ?? current_balance,
-// same fallback Home's own bank-total math already uses) of whichever
-// selected accounts still exist - a selected account that's since been
-// unlinked/removed is silently excluded from the sum (not an error, not
-// treated as $0 "missing" money) but its id is still reported back via
-// `missing_account_ids` so the UI can tell the user honestly rather than
-// just quietly under-counting.
+// Thin wrapper, same isolation style as every other compute function in
+// this app. The actual "sum selected account balances toward a target"
+// math now lives in computeBalanceProgress (server/balanceProgress.js,
+// extracted Phase 42, 2026-09-08) so goal progress can reuse it verbatim -
+// this function's only remaining job is the enabled/disabled gate, which
+// is specific to a toggleable tracker and doesn't generalize to a goal
+// (a goal exists or is archived, it has no on/off switch).
 function computeEmergencyFundProgress({ config, accounts }) {
   if (!config || !config.enabled) {
     return { enabled: false };
   }
 
-  const accountsById = new Map((accounts || []).map((a) => [a.id, a]));
-  const selectedIds = config.account_ids || [];
-  const missingAccountIds = selectedIds.filter((id) => !accountsById.has(id));
-  const currentAmount = round2(
-    selectedIds.reduce((sum, id) => {
-      const a = accountsById.get(id);
-      if (!a) return sum;
-      const balance = a.available_balance ?? a.current_balance;
-      return sum + (Number.isFinite(balance) ? balance : 0);
-    }, 0)
-  );
-
-  const hasTarget = Number.isFinite(config.target_amount) && config.target_amount > 0;
-  const percentComplete = hasTarget
-    ? round2(Math.min(100, Math.max(0, (currentAmount / config.target_amount) * 100)))
-    : null;
-
-  return {
-    enabled: true,
-    target_amount: hasTarget ? config.target_amount : null,
-    current_amount: currentAmount,
-    percent_complete: percentComplete,
-    account_ids: selectedIds,
-    missing_account_ids: missingAccountIds,
-  };
+  return { enabled: true, ...computeBalanceProgress({
+    targetAmount: config.target_amount,
+    accountIds: config.account_ids,
+    accounts,
+  }) };
 }
 
 // DB-touching wrapper - all I/O lives here, no business logic. Returns the

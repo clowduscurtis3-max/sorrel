@@ -45,7 +45,13 @@ const { recomputeOverspendAlerts } = require('./alerts');
 const { getGoalProgress } = require('./goalProgress');
 const { getSubscriptionAudit } = require('./subscriptionAudit');
 const { refreshAccountBalances, getAccountsSummary } = require('./accounts');
-const { generateNetWorthSnapshot, getNetWorthSummary } = require('./netWorth');
+const {
+  generateNetWorthSnapshot,
+  generateAccountBalanceSnapshots,
+  getEligibleAccountsForUser,
+  getUserTimezone,
+  getNetWorthSummary,
+} = require('./netWorth');
 const { recomputeNotificationEvents } = require('./notificationEvents');
 const { recomputeSubscriptionAuditEvents } = require('./subscriptionAuditEvents');
 const { getEmergencyFundStatus, setEmergencyFundConfig } = require('./emergencyFund');
@@ -913,6 +919,18 @@ app.post('/admin/generate-net-worth-snapshot', requireUser, async (req, res) => 
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to generate net worth snapshot' });
+  }
+});
+
+// Phase 42: same manual-trigger purpose as the route just above, for the
+// new per-account daily balance history.
+app.post('/admin/generate-account-balance-snapshots', requireUser, async (req, res) => {
+  try {
+    const result = await generateAccountBalanceSnapshots(req.userId);
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to generate account balance snapshots' });
   }
 });
 
@@ -3750,10 +3768,40 @@ async function runNetWorthSnapshots() {
   }
 
   for (const [userId, activeItemIds] of itemIdsByUser) {
+    // Found by code review (Phase 42): generateNetWorthSnapshot and
+    // generateAccountBalanceSnapshots each independently re-fetched
+    // `accounts` and the notification_preferences timezone for the same
+    // user in the same tick once both started running back-to-back here -
+    // the exact same redundant-query pattern already fixed once for
+    // plaid_items via `activeItemIds` above. Prefetched once and shared
+    // via each function's optional `precomputed` param; single-user
+    // callers (the /admin/* routes) don't pass this and keep doing their
+    // own independent lookup, unaffected.
+    let precomputed;
     try {
-      await generateNetWorthSnapshot(userId, new Date(), activeItemIds);
+      const [accounts, timezone] = await Promise.all([
+        getEligibleAccountsForUser(userId, activeItemIds),
+        getUserTimezone(userId),
+      ]);
+      precomputed = { accounts, timezone };
+    } catch (err) {
+      logError(`Failed to prefetch accounts/timezone for user ${userId} (net worth/balance snapshots skipped this tick):`, err);
+      continue;
+    }
+
+    try {
+      await generateNetWorthSnapshot(userId, new Date(), activeItemIds, precomputed);
     } catch (err) {
       logError(`Net worth snapshot failed for user ${userId}:`, err);
+    }
+    // Phase 42: per-account daily balance history, same batch/failure-
+    // isolation discipline as the net worth snapshot just above - a
+    // failure here doesn't roll back or skip the net worth write, and
+    // doesn't stop the rest of the user batch either.
+    try {
+      await generateAccountBalanceSnapshots(userId, new Date(), activeItemIds, precomputed);
+    } catch (err) {
+      logError(`Account balance snapshot failed for user ${userId}:`, err);
     }
   }
 }

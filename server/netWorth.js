@@ -166,12 +166,38 @@ async function getEligibleAccountsForUser(userId, activeItemIds) {
 
   const { data: accounts, error: accountsError } = await supabaseAdmin
     .from('accounts')
-    .select('type, current_balance, available_balance, persistent_account_id, iso_currency_code')
+    // `id` added (Phase 42) - previously unselected since net worth itself
+    // never needed a per-account identity, only the aggregate. The new
+    // per-account daily balance snapshot below (generateAccountBalanceSnapshots)
+    // needs it to know which account each row belongs to.
+    .select('id, type, current_balance, available_balance, persistent_account_id, iso_currency_code')
     .eq('user_id', userId)
     .in('plaid_item_id', itemIds);
   if (accountsError) throw accountsError;
 
   return accounts || [];
+}
+
+// Found by code review: a genuine DB failure looking up the user's
+// timezone used to be silently indistinguishable from "no preferences row
+// exists yet" (both left `prefs` undefined) - harmless in effect (still
+// falls back to UTC, still produces a correct snapshot), but a real
+// failure was going completely unlogged. PGRST116 is PostgREST's own "no
+// rows found" code for .single() - the one case that's genuinely expected
+// and not worth logging. Extracted (Phase 42) so
+// generateNetWorthSnapshot/generateAccountBalanceSnapshots can share one
+// lookup per user per batch tick instead of each running it independently
+// - see runNetWorthSnapshots' own prefetch-once comment in index.js.
+async function getUserTimezone(userId) {
+  const { data: prefs, error: prefsError } = await supabaseAdmin
+    .from('notification_preferences')
+    .select('timezone')
+    .eq('user_id', userId)
+    .single();
+  if (prefsError && prefsError.code !== 'PGRST116') {
+    logError(`Failed to look up timezone for user ${userId} (falling back to UTC):`, prefsError);
+  }
+  return prefs?.timezone;
 }
 
 // DB-touching wrapper - the daily job's actual unit of work, and also
@@ -187,8 +213,18 @@ async function getEligibleAccountsForUser(userId, activeItemIds) {
 // disconnected) gets no snapshot written at all, not a fabricated $0 one
 // - "we have no account data for this user today" and "this user's real
 // net worth is $0" are different, and only one of them is true here.
-async function generateNetWorthSnapshot(userId, now = new Date(), activeItemIds) {
-  const accounts = await getEligibleAccountsForUser(userId, activeItemIds);
+//
+// `precomputed` ({accounts, timezone}), if given, skips both internal
+// lookups entirely - found by code review (Phase 42): once
+// generateAccountBalanceSnapshots started running back-to-back with this
+// function for the same user in the same batch tick, each independently
+// re-querying `accounts` and `notification_preferences` doubled this job's
+// DB load, the exact same redundant-query pattern already fixed once for
+// plaid_items via `activeItemIds` below. Single-user callers (the /admin/*
+// routes) never pass this, so they keep doing their own independent
+// lookup - only the batch job needs to prefetch and share it.
+async function generateNetWorthSnapshot(userId, now = new Date(), activeItemIds, precomputed) {
+  const accounts = precomputed ? precomputed.accounts : await getEligibleAccountsForUser(userId, activeItemIds);
   if (accounts.length === 0) return null;
 
   // Found by code review: excluded_account_count was computed by
@@ -199,23 +235,8 @@ async function generateNetWorthSnapshot(userId, now = new Date(), activeItemIds)
   // written through below.
   const { assets, liabilities, net_worth, excluded_account_count } = computeNetWorth({ accounts });
 
-  // Found by code review: a genuine DB failure looking up the user's
-  // timezone used to be silently indistinguishable from "no preferences
-  // row exists yet" (both left `prefs` undefined) - harmless in effect
-  // (still falls back to UTC, still produces a correct snapshot), but a
-  // real failure was going completely unlogged. PGRST116 is PostgREST's
-  // own "no rows found" code for .single() - the one case that's
-  // genuinely expected and not worth logging.
-  const { data: prefs, error: prefsError } = await supabaseAdmin
-    .from('notification_preferences')
-    .select('timezone')
-    .eq('user_id', userId)
-    .single();
-  if (prefsError && prefsError.code !== 'PGRST116') {
-    logError(`Failed to look up timezone for user ${userId} (falling back to UTC):`, prefsError);
-  }
-
-  const snapshotDate = getLocalDateString(prefs?.timezone, now);
+  const timezone = precomputed ? precomputed.timezone : await getUserTimezone(userId);
+  const snapshotDate = getLocalDateString(timezone, now);
 
   const { error } = await supabaseAdmin.from('net_worth_snapshots').upsert(
     {
@@ -232,6 +253,50 @@ async function generateNetWorthSnapshot(userId, now = new Date(), activeItemIds)
   if (error) throw error;
 
   return { snapshot_date: snapshotDate, assets, liabilities, net_worth, excluded_account_count };
+}
+
+// Phase 42 (multi-goal tracking, 2026-09-08): v1 foundation only, nothing
+// reads this table yet - see account_balance_snapshots' own migration
+// comment. Writes purely so a future phase can reintroduce real pace/
+// projected-finish-date once weeks/months of real per-account history
+// exist (this app has no per-account historical balance data anywhere
+// today; net_worth_snapshots is aggregate-only). Scoped to `depository`
+// accounts only - the only account type a goal or Emergency Fund can ever
+// be linked to (see the account picker's own `type === 'depository'`
+// filter, Phase 34) - a credit/loan/investment balance snapshot would
+// never actually be read by anything this table exists to eventually
+// support. Same idempotent-upsert discipline as generateNetWorthSnapshot:
+// (account_id, snapshot_date) is the real idempotency key, so running this
+// twice for the same account/day updates the one row rather than
+// duplicating. `precomputed` - same purpose and same caller contract as
+// generateNetWorthSnapshot's own parameter directly above.
+async function generateAccountBalanceSnapshots(userId, now = new Date(), activeItemIds, precomputed) {
+  const accounts = precomputed ? precomputed.accounts : await getEligibleAccountsForUser(userId, activeItemIds);
+  const depositoryAccounts = accounts.filter((a) => a.type === 'depository');
+  if (depositoryAccounts.length === 0) return { snapshot_count: 0 };
+
+  const timezone = precomputed ? precomputed.timezone : await getUserTimezone(userId);
+  const snapshotDate = getLocalDateString(timezone, now);
+
+  const rows = depositoryAccounts
+    .map((a) => ({
+      user_id: userId,
+      account_id: a.id,
+      snapshot_date: snapshotDate,
+      balance: a.available_balance ?? a.current_balance,
+    }))
+    // Same "never write a fabricated number" discipline as computeNetWorth's
+    // own excluded_account_count handling - a missing/non-finite balance is
+    // skipped, not written as a fake $0.
+    .filter((r) => typeof r.balance === 'number' && Number.isFinite(r.balance));
+  if (rows.length === 0) return { snapshot_count: 0 };
+
+  const { error } = await supabaseAdmin
+    .from('account_balance_snapshots')
+    .upsert(rows, { onConflict: 'account_id,snapshot_date' });
+  if (error) throw error;
+
+  return { snapshot_count: rows.length, snapshot_date: snapshotDate };
 }
 
 // Roughly a year of daily snapshots - generous for any trend view this
@@ -275,6 +340,8 @@ module.exports = {
   computeNetWorth,
   getLocalDateString,
   getEligibleAccountsForUser,
+  getUserTimezone,
   generateNetWorthSnapshot,
+  generateAccountBalanceSnapshots,
   getNetWorthSummary,
 };
