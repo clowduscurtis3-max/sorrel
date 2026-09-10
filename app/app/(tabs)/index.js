@@ -211,7 +211,7 @@ function groupByMonth(transactions) {
 export default function Home() {
   const {
     alerts,
-    goalProgress,
+    goalsProgress,
     subscriptionAudit,
     accounts,
     plaidItems,
@@ -296,14 +296,14 @@ export default function Home() {
   // recomputed on every render (cheap arithmetic over small arrays, no
   // memoization needed at this scale). See _lib/homeSummary.js for the
   // actual logic/guardrails.
-  const health = computeFinancialHealth(alerts, goalProgress, netWorth?.history);
+  const health = computeFinancialHealth(alerts, netWorth?.history);
   const categoryTiles = computeCategoryStatuses(budgetStatus, alerts);
   const monthProgress = budgetStatus
     ? computeMonthProgress(budgetStatus.period_start, budgetStatus.period_end)
     : null;
   const spendStats = computeSpendStats(budgetStatus);
   const pace = monthProgress ? computePace(spendStats, monthProgress) : null;
-  const insight = computeInsight(alerts, goalProgress);
+  const insight = computeInsight(alerts);
   const monthName = new Date().toLocaleDateString('en-US', { month: 'long' });
 
   // Code review, 2026-09-05: with the 30s poll below plus pull-to-refresh
@@ -897,9 +897,11 @@ export default function Home() {
             <Text style={[homeStyles.changeText, textColor && { color: textColor }]}>{monthlyReview.note}</Text>
           </View>
         )}
-        {monthlyReview.goal_pace?.message && (
-          <Text style={homeStyles.changeMore}>{monthlyReview.goal_pace.message}</Text>
-        )}
+        {/* Phase 42: a user can have several goals now - one message line
+            per goal, same content each already carried individually. */}
+        {(monthlyReview.goals || []).map((g) => (
+          <Text key={g.id} style={homeStyles.changeMore}>{g.message}</Text>
+        ))}
       </Pressable>
     );
   }
@@ -922,8 +924,17 @@ export default function Home() {
     );
   }
 
+  // Phase 42 (multi-goal tracking, 2026-09-08): a user can have several
+  // active goals now - one compact row per goal (name, percent bar,
+  // dollar fraction, no pace clause - the balance-tracked model has no
+  // per-account history to honestly support one yet), instead of a
+  // single progress bar for "the" goal. Goals without a real dollar
+  // target are excluded from these rows (same "nothing to show a bar
+  // for" reasoning the old single-goal card already had), not shown as
+  // an empty bar.
   function renderGoalProgressCard() {
-    if (!goalProgress?.has_target) return null;
+    const goalsWithTarget = (goalsProgress || []).filter((g) => g.has_target);
+    if (goalsWithTarget.length === 0) return null;
     const textColor = readableTextColor(cardColors.goal_progress, colors);
     return (
       // Direct user request: Home cards should be interactive. This one
@@ -941,18 +952,25 @@ export default function Home() {
         accessibilityLabel="View Goal tab"
       >
         <Text style={[styles.cardTitle, textColor && { color: textColor }]}>Goal progress</Text>
-        <View style={homeStyles.progressTrack}>
-          <View
-            style={[
-              homeStyles.progressFill,
-              { width: `${Math.min(100, Math.max(0, goalProgress.percent_complete))}%` },
-            ]}
-          />
-        </View>
-        <Text style={[styles.smallText, textColor && { color: textColor }]}>
-          ${formatDecimal(goalProgress.saved_amount)} of ${formatDecimal(goalProgress.target_amount)} —{' '}
-          {Math.round(goalProgress.percent_complete)}% · {formatGoalType(goalProgress.goal_type)}
-        </Text>
+        {goalsWithTarget.map((g, index) => (
+          <View key={g.id} style={index > 0 ? homeStyles.goalProgressRow : null}>
+            <Text style={[styles.smallText, textColor && { color: textColor }]}>
+              {g.notes || formatGoalType(g.goal_type)}
+            </Text>
+            <View style={homeStyles.progressTrack}>
+              <View
+                style={[
+                  homeStyles.progressFill,
+                  { width: `${Math.min(100, Math.max(0, g.percent_complete))}%` },
+                ]}
+              />
+            </View>
+            <Text style={[styles.smallText, textColor && { color: textColor }]}>
+              ${formatDecimal(g.saved_amount)} of ${formatDecimal(g.target_amount)} —{' '}
+              {Math.round(g.percent_complete)}%
+            </Text>
+          </View>
+        ))}
       </Pressable>
     );
   }
@@ -1336,12 +1354,35 @@ export default function Home() {
             >
               <MaterialIcons name="track-changes" size={18} color={colors.dark} />
               <Text style={homeStyles.statLabel}>GOAL PROGRESS</Text>
-              <Text style={homeStyles.statValue}>
-                {goalProgress?.has_target ? `${Math.round(goalProgress.percent_complete)}%` : '—'}
-              </Text>
-              <Text style={homeStyles.statSub}>
-                {goalProgress ? formatGoalType(goalProgress.goal_type) : 'No goal yet'}
-              </Text>
+              {/* Phase 42: a single blended percent across differently-sized
+                  goals would be a fabricated number - shown only when
+                  there's exactly one real goal to summarize; the count
+                  otherwise, never an averaged figure. */}
+              {(() => {
+                const goalsWithTarget = (goalsProgress || []).filter((g) => g.has_target);
+                if (goalsWithTarget.length === 1) {
+                  return (
+                    <>
+                      <Text style={homeStyles.statValue}>{Math.round(goalsWithTarget[0].percent_complete)}%</Text>
+                      <Text style={homeStyles.statSub}>{formatGoalType(goalsWithTarget[0].goal_type)}</Text>
+                    </>
+                  );
+                }
+                if (goalsWithTarget.length > 1) {
+                  return (
+                    <>
+                      <Text style={homeStyles.statValue}>{goalsWithTarget.length}</Text>
+                      <Text style={homeStyles.statSub}>goals in progress</Text>
+                    </>
+                  );
+                }
+                return (
+                  <>
+                    <Text style={homeStyles.statValue}>—</Text>
+                    <Text style={homeStyles.statSub}>No goal yet</Text>
+                  </>
+                );
+              })()}
             </Pressable>
           </View>
 
@@ -1535,6 +1576,12 @@ const homeStyles = StyleSheet.create({
   smallLabel: {
     fontSize: 11,
     color: colors.muted,
+  },
+  // Phase 42: spacing between per-goal blocks on the multi-goal summary
+  // card - only applied from the second row on, so the first goal sits
+  // flush under the card title like every other card's own first row.
+  goalProgressRow: {
+    marginTop: 12,
   },
   progressTrack: {
     height: 4,

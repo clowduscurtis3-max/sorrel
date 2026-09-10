@@ -64,7 +64,11 @@ export function AppDataProvider({ children }) {
   const { session, signOut: baseSignOut } = useSessionContext();
 
   const [alerts, setAlerts] = useState([]);
-  const [goalProgress, setGoalProgress] = useState(null);
+  // Phase 42 (multi-goal tracking, 2026-09-08): a user can have several
+  // active goals now - GET /goal/progress returns { goals: [...] }, never
+  // a 404 (an empty array is a normal "no goals yet" state, same as
+  // GET /goal itself).
+  const [goalsProgress, setGoalsProgress] = useState([]);
   const [subscriptionAudit, setSubscriptionAudit] = useState(null);
   const [accounts, setAccounts] = useState(null);
   // Phase 8 Step 3 follow-up: moved here from being AccountMenu-local state
@@ -136,16 +140,12 @@ export function AppDataProvider({ children }) {
     }
   }
 
-  async function fetchGoalProgress() {
+  async function fetchGoalsProgress() {
     try {
       const res = await apiFetch('/goal/progress');
-      if (res.status === 404) {
-        setGoalProgress(null);
-        return;
-      }
       if (!res.ok) throw new Error('SERVER_ERROR');
       const data = await res.json();
-      setGoalProgress(data.progress);
+      setGoalsProgress(data.goals || []);
     } catch (err) {
       console.error(err);
     }
@@ -229,7 +229,7 @@ export function AppDataProvider({ children }) {
   useEffect(() => {
     if (!session) return;
     fetchAlerts();
-    fetchGoalProgress();
+    fetchGoalsProgress();
     fetchSubscriptionAudit();
     fetchAccounts();
     fetchPlaidItems();
@@ -253,7 +253,7 @@ export function AppDataProvider({ children }) {
       if (appState.current.match(/inactive|background/) && nextState === 'active' && session) {
         setTimeout(() => {
           fetchAlerts();
-          fetchGoalProgress();
+          fetchGoalsProgress();
           fetchSubscriptionAudit();
           fetchAccounts();
           fetchPlaidItems();
@@ -307,7 +307,7 @@ export function AppDataProvider({ children }) {
     <AppDataContext.Provider
       value={{
         alerts,
-        goalProgress,
+        goalsProgress,
         subscriptionAudit,
         accounts,
         plaidItems,
@@ -316,7 +316,7 @@ export function AppDataProvider({ children }) {
         homeChanges,
         monthlyReview,
         refetchAlerts: fetchAlerts,
-        refetchGoalProgress: fetchGoalProgress,
+        refetchGoalsProgress: fetchGoalsProgress,
         refetchSubscriptionAudit: fetchSubscriptionAudit,
         refetchAccounts: fetchAccounts,
         refetchPlaidItems: fetchPlaidItems,

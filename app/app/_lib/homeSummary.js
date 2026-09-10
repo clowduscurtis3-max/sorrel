@@ -1,11 +1,18 @@
 // Phase 14 (Home synthesis layer) - pure selection/composition helpers for
 // the Home tab's redesigned Overview. No I/O, no Claude/Anthropic call
 // anywhere in this file - every value here is either arithmetic over
-// numbers `budgetStatus`/`alerts`/`goalProgress` already computed
-// server-side, or verbatim reuse of an existing template string
-// (`alert.message`/`goalProgress.message`), per this phase's own
-// non-negotiable guardrail ("no new Claude call... this is selection and
-// composition over existing facts, never new AI-generated phrasing").
+// numbers `budgetStatus`/`alerts` already computed server-side, or
+// verbatim reuse of an existing template string (`alert.message`), per
+// this phase's own non-negotiable guardrail ("no new Claude call... this
+// is selection and composition over existing facts, never new
+// AI-generated phrasing").
+//
+// Phase 42 (multi-goal tracking, 2026-09-08): goals no longer feed
+// computeFinancialHealth/computeInsight at all (confirmed decision -
+// simplest option, chosen over inventing a deadline-vs-elapsed-time
+// "behind pace" rule for N goals). Budget/overspend alerts and net-worth
+// trend alone drive the status pill and insight line; goals surface only
+// through their own dedicated multi-goal summary card on Home.
 //
 // The financial-health bucket below is a deliberately small, lightweight
 // decision table - not the full Phase 15 brief (a separate, not-yet-built
@@ -126,11 +133,7 @@ function netWorthTrend(netWorthHistory) {
 // One plain-language sentence explaining the bucket above - mirrors the
 // same signal priority the bucket decision itself uses, so the reason
 // never cites a signal that wasn't actually why this bucket was chosen.
-// Reuses goalProgress.message verbatim for the off-pace case (existing
-// template string, per this phase's "no new AI-generated phrasing"
-// guardrail); the net-worth sentence is new because no existing string
-// anywhere in the app describes this signal yet.
-function healthReason(bucket, { severeCount, warnCount, offPace, trend, goalProgress }) {
+function healthReason(bucket, { severeCount, warnCount, trend }) {
   if (bucket === 'under_pressure') {
     if (severeCount >= 1) {
       return severeCount === 1
@@ -145,37 +148,35 @@ function healthReason(bucket, { severeCount, warnCount, offPace, trend, goalProg
         ? 'One category is trending over its budget this month.'
         : `${warnCount} categories are trending over budget this month.`;
     }
-    if (offPace) return goalProgress.message;
     if (trend === 'declining') return 'Your net worth has dipped over the past month.';
   }
-  return 'Spending, goal pace, and net worth are all in good shape this month.';
+  return 'Spending and net worth are both in good shape this month.';
 }
 
 // Qualitative bucket only, per Phase 15's own non-negotiable guardrail -
 // never a numeric score. There is no natural 0-100 anywhere in this app's
 // real data; inventing one would be exactly the fabricated precision this
 // project's "never guess a financial fact" rule forbids elsewhere.
-export function computeFinancialHealth(alerts, goalProgress, netWorthHistory) {
+export function computeFinancialHealth(alerts, netWorthHistory) {
   const severeCount = (alerts || []).filter((a) => alertSeverity(a) === 'severe').length;
   const warnCount = (alerts || []).length;
-  const offPace = goalProgress?.has_target && goalProgress.on_pace === false;
   const trend = netWorthTrend(netWorthHistory);
   const decliningNetWorth = trend === 'declining';
 
   let bucket;
   if (severeCount >= 1 || warnCount >= 3) bucket = 'under_pressure';
-  else if (warnCount >= 1 || offPace || decliningNetWorth) bucket = 'needs_attention';
+  else if (warnCount >= 1 || decliningNetWorth) bucket = 'needs_attention';
   else bucket = 'on_track';
 
-  const reason = healthReason(bucket, { severeCount, warnCount, offPace, trend, goalProgress });
+  const reason = healthReason(bucket, { severeCount, warnCount, trend });
   return { bucket, ...HEALTH_BUCKETS[bucket], reason };
 }
 
 // The 1-2 things worth surfacing right now, per Phase 14's own selector
-// requirement - ranked by materiality (severe > ordinary alert > goal
-// pace), capped at one for the single "Insight" card the mockup shows.
-// Every string reused verbatim from where it was already computed.
-export function computeInsight(alerts, goalProgress) {
+// requirement - ranked by materiality, capped at one for the single
+// "Insight" card the mockup shows. Every string reused verbatim from
+// where it was already computed.
+export function computeInsight(alerts) {
   const sorted = [...(alerts || [])].sort((a, b) => {
     const rank = { severe: 1, warning: 0 };
     return rank[alertSeverity(b)] - rank[alertSeverity(a)];
@@ -198,12 +199,6 @@ export function computeInsight(alerts, goalProgress) {
       detail: null,
       hasDetail: true,
     };
-  }
-  if (goalProgress?.has_target && goalProgress.on_pace === false) {
-    return { text: goalProgress.message, detail: null, hasDetail: true };
-  }
-  if (goalProgress?.message) {
-    return { text: goalProgress.message, detail: null, hasDetail: true };
   }
   return { text: 'Nothing needs your attention right now.', detail: null, hasDetail: false };
 }

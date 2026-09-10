@@ -104,19 +104,23 @@ function goalDisplayName(goalType, notes) {
   return GOAL_TYPES.find((g) => g.value === goalType)?.label || 'Your goal';
 }
 
-// Status badge for the Primary Goal card - derived entirely from
-// goalProgress's own already-computed fields (saved_amount/target_amount/
-// on_pace), never a new judgment call of its own. on_pace is always one of
-// null/true/false whenever has_target is true (server/goalProgress.js's
-// computeGoalProgress always sets it in that branch), so this covers every
-// case that can reach it.
+// Status badge for a goal card - derived entirely from goalProgress's own
+// already-computed fields, never a new judgment call of its own.
+//
+// Phase 42 (multi-goal tracking, 2026-09-08): on_pace no longer exists -
+// goals are balance-tracked now, and this app has no per-account
+// historical data yet to honestly support a pace/on-track claim (see
+// server/goalPace.js's own header). A plain percent-complete badge is the
+// honest replacement, not a fabricated pace signal.
 function goalStatusBadge(goalProgress) {
-  if (goalProgress.saved_amount >= goalProgress.target_amount) {
+  if (goalProgress.no_accounts_linked) {
+    return { label: 'Not tracking yet', color: colors.muted };
+  }
+  if (goalProgress.has_target && goalProgress.saved_amount >= goalProgress.target_amount) {
     return { label: 'Goal reached', color: colors.positive };
   }
-  if (goalProgress.on_pace === true) return { label: 'On track', color: colors.positive };
-  if (goalProgress.on_pace === false) return { label: 'Behind pace', color: colors.warning };
-  return { label: 'Not started yet', color: colors.muted };
+  if (!goalProgress.has_target) return { label: 'No target set', color: colors.muted };
+  return { label: `${Math.round(goalProgress.percent_complete)}% there`, color: colors.primary };
 }
 
 // "4y 0m" style, from the projections.months_remaining float the backend
@@ -158,8 +162,12 @@ function formatTargetDate(isoDate) {
 // computeGoalMilestones - each milestone is a projectAffordableDate
 // result, so it carries the exact same status vocabulary that function
 // already uses).
+// Phase 42: server/scenario.js's computeGoalMilestones was rebuilt as
+// hypothetical-pace-driven, matching calculateGoalPace's own status
+// vocabulary ('already_reached'/'projected') - was 'already_affordable'
+// under the old realized-pace version this replaced.
 function describeMilestoneStatus(milestone) {
-  if (milestone.status === 'already_affordable') return 'Already reached';
+  if (milestone.status === 'already_reached') return 'Already reached';
   if (milestone.status === 'projected') return `Projected: ${formatTargetDate(milestone.projected_date)}`;
   return milestone.detail || 'Not enough data yet';
 }
@@ -174,10 +182,14 @@ function describeMilestoneStatus(milestone) {
 // condition isn't actually true. The Goal Insight pill above already shows
 // goalProgress.message verbatim, so rules here deliberately favor genuinely
 // NEW information (a detected price jump, an over-budget category, a
-// concrete next step) over restating what that pill already says - "behind
-// pace" here points at the Goal Calculator rather than repeating the pace
-// sentence, and "on pace"/"goal reached" are ranked last since the Insight
-// pill already covers that ground.
+// concrete next step) over restating what that pill already says.
+//
+// Phase 42 (multi-goal tracking, 2026-09-08): on_pace no longer exists -
+// its three branches (behind pace / on pace / nothing saved yet, inferred
+// from a realized pace this app can no longer honestly compute) are
+// replaced by a single "link an account" prompt when nothing real is
+// being tracked yet, which is the actually-actionable equivalent under
+// the balance model.
 function computeGoalAdvisorTip({ goalProgress, subscriptionAudit, budgetStatus }) {
   if (!goalProgress) return null;
 
@@ -190,6 +202,13 @@ function computeGoalAdvisorTip({ goalProgress, subscriptionAudit, budgetStatus }
 
   if (goalProgress.saved_amount >= goalProgress.target_amount) {
     return { icon: 'celebration', text: 'This goal has been reached.' };
+  }
+
+  if (goalProgress.no_accounts_linked) {
+    return {
+      icon: 'account-balance',
+      text: 'Linking a real account to this goal is what turns the target above into tracked, honest progress - tap Edit Goal to pick one.',
+    };
   }
 
   const priceJump = subscriptionAudit?.price_jumps?.[0];
@@ -210,24 +229,10 @@ function computeGoalAdvisorTip({ goalProgress, subscriptionAudit, budgetStatus }
     };
   }
 
-  if (goalProgress.on_pace === false) {
-    return {
-      icon: 'calculate',
-      text: 'This goal is currently behind pace for its target date - the Goal Calculator above can show what monthly amount would get it back on track.',
-    };
-  }
-
-  if (goalProgress.on_pace === null && goalProgress.saved_amount <= 0) {
+  if (goalProgress.saved_amount <= 0) {
     return {
       icon: 'savings',
-      text: 'Nothing has been saved toward this goal yet - even a small recurring contribution starts real progress.',
-    };
-  }
-
-  if (goalProgress.on_pace === true) {
-    return {
-      icon: 'trending-up',
-      text: 'This goal is on pace for its target date - staying consistent is what keeps it there.',
+      text: 'Nothing is in the linked account(s) toward this goal yet - even a small deposit starts real, trackable progress.',
     };
   }
 
@@ -263,16 +268,101 @@ function computeGoalAdvisorTip({ goalProgress, subscriptionAudit, budgetStatus }
 // picture - kept here unedited as a historical note, not corrected in
 // place.
 export default function Goal() {
-  const { goal, refetchGoal } = useSessionContext();
-  const { goalProgress, refetchGoalProgress, subscriptionAudit, budgetStatus, accounts } = useAppData();
-  const [editing, setEditing] = useState(false);
-  const form = useGoalForm(goal, {
+  const { refetchGoal } = useSessionContext();
+  const { goalsProgress, refetchGoalsProgress, subscriptionAudit, budgetStatus, accounts } = useAppData();
+
+  // Phase 42 (multi-goal tracking, 2026-09-08): the single "Primary Goal"
+  // card is now a list of goal cards; tapping one swaps to a local-state
+  // detail view for that specific goal (viewingGoalId), matching Budget's
+  // own viewingCategory precedent (Phase 41) - never a new pushed route,
+  // since this app's root layout is a bare <Slot/> with no <Stack/> and a
+  // pushed route here would break back-navigation the same way it did for
+  // Budget's category detail before that fix. `addingGoal` opens the same
+  // form in add mode instead (GoalFormFields is goal-count-agnostic,
+  // already proven by goal-intake.js's own first-run use).
+  const [viewingGoalId, setViewingGoalId] = useState(null);
+  const [addingGoal, setAddingGoal] = useState(false);
+  const viewingGoal = (goalsProgress || []).find((g) => g.id === viewingGoalId) || null;
+  const showingGoalDetail = addingGoal || viewingGoalId !== null;
+
+  // Which real linked accounts this goal's balance is tracked against -
+  // separate from `form`'s own field state (useGoalForm has no concept of
+  // accounts, shared as-is with goal-intake.js's first-run flow, which
+  // shouldn't force an account choice before one even exists). Same
+  // account-picker pattern Emergency Fund's own editor already uses
+  // (efSelectedAccountIds below), reused for consistency rather than a new
+  // pattern.
+  //
+  // Found by code review (2026-09): this used to be a useEffect keyed on
+  // `[viewingGoalId]`, resyncing whenever that id changed - but React
+  // bails out of an effect when a dependency's new value is
+  // reference-equal to its old one, and `viewingGoalId` goes `null` ->
+  // `null` (a no-op "change") on two real, reachable paths: saving a
+  // brand-new goal then immediately tapping "Add another goal" again, or
+  // canceling out of add mode then re-entering it. Either path left the
+  // PREVIOUS goal's selected accounts sitting in this state, so a second
+  // new goal could silently save with someone else's real linked accounts
+  // still checked. Fixed by resetting explicitly in every navigation
+  // handler below instead of relying on a dependency array to notice a
+  // change that doesn't always register as one.
+  const [goalAccountIds, setGoalAccountIds] = useState([]);
+
+  function toggleGoalAccount(accountId) {
+    setGoalAccountIds((prev) =>
+      prev.includes(accountId) ? prev.filter((id) => id !== accountId) : [...prev, accountId]
+    );
+  }
+
+  function openGoal(goalId) {
+    setAddingGoal(false);
+    setViewingGoalId(goalId);
+    setGoalAccountIds((goalsProgress || []).find((g) => g.id === goalId)?.account_ids || []);
+    setActiveEditor(null);
+    setShowCalculationDetail(false);
+    resetGoalDependentTools();
+  }
+  function openAddGoal() {
+    setViewingGoalId(null);
+    setAddingGoal(true);
+    setGoalAccountIds([]);
+    setActiveEditor(null);
+    setShowCalculationDetail(false);
+    resetGoalDependentTools();
+  }
+  function closeGoalDetail() {
+    form.reset();
+    setViewingGoalId(null);
+    setAddingGoal(false);
+    setGoalAccountIds([]);
+    setActiveEditor(null);
+    setShowCalculationDetail(false);
+    resetGoalDependentTools();
+  }
+
+  const form = useGoalForm(addingGoal ? null : viewingGoal, {
     onSaved: () => {
-      setEditing(false);
+      setViewingGoalId(null);
+      setAddingGoal(false);
+      setGoalAccountIds([]);
       resetGoalDependentTools();
     },
-    onGoalProgressChanged: refetchGoalProgress,
+    onGoalProgressChanged: refetchGoalsProgress,
   });
+
+  async function archiveGoal(goalId) {
+    try {
+      const res = await apiFetch(`/goal/${goalId}/archive`, { method: 'POST' });
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      await refetchGoal();
+      await refetchGoalsProgress();
+      setViewingGoalId(null);
+      setAddingGoal(false);
+      setGoalAccountIds([]);
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Error', apiErrorMessage(err));
+    }
+  }
 
   // Edit Goal redesign (2026-08-27): which settings row (if any) currently
   // has its editor expanded inline below it - 'amount' | 'date' | 'type' |
@@ -388,22 +478,18 @@ export default function Goal() {
     fn();
   }
 
-  // Real note on scope: this app's goal model is one goal per user
-  // (upsert-only; no DELETE /goal route exists, and the root layout's own
-  // gate requires a goal to exist before (tabs) is even reachable - see
-  // this file's own header note and _layout.js). "Delete Goal" therefore
-  // can't mean removing the row outright without breaking that invariant
-  // - it reuses the exact same reset-to-general path goal-intake.js's own
-  // "Skip" already exercises (useGoalForm's skip()), which is the smallest
-  // correct interpretation of "delete this specific goal" this schema
-  // actually supports, not a new backend route.
+  // Phase 42 (multi-goal tracking, 2026-09-08): a user can have several
+  // goals now, so "delete" archives this one specific goal (POST
+  // /goal/:id/archive - soft, preserves notification_events/
+  // recommendation_events history) rather than resetting the app's one
+  // goal slot back to "no specific goal" the way this used to work.
   function confirmDeleteGoal() {
     Alert.alert(
-      'Delete this goal?',
-      'This removes your specific goal and target, and returns to a general "smarter spending" focus - it does not affect your linked accounts or transaction history.',
+      'Archive this goal?',
+      'This removes it from your active goals - it does not affect your linked accounts or transaction history, and can be restored later if needed.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete Goal', style: 'destructive', onPress: form.skip },
+        { text: 'Archive Goal', style: 'destructive', onPress: () => archiveGoal(viewingGoalId) },
       ]
     );
   }
@@ -640,10 +726,12 @@ export default function Goal() {
     setCalculatorError(null);
     setCalculatorResult(null);
     try {
+      // Phase 42: a user can have several goals now - goal_id says which
+      // one this hypothetical is projected against.
       const res = await apiFetch('/goal/calculator', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hypothetical_monthly_amount: amount }),
+        body: JSON.stringify({ goal_id: viewingGoalId, hypothetical_monthly_amount: amount }),
       });
       if (!res.ok) throw new Error('SERVER_ERROR');
       const data = await res.json();
@@ -720,20 +808,88 @@ export default function Goal() {
   }
 
   // Phase 28 (Savings Planner v1, 2026-08-25): computed checkpoints (25/50/
-  // 75/100% of the real target), fetched lazily on first expand rather than
-  // eagerly on every tab visit - same toggle-then-fetch pattern as the Goal
-  // Calculator card above, since GET /goal/milestones costs a handful of DB
-  // reads (no Claude call) but isn't something worth fetching unasked.
-  const [showMilestones, setShowMilestones] = useState(false);
+  // 75/100% of the real target). Phase 42 (2026-09-08) - REBUILT as
+  // hypothetical-pace-driven (see server/scenario.js's computeGoalMilestones
+  // own header for the full "why"): now needs a real monthly amount from
+  // the user before it can compute anything, same text+mic input pattern
+  // the Goal Calculator card already uses just above, reused rather than
+  // a second implementation.
+  const [milestonesAmountText, setMilestonesAmountText] = useState('');
   const [milestonesResult, setMilestonesResult] = useState(null);
   const [loadingMilestones, setLoadingMilestones] = useState(false);
   const [milestonesError, setMilestonesError] = useState(null);
 
+  const milestonesRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const milestonesRecorderState = useAudioRecorderState(milestonesRecorder);
+  const [milestonesTranscribing, setMilestonesTranscribing] = useState(false);
+  const [milestonesVoiceError, setMilestonesVoiceError] = useState(null);
+
+  async function startMilestonesRecording() {
+    setMilestonesVoiceError(null);
+    const { granted } = await requestRecordingPermissionsAsync();
+    if (!granted) {
+      setMilestonesVoiceError('Microphone access is needed to speak the amount.');
+      return;
+    }
+    await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+    await milestonesRecorder.prepareToRecordAsync();
+    milestonesRecorder.record();
+  }
+
+  async function stopMilestonesRecordingAndTranscribe() {
+    await milestonesRecorder.stop();
+    if (!milestonesRecorder.uri) {
+      setMilestonesVoiceError("That recording didn't come through - try again or type it.");
+      return;
+    }
+    setMilestonesTranscribing(true);
+    setMilestonesVoiceError(null);
+    try {
+      const fileResponse = await fetch(milestonesRecorder.uri);
+      const blob = await fileResponse.blob();
+      const res = await apiFetch('/affordability/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'audio/m4a' },
+        body: blob,
+      });
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const { text: transcribed } = await res.json();
+      setMilestonesAmountText(transcribed || '');
+    } catch (err) {
+      console.error(err);
+      setMilestonesVoiceError(
+        err.message === 'SERVER_ERROR' ? apiErrorMessage(err) : "Couldn't transcribe that - try again or type it."
+      );
+    } finally {
+      setMilestonesTranscribing(false);
+    }
+  }
+
+  function onMilestonesMicPress() {
+    if (milestonesRecorderState.isRecording) {
+      stopMilestonesRecordingAndTranscribe();
+    } else {
+      startMilestonesRecording();
+    }
+  }
+
   async function fetchMilestones() {
+    const amount = parseDollarAmount(milestonesAmountText);
+    if (!amount) {
+      setMilestonesError('Enter a valid monthly amount, like $200.');
+      return;
+    }
     setLoadingMilestones(true);
     setMilestonesError(null);
+    setMilestonesResult(null);
     try {
-      const res = await apiFetch('/goal/milestones');
+      // Phase 42: a user can have several goals now - goal_id says which
+      // one these checkpoints are projected against.
+      const res = await apiFetch('/goal/milestones', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ goal_id: viewingGoalId, hypothetical_monthly_amount: amount }),
+      });
       if (!res.ok) throw new Error('SERVER_ERROR');
       const data = await res.json();
       setMilestonesResult(data.result);
@@ -745,28 +901,29 @@ export default function Goal() {
     }
   }
 
-  function openMilestones() {
-    setShowMilestones(true);
-    if (!milestonesResult) fetchMilestones();
-  }
-
   // Real bug found by /code-review (2026-08-25): the Goal Calculator's
   // projected date and the Savings Planner's checkpoints are both computed
-  // server-side against the goal's CURRENT target_amount at the moment
-  // they're requested - neither is invalidated when the goal itself
-  // changes. Without this, editing the target (or switching the goal to
-  // Emergency Fund, which also changes target_amount) would leave stale
-  // numbers on screen computed against the old target, with no visual
-  // indication and no way to force a refresh short of a full remount -
-  // exactly the kind of stale-financial-fact this app's guardrails
-  // elsewhere are careful to avoid. Collapses both panels back to their
-  // "not yet computed" state rather than just clearing the number, so a
-  // stale result can never render even for an instant before a refetch.
+  // server-side against whatever goal_id/target_amount was current at the
+  // moment they're requested - neither is invalidated when that changes.
+  // Without this, editing the target, or (Phase 42, 2026-09-08) switching
+  // to look at a DIFFERENT goal entirely, would leave stale numbers on
+  // screen computed against the old goal/target, with no visual indication
+  // and no way to force a refresh short of a full remount - exactly the
+  // kind of stale-financial-fact this app's guardrails elsewhere are
+  // careful to avoid. Collapses both panels back to their "not yet
+  // computed" state rather than just clearing the number, so a stale
+  // result can never render even for an instant before a refetch. Called
+  // from openGoal/openAddGoal/closeGoalDetail (below) as well as onSaved -
+  // a second real bug found by /code-review (2026-09-09): this used to
+  // only fire after a save, so navigating list -> Goal A -> back -> Goal B
+  // without ever saving could still show Goal A's calculator/milestones
+  // results under Goal B.
   function resetGoalDependentTools() {
     setShowCalculator(false);
+    setCalculatorAmountText('');
     setCalculatorResult(null);
     setCalculatorError(null);
-    setShowMilestones(false);
+    setMilestonesAmountText('');
     setMilestonesResult(null);
     setMilestonesError(null);
   }
@@ -857,16 +1014,14 @@ export default function Goal() {
   const onBackdropTextColor = night ? colors.background : undefined;
 
   // Real bug found by adversarial review, 2026-08-13: Cancel used to only
-  // toggle `editing` back to false, leaving any discarded edits sitting in
+  // toggle the detail view closed, leaving any discarded edits sitting in
   // `form`'s state (this component instance, and therefore `form`, stays
   // alive for the whole session - see GoalForm.js's reset() comment for
-  // the full failure scenario).
-  function cancelEditing() {
-    form.reset();
-    setActiveEditor(null);
-    setShowCalculationDetail(false);
-    setEditing(false);
-  }
+  // the full failure scenario). closeGoalDetail (defined above) already
+  // calls form.reset() before closing, for exactly this reason - Phase 42
+  // merged what used to be this screen's own separate cancelEditing into
+  // that shared close handler, since both single-goal Cancel and
+  // multi-goal "back to the list" now mean the same thing.
 
   // Derived, display-only values for the redesigned editing screen -
   // pending/uncommitted (`form.*`) vs. persisted (`goalProgress`) is kept
@@ -889,7 +1044,7 @@ export default function Goal() {
 
   return (
     <View style={styles.container}>
-      {editing ? (
+      {showingGoalDetail ? (
         // Edit Goal redesign (2026-08-27, design-references - see the user's
         // own mockup for this exact screen). Replaces the old always-
         // visible button wall (GoalFormFields rendered directly) with a
@@ -910,7 +1065,7 @@ export default function Goal() {
           <View style={goalStyles.editHeaderRow}>
             <Pressable
               style={goalStyles.backButton}
-              onPress={cancelEditing}
+              onPress={closeGoalDetail}
               accessibilityRole="button"
               accessibilityLabel="Back, discard unsaved changes"
             >
@@ -922,12 +1077,12 @@ export default function Goal() {
             </Pressable>
             <View style={goalStyles.editHeaderTextCol}>
               <Text style={[goalStyles.editHeaderTitle, night && { color: colors.background }]}>
-                Edit Goal
+                {addingGoal ? 'Add Goal' : 'Edit Goal'}
               </Text>
               <Text
                 style={[goalStyles.editHeaderSubtitle, night && { color: 'rgba(244, 246, 242, 0.75)' }]}
               >
-                Make changes to your goal.
+                {addingGoal ? 'Set up a new goal.' : 'Make changes to your goal.'}
               </Text>
             </View>
             <View style={{ width: 40 }} />
@@ -1179,34 +1334,128 @@ export default function Goal() {
                   </View>
                 </View>
               )}
+
+              <View style={goalStyles.settingsDivider} />
+
+              {/* Linked accounts (Phase 42, 2026-09-08) - which real
+                  account(s) this goal's balance is tracked against, same
+                  account-picker pattern Emergency Fund's own editor
+                  already uses (checkboxes over depositoryAccounts, name +
+                  mask + institution + live balance). A goal can exist with
+                  none linked yet (an honest "not tracking anything real
+                  yet" state, matches computeGoalBalanceProgress's own
+                  no_accounts_linked message server-side) - not forced
+                  before the goal can be created.
+                  Flagged by code review (2026-09-09): this duplicates
+                  Emergency Fund's own checkbox list below almost verbatim
+                  rather than sharing one component - a real, deliberately
+                  deferred cleanup (not fixed in this pass, to avoid
+                  touching Emergency Fund's already on-device-verified code
+                  without a device to re-verify it on right now). Worth
+                  extracting into a shared AccountCheckboxList the next time
+                  either picker needs a real change. */}
+              <Pressable
+                style={goalStyles.settingsRow}
+                onPress={() => setActiveEditor(activeEditor === 'accounts' ? null : 'accounts')}
+                accessibilityRole="button"
+                accessibilityLabel={`Linked accounts: ${goalAccountIds.length}`}
+              >
+                <View style={goalStyles.settingsIconCircle}>
+                  <MaterialIcons name="account-balance" size={18} color={colors.dark} />
+                </View>
+                <View style={goalStyles.settingsRowText}>
+                  <Text style={goalStyles.settingsRowLabel}>Linked accounts</Text>
+                  <Text style={goalStyles.settingsRowValue}>
+                    {goalAccountIds.length === 0
+                      ? 'None yet'
+                      : `${goalAccountIds.length} account${goalAccountIds.length === 1 ? '' : 's'}`}
+                  </Text>
+                </View>
+                <MaterialIcons
+                  name={activeEditor === 'accounts' ? 'expand-less' : 'chevron-right'}
+                  size={22}
+                  color={colors.muted}
+                />
+              </Pressable>
+              {activeEditor === 'accounts' && (
+                <View style={goalStyles.inlineEditor}>
+                  <Text style={styles.smallText}>
+                    Pick which real account(s) count toward this goal - Sorrel tracks the actual
+                    balance against your target, the same way Emergency Fund does.
+                  </Text>
+                  {depositoryAccounts.length === 0 ? (
+                    <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
+                      No linked bank/savings accounts found yet.
+                    </Text>
+                  ) : (
+                    <View style={goalStyles.estimateSpacing}>
+                      {depositoryAccounts.map((a) => {
+                        const selected = goalAccountIds.includes(a.id);
+                        const balance = a.available_balance ?? a.current_balance;
+                        return (
+                          <Pressable
+                            key={a.id}
+                            style={goalStyles.efAccountRow}
+                            onPress={() => toggleGoalAccount(a.id)}
+                            accessibilityRole="checkbox"
+                            accessibilityState={{ checked: selected }}
+                          >
+                            <MaterialIcons
+                              name={selected ? 'check-box' : 'check-box-outline-blank'}
+                              size={20}
+                              color={selected ? colors.primary : colors.muted}
+                            />
+                            <View style={goalStyles.efAccountRowText}>
+                              <Text style={goalStyles.settingsRowLabel}>
+                                {a.name}
+                                {a.mask ? ` ····${a.mask}` : ''}
+                              </Text>
+                              <Text style={styles.smallText}>
+                                {a.institution_name ? `${a.institution_name} · ` : ''}
+                                {balance != null ? `$${formatDecimal(balance)}` : '—'}
+                              </Text>
+                            </View>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  )}
+                  <View style={goalStyles.inlineEditorActions}>
+                    <Pressable onPress={() => setActiveEditor(null)} accessibilityRole="button">
+                      <Text style={goalStyles.inlineEditorLinkDone}>Done</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
             </View>
 
-            {/* Progress - the *saved* goal's real progress (goalProgress,
-                same canonical server calculation the read-only Overview
-                below already uses), not the pending form edits above -
-                gracefully adapts rather than fabricating a number when
-                there's no target on the saved goal yet. */}
+            {/* Progress - the *saved* goal's real progress (viewingGoal,
+                same canonical server calculation the goal list above
+                already uses), not the pending form edits above - not
+                shown at all while adding a brand new goal, since there's
+                no saved goal yet to show progress for. */}
+            {!addingGoal && (
             <View style={[styles.card, goalStyles.cardMargin]}>
               <View style={goalStyles.progressHeaderRow}>
                 <Text style={goalStyles.cardEyebrow}>YOUR PROGRESS</Text>
                 <MaterialIcons name="auto-awesome" size={16} color={colors.dark} />
               </View>
-              {!goalProgress ? (
+              {!viewingGoal ? (
                 <Text style={styles.smallText}>Loading…</Text>
-              ) : !goalProgress.has_target ? (
+              ) : !viewingGoal.has_target ? (
                 <Text style={styles.smallText}>
                   Set a target amount to start tracking progress toward this goal.
                 </Text>
               ) : (
                 (() => {
-                  const percent = Math.min(100, Math.max(0, goalProgress.percent_complete));
-                  const remaining = Math.max(0, goalProgress.target_amount - goalProgress.saved_amount);
+                  const percent = Math.min(100, Math.max(0, viewingGoal.percent_complete));
+                  const remaining = Math.max(0, viewingGoal.target_amount - viewingGoal.saved_amount);
                   return (
                     <>
                       <View style={goalStyles.progressValuesRow}>
                         <View>
                           <Text style={goalStyles.progressBigValue}>
-                            ${formatDecimal(goalProgress.saved_amount)}
+                            ${formatDecimal(viewingGoal.saved_amount)}
                           </Text>
                           <Text style={styles.smallText}>saved so far</Text>
                         </View>
@@ -1228,13 +1477,14 @@ export default function Goal() {
                 })()
               )}
             </View>
+            )}
 
-            {/* Sorrel's Take - reuses goalProgress.projections verbatim
+            {/* Sorrel's Take - reuses viewingGoal.projections verbatim
                 (server/goalProgress.js's computeGoalProjections, already
-                built and already shown on the read-only Overview) - no new
+                built and already shown in the goal list above) - no new
                 calculation. "See how I calculated this" is a plain expand
                 over numbers already in hand, not a second fetch/estimate. */}
-            {goalProgress?.projections && (
+            {!addingGoal && viewingGoal?.projections && (
               <View style={[styles.card, goalStyles.cardMargin, goalStyles.insightCard]}>
                 <View style={goalStyles.insightIconCircle}>
                   <MaterialIcons name="auto-awesome" size={18} color={colors.dark} />
@@ -1242,9 +1492,9 @@ export default function Goal() {
                 <View style={goalStyles.insightBody}>
                   <Text style={goalStyles.cardEyebrow}>SORREL'S TAKE</Text>
                   <Text style={goalStyles.insightText}>
-                    {goalProgress.projections.deadline_passed
-                      ? `Your target date of ${formatTargetDate(goalProgress.projections.target_date)} has passed - you'd still need about $${formatWhole(goalProgress.projections.monthly_savings_needed)} per month to reach this goal.`
-                      : `To reach your goal by ${formatTargetDate(goalProgress.projections.target_date)}, you'll need to save about $${formatWhole(goalProgress.projections.monthly_savings_needed)} per month.`}
+                    {viewingGoal.projections.deadline_passed
+                      ? `Your target date of ${formatTargetDate(viewingGoal.projections.target_date)} has passed - you'd still need about $${formatWhole(viewingGoal.projections.monthly_savings_needed)} per month to reach this goal.`
+                      : `To reach your goal by ${formatTargetDate(viewingGoal.projections.target_date)}, you'll need to save about $${formatWhole(viewingGoal.projections.monthly_savings_needed)} per month.`}
                   </Text>
                   <Pressable
                     onPress={() => setShowCalculationDetail((s) => !s)}
@@ -1262,21 +1512,21 @@ export default function Goal() {
                   {showCalculationDetail && (
                     <View style={goalStyles.calculationDetail}>
                       <Text style={styles.smallText}>
-                        Target amount: ${formatDecimal(goalProgress.target_amount)}
+                        Target amount: ${formatDecimal(viewingGoal.target_amount)}
                       </Text>
                       <Text style={styles.smallText}>
-                        Saved so far: ${formatDecimal(goalProgress.saved_amount)}
+                        Saved so far: ${formatDecimal(viewingGoal.saved_amount)}
                       </Text>
                       <Text style={styles.smallText}>
                         Remaining: $
-                        {formatDecimal(Math.max(0, goalProgress.target_amount - goalProgress.saved_amount))}
+                        {formatDecimal(Math.max(0, viewingGoal.target_amount - viewingGoal.saved_amount))}
                       </Text>
                       <Text style={styles.smallText}>
-                        Time remaining: {formatTimeRemaining(goalProgress.projections.months_remaining)}
+                        Time remaining: {formatTimeRemaining(viewingGoal.projections.months_remaining)}
                       </Text>
                       <Text style={styles.smallText}>
                         Remaining ÷ time remaining = about $
-                        {formatWhole(goalProgress.projections.monthly_savings_needed)}/month
+                        {formatWhole(viewingGoal.projections.monthly_savings_needed)}/month
                       </Text>
                     </View>
                   )}
@@ -1284,150 +1534,15 @@ export default function Goal() {
               </View>
             )}
 
-            {form.error && (
-              <Text style={[styles.errorText, goalStyles.cardMargin]}>{form.error}</Text>
-            )}
-
-            <View style={goalStyles.cardMargin}>
-              <PrimaryButton title="Save Changes" onPress={form.save} loading={form.saving} />
-            </View>
-
-            <Pressable
-              style={[goalStyles.deleteGoalButton, goalStyles.cardMargin]}
-              onPress={confirmDeleteGoal}
-              disabled={form.saving}
-              accessibilityRole="button"
-              accessibilityLabel="Delete goal"
-            >
-              <MaterialIcons name="delete-outline" size={18} color={colors.error} />
-              <Text style={goalStyles.deleteGoalButtonText}>Delete Goal</Text>
-            </Pressable>
-          </Animated.ScrollView>
-          </TopEdgeFade>
-        </>
-      ) : (
-        <>
-          <View style={goalStyles.backgroundLayer} pointerEvents="none">
-            <AppBackdrop scrollY={scrollY} />
-          </View>
-
-          <View style={goalStyles.wordmarkStrip}>
-            <SorrelWordmark layout="row" leafSize={30} showTagline={false} textColor={onBackdropTextColor} />
-            <MaterialIcons name="notifications-none" size={26} color={onBackdropTextColor || colors.darkest} />
-          </View>
-
-          <TopEdgeFade height={90}>
-          <Animated.ScrollView
-            style={[styles.list, goalStyles.transparentScroll]}
-            contentContainerStyle={{ paddingBottom: 150 }}
-            onScroll={onScroll}
-            scrollEventThrottle={16}
-          >
-            <View style={goalStyles.titleBlock}>
-              <Text style={[goalStyles.title, onBackdropTextColor && { color: onBackdropTextColor }]}>
-                Your Goals
-              </Text>
-              <Text
-                style={[goalStyles.subtitle, night && { color: 'rgba(244, 246, 242, 0.75)' }]}
-              >
-                Build the future you want.
-              </Text>
-            </View>
-
-            {!goalProgress ? (
-              <Text style={[styles.smallText, goalStyles.cardMargin]}>
-                Loading goal progress…
-              </Text>
-            ) : goalProgress.has_target ? (
+            {/* Phase 42: Goal Calculator, Savings Planner, and Advisor Tip
+                moved here from the old page-level Planning Tools row -
+                they're inherently per-goal tools now that a user can have
+                several goals, so they live inside this goal's own detail
+                view instead of needing a separate goal picker of their
+                own. Not shown while adding a brand new goal (no saved
+                goal/id to run them against yet). */}
+            {!addingGoal && viewingGoal && (
               <>
-                {(() => {
-                  const badge = goalStatusBadge(goalProgress);
-                  const percent = Math.min(100, Math.max(0, goalProgress.percent_complete));
-                  return (
-                    <View style={[styles.card, goalStyles.cardMargin]}>
-                      <View style={goalStyles.primaryGoalHeaderRow}>
-                        <View style={goalStyles.targetIconCircle}>
-                          <MaterialIcons name="track-changes" size={20} color={colors.dark} />
-                        </View>
-                        <View style={goalStyles.primaryGoalHeaderText}>
-                          <Text style={goalStyles.primaryGoalEyebrow}>Primary Goal</Text>
-                          <Text style={goalStyles.primaryGoalTarget}>
-                            ${formatDecimal(goalProgress.target_amount)} Target
-                          </Text>
-                        </View>
-                        <View style={[goalStyles.badge, { backgroundColor: badge.color }]}>
-                          <Text style={goalStyles.badgeText}>{badge.label}</Text>
-                        </View>
-                      </View>
-
-                      <Text style={goalStyles.primaryGoalTagline}>
-                        Turn your goals into progress.
-                      </Text>
-
-                      <View style={goalStyles.savedRow}>
-                        <Text style={goalStyles.savedAmount}>
-                          ${formatDecimal(goalProgress.saved_amount)} saved
-                        </Text>
-                        <Text style={goalStyles.savedPercent}>{Math.round(percent)}%</Text>
-                      </View>
-                      <View style={goalStyles.progressTrack}>
-                        <View style={[goalStyles.progressFill, { width: `${percent}%` }]} />
-                      </View>
-
-                      <View style={goalStyles.editGoalSpacing}>
-                        <PrimaryButton title="EDIT GOAL" onPress={() => setEditing(true)} />
-                      </View>
-                    </View>
-                  );
-                })()}
-
-                <View style={[styles.card, goalStyles.cardMargin, goalStyles.insightCard]}>
-                  <View style={goalStyles.insightIconCircle}>
-                    <MaterialIcons name="auto-awesome" size={18} color={colors.dark} />
-                  </View>
-                  <View style={goalStyles.insightBody}>
-                    <Text style={goalStyles.cardEyebrow}>GOAL INSIGHT</Text>
-                    <Text style={goalStyles.insightText}>{goalProgress.message}</Text>
-                  </View>
-                </View>
-
-                {goalProgress.projections && (
-                  <View style={[styles.card, goalStyles.cardMargin]}>
-                    <View style={goalStyles.projectionsHeaderRow}>
-                      <MaterialIcons name="show-chart" size={18} color={colors.dark} />
-                      <Text style={goalStyles.cardTitle}>Goal Projections</Text>
-                    </View>
-                    <View style={goalStyles.projectionsRow}>
-                      <View style={goalStyles.projectionTile}>
-                        <Text style={goalStyles.projectionLabel}>
-                          {goalProgress.projections.deadline_passed
-                            ? 'STILL NEEDED'
-                            : 'MONTHLY SAVINGS NEEDED'}
-                        </Text>
-                        <Text style={goalStyles.projectionValue}>
-                          ${formatWhole(goalProgress.projections.monthly_savings_needed)}
-                        </Text>
-                      </View>
-                      <View style={goalStyles.projectionDivider} />
-                      <View style={goalStyles.projectionTile}>
-                        <Text style={goalStyles.projectionLabel}>TARGET DATE</Text>
-                        <Text style={goalStyles.projectionValue}>
-                          {formatTargetDate(goalProgress.projections.target_date)}
-                        </Text>
-                      </View>
-                      <View style={goalStyles.projectionDivider} />
-                      <View style={goalStyles.projectionTile}>
-                        <Text style={goalStyles.projectionLabel}>TIME REMAINING</Text>
-                        <Text style={goalStyles.projectionValue}>
-                          {goalProgress.projections.deadline_passed
-                            ? 'Passed'
-                            : formatTimeRemaining(goalProgress.projections.months_remaining)}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-                )}
-
                 <View style={[styles.card, goalStyles.cardMargin]}>
                   <View style={goalStyles.projectionsHeaderRow}>
                     <MaterialIcons name="calculate" size={18} color={colors.dark} />
@@ -1526,19 +1641,66 @@ export default function Goal() {
                     <MaterialIcons name="flag" size={18} color={colors.dark} />
                     <Text style={goalStyles.cardTitle}>Savings Planner</Text>
                   </View>
-                  {!showMilestones ? (
-                    <Pressable
-                      style={[goalStyles.estimateOutlineButton, goalStyles.estimateSpacing]}
-                      onPress={openMilestones}
-                      accessibilityRole="button"
-                    >
-                      <Text style={goalStyles.estimateOutlineButtonText}>SEE CHECKPOINTS TOWARD YOUR GOAL</Text>
-                    </Pressable>
-                  ) : loadingMilestones ? (
+                  {/* Phase 42: rebuilt as hypothetical-pace-driven, same
+                      math/UI pattern as the Goal Calculator above - this
+                      app has no per-account history deep enough yet to
+                      trust a realized pace for every goal, so every
+                      checkpoint date here is explicitly "if you
+                      contributed $X/month," never an observed rate. */}
+                  <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
+                    Type or speak a hypothetical monthly amount to see when each checkpoint would land.
+                  </Text>
+                  <View style={[goalStyles.calculatorInputRow, goalStyles.estimateSpacing]}>
+                    <TextInput
+                      style={[styles.input, goalStyles.calculatorInput]}
+                      value={milestonesAmountText}
+                      onChangeText={setMilestonesAmountText}
+                      placeholder="e.g. $200"
+                      placeholderTextColor={colors.placeholder}
+                      keyboardType="numeric"
+                      editable={!loadingMilestones && !milestonesTranscribing}
+                    />
+                    {milestonesTranscribing ? (
+                      <ActivityIndicator style={goalStyles.calculatorMicButton} />
+                    ) : (
+                      <Pressable
+                        onPress={onMilestonesMicPress}
+                        disabled={loadingMilestones}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          milestonesRecorderState.isRecording ? 'Stop recording' : 'Speak the amount'
+                        }
+                        style={[
+                          goalStyles.calculatorMicButton,
+                          milestonesRecorderState.isRecording
+                            ? goalStyles.calculatorMicButtonRecording
+                            : goalStyles.calculatorMicButtonIdle,
+                        ]}
+                      >
+                        <MaterialIcons
+                          name={milestonesRecorderState.isRecording ? 'stop' : 'mic'}
+                          size={20}
+                          color={colors.background}
+                        />
+                      </Pressable>
+                    )}
+                  </View>
+                  {milestonesVoiceError && (
+                    <Text style={[styles.errorText, goalStyles.estimateSpacing]}>{milestonesVoiceError}</Text>
+                  )}
+                  {milestonesError && <Text style={styles.errorText}>{milestonesError}</Text>}
+                  {loadingMilestones ? (
                     <ActivityIndicator style={goalStyles.estimateSpacing} />
-                  ) : milestonesError ? (
-                    <Text style={[styles.errorText, goalStyles.estimateSpacing]}>{milestonesError}</Text>
-                  ) : milestonesResult?.available ? (
+                  ) : (
+                    <View style={goalStyles.estimateSpacing}>
+                      <PrimaryButton
+                        title="SEE CHECKPOINTS"
+                        onPress={fetchMilestones}
+                        disabled={milestonesTranscribing || milestonesRecorderState.isRecording}
+                      />
+                    </View>
+                  )}
+                  {milestonesResult?.available && (
                     <View style={goalStyles.estimateSpacing}>
                       {milestonesResult.milestones.map((milestone) => (
                         <View key={milestone.percent} style={goalStyles.milestoneRow}>
@@ -1551,82 +1713,210 @@ export default function Goal() {
                         </View>
                       ))}
                     </View>
-                  ) : (
+                  )}
+                  {milestonesResult && !milestonesResult.available && (
                     <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
-                      {milestonesResult?.detail || 'Checkpoints are not available right now.'}
+                      {milestonesResult.detail || 'Checkpoints are not available right now.'}
                     </Text>
                   )}
                 </View>
 
-                {goalSettings.round_ups_enabled !== false && (
-                <View style={[styles.card, goalStyles.cardMargin]}>
-                  <View style={goalStyles.projectionsHeaderRow}>
-                    <MaterialIcons name="toll" size={18} color={colors.dark} />
-                    <Text style={goalStyles.cardTitle}>Round-Ups</Text>
-                  </View>
-                  {!showRoundUps ? (
-                    <Pressable
-                      style={[goalStyles.estimateOutlineButton, goalStyles.estimateSpacing]}
-                      onPress={openRoundUps}
-                      accessibilityRole="button"
-                    >
-                      <Text style={goalStyles.estimateOutlineButtonText}>
-                        SEE HOW MUCH ROUND-UPS COULD ADD UP TO
-                      </Text>
-                    </Pressable>
-                  ) : loadingRoundUps ? (
-                    <ActivityIndicator style={goalStyles.estimateSpacing} />
-                  ) : roundUpsError ? (
-                    <Text style={[styles.errorText, goalStyles.estimateSpacing]}>{roundUpsError}</Text>
-                  ) : (
-                    <View style={[goalStyles.estimateSpacing, goalStyles.wrappingTextBlock]}>
-                      <Text style={[styles.smallText, goalStyles.wrappingText]}>
-                        Rounding each of this period's {roundUpsResult?.transaction_count ?? 0}{' '}
-                        purchase{roundUpsResult?.transaction_count === 1 ? '' : 's'} up to the next
-                        dollar would have added up to{' '}
-                        <Text style={goalStyles.inlineBold}>
-                          ${formatDecimal(roundUpsResult?.total_round_ups ?? 0)}
-                        </Text>
-                        . This is an estimate only - nothing is actually being set aside
-                        automatically.
-                      </Text>
-                    </View>
-                  )}
-                </View>
-                )}
+                {goalSettings.show_advisor_tip !== false &&
+                  (() => {
+                    const tip = computeGoalAdvisorTip({ goalProgress: viewingGoal, subscriptionAudit, budgetStatus });
+                    if (!tip) return null;
+                    return (
+                      <View style={[styles.card, goalStyles.cardMargin, goalStyles.insightCard]}>
+                        <View style={goalStyles.insightIconCircle}>
+                          <MaterialIcons name={tip.icon} size={18} color={colors.dark} />
+                        </View>
+                        <View style={goalStyles.insightBody}>
+                          <Text style={goalStyles.cardEyebrow}>ADVISOR TIP</Text>
+                          <Text style={goalStyles.insightText}>{tip.text}</Text>
+                        </View>
+                      </View>
+                    );
+                  })()}
               </>
-            ) : (
+            )}
+
+            {form.error && (
+              <Text style={[styles.errorText, goalStyles.cardMargin]}>{form.error}</Text>
+            )}
+
+            <View style={goalStyles.cardMargin}>
+              <PrimaryButton
+                title={addingGoal ? 'Save Goal' : 'Save Changes'}
+                onPress={() => form.save({ account_ids: goalAccountIds })}
+                loading={form.saving}
+              />
+            </View>
+
+            {/* Archiving only makes sense for a goal that already exists -
+                not shown while adding a brand new one. */}
+            {!addingGoal && (
+              <Pressable
+                style={[goalStyles.deleteGoalButton, goalStyles.cardMargin]}
+                onPress={confirmDeleteGoal}
+                disabled={form.saving}
+                accessibilityRole="button"
+                accessibilityLabel="Archive goal"
+              >
+                <MaterialIcons name="delete-outline" size={18} color={colors.error} />
+                <Text style={goalStyles.deleteGoalButtonText}>Archive Goal</Text>
+              </Pressable>
+            )}
+          </Animated.ScrollView>
+          </TopEdgeFade>
+        </>
+      ) : (
+        <>
+          <View style={goalStyles.backgroundLayer} pointerEvents="none">
+            <AppBackdrop scrollY={scrollY} />
+          </View>
+
+          <View style={goalStyles.wordmarkStrip}>
+            <SorrelWordmark layout="row" leafSize={30} showTagline={false} textColor={onBackdropTextColor} />
+            <MaterialIcons name="notifications-none" size={26} color={onBackdropTextColor || colors.darkest} />
+          </View>
+
+          <TopEdgeFade height={90}>
+          <Animated.ScrollView
+            style={[styles.list, goalStyles.transparentScroll]}
+            contentContainerStyle={{ paddingBottom: 150 }}
+            onScroll={onScroll}
+            scrollEventThrottle={16}
+          >
+            <View style={goalStyles.titleBlock}>
+              <Text style={[goalStyles.title, onBackdropTextColor && { color: onBackdropTextColor }]}>
+                Your Goals
+              </Text>
+              <Text
+                style={[goalStyles.subtitle, night && { color: 'rgba(244, 246, 242, 0.75)' }]}
+              >
+                Build the future you want.
+              </Text>
+            </View>
+
+            {/* Phase 42 (multi-goal tracking, 2026-09-08): the single
+                "Primary Goal" card is now a list of compact goal cards -
+                tapping one opens its own local-state detail view (see
+                showingGoalDetail above) with the full progress/projections/
+                Calculator/Savings Planner/Advisor Tip content the old
+                single card and its page-level Planning Tools row used to
+                show. Round-Ups (goal-independent - it never referenced
+                goal amount/type) is relocated to page level, right after
+                the list, instead of living inside a per-goal branch. */}
+            {!goalsProgress ? (
+              <Text style={[styles.smallText, goalStyles.cardMargin]}>
+                Loading goals…
+              </Text>
+            ) : goalsProgress.length === 0 ? (
               <View style={[styles.card, goalStyles.cardMargin, goalStyles.insightCard]}>
                 <View style={goalStyles.insightIconCircle}>
                   <MaterialIcons name="auto-awesome" size={18} color={colors.dark} />
                 </View>
                 <View style={goalStyles.insightBody}>
                   <Text style={goalStyles.cardEyebrow}>GOAL INSIGHT</Text>
-                  <Text style={goalStyles.insightText}>{goalProgress.message}</Text>
+                  <Text style={goalStyles.insightText}>
+                    No goals set yet - add one to start tracking real progress.
+                  </Text>
                   <View style={goalStyles.editGoalSpacing}>
-                    <PrimaryButton title="SET A TARGET" onPress={() => setEditing(true)} />
+                    <PrimaryButton title="ADD A GOAL" onPress={openAddGoal} />
                   </View>
                 </View>
               </View>
+            ) : (
+              <>
+                {goalsProgress.map((g) => {
+                  const badge = goalStatusBadge(g);
+                  const percent = Math.min(100, Math.max(0, g.percent_complete || 0));
+                  return (
+                    <Pressable
+                      key={g.id}
+                      style={[styles.card, goalStyles.cardMargin]}
+                      onPress={() => openGoal(g.id)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`View ${goalDisplayName(g.goal_type, g.notes)}`}
+                    >
+                      <View style={goalStyles.primaryGoalHeaderRow}>
+                        <View style={goalStyles.targetIconCircle}>
+                          <MaterialIcons name={GOAL_TYPE_ICON[g.goal_type] || 'flag'} size={20} color={colors.dark} />
+                        </View>
+                        <View style={goalStyles.primaryGoalHeaderText}>
+                          <Text style={goalStyles.primaryGoalEyebrow}>
+                            {goalDisplayName(g.goal_type, g.notes)}
+                          </Text>
+                          <Text style={goalStyles.primaryGoalTarget}>
+                            {g.has_target ? `$${formatDecimal(g.target_amount)} Target` : 'No target set'}
+                          </Text>
+                        </View>
+                        <View style={[goalStyles.badge, { backgroundColor: badge.color }]}>
+                          <Text style={goalStyles.badgeText}>{badge.label}</Text>
+                        </View>
+                      </View>
+
+                      {g.has_target && (
+                        <>
+                          <View style={goalStyles.savedRow}>
+                            <Text style={goalStyles.savedAmount}>
+                              ${formatDecimal(g.saved_amount)} saved
+                            </Text>
+                            <Text style={goalStyles.savedPercent}>{Math.round(percent)}%</Text>
+                          </View>
+                          <View style={goalStyles.progressTrack}>
+                            <View style={[goalStyles.progressFill, { width: `${percent}%` }]} />
+                          </View>
+                        </>
+                      )}
+
+                      <Text style={[styles.smallText, { marginTop: 8 }]}>{g.message}</Text>
+                    </Pressable>
+                  );
+                })}
+
+                <View style={goalStyles.cardMargin}>
+                  <PrimaryButton title="ADD ANOTHER GOAL" onPress={openAddGoal} />
+                </View>
+              </>
             )}
 
-            {goalProgress &&
-              goalSettings.show_advisor_tip !== false &&
-              (() => {
-                const tip = computeGoalAdvisorTip({ goalProgress, subscriptionAudit, budgetStatus });
-                if (!tip) return null;
-                return (
-                  <View style={[styles.card, goalStyles.cardMargin, goalStyles.insightCard]}>
-                    <View style={goalStyles.insightIconCircle}>
-                      <MaterialIcons name={tip.icon} size={18} color={colors.dark} />
-                    </View>
-                    <View style={goalStyles.insightBody}>
-                      <Text style={goalStyles.cardEyebrow}>ADVISOR TIP</Text>
-                      <Text style={goalStyles.insightText}>{tip.text}</Text>
-                    </View>
+            {goalSettings.round_ups_enabled !== false && (
+              <View style={[styles.card, goalStyles.cardMargin]}>
+                <View style={goalStyles.projectionsHeaderRow}>
+                  <MaterialIcons name="toll" size={18} color={colors.dark} />
+                  <Text style={goalStyles.cardTitle}>Round-Ups</Text>
+                </View>
+                {!showRoundUps ? (
+                  <Pressable
+                    style={[goalStyles.estimateOutlineButton, goalStyles.estimateSpacing]}
+                    onPress={openRoundUps}
+                    accessibilityRole="button"
+                  >
+                    <Text style={goalStyles.estimateOutlineButtonText}>
+                      SEE HOW MUCH ROUND-UPS COULD ADD UP TO
+                    </Text>
+                  </Pressable>
+                ) : loadingRoundUps ? (
+                  <ActivityIndicator style={goalStyles.estimateSpacing} />
+                ) : roundUpsError ? (
+                  <Text style={[styles.errorText, goalStyles.estimateSpacing]}>{roundUpsError}</Text>
+                ) : (
+                  <View style={[goalStyles.estimateSpacing, goalStyles.wrappingTextBlock]}>
+                    <Text style={[styles.smallText, goalStyles.wrappingText]}>
+                      Rounding each of this period's {roundUpsResult?.transaction_count ?? 0}{' '}
+                      purchase{roundUpsResult?.transaction_count === 1 ? '' : 's'} up to the next
+                      dollar would have added up to{' '}
+                      <Text style={goalStyles.inlineBold}>
+                        ${formatDecimal(roundUpsResult?.total_round_ups ?? 0)}
+                      </Text>
+                      . This is an estimate only - nothing is actually being set aside
+                      automatically.
+                    </Text>
                   </View>
-                );
-              })()}
+                )}
+              </View>
+            )}
 
             {(() => {
               const estimate = emergencyFundStatus?.essential_expense_estimate;
@@ -1805,7 +2095,7 @@ export default function Goal() {
                     <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
                       Turn this on to track a dedicated safety-net balance across one or more of
                       your accounts, the same way a budget category is tracked - separate from
-                      your primary goal above, not competing with it.
+                      your other goals above, not competing with them.
                     </Text>
                   )}
                 </View>

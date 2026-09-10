@@ -58,8 +58,28 @@ function renderToolResult({ tool, result }) {
   }
 
   if (tool === 'project_affordable_date') {
-    if (!result.available) return <Text style={styles.smallText}>{result.detail}</Text>;
-    return <Text style={styles.smallText}>{describeProjection(result)}</Text>;
+    // Phase 42 (multi-goal tracking, 2026-09-08): this now answers per
+    // goal ({ available, goals: [...] }) since the chat has no way to know
+    // which goal the user means - one line per goal, prefixed with its
+    // name only when there's more than one to disambiguate.
+    const projectionGoals = result.goals || [];
+    if (!result.available || projectionGoals.length === 0) {
+      return (
+        <Text style={styles.smallText}>
+          {result.detail || "No goal is set, so there's no observed saving rate to project from."}
+        </Text>
+      );
+    }
+    return (
+      <>
+        {projectionGoals.map((g) => (
+          <Text key={g.goal_id} style={styles.smallText}>
+            {projectionGoals.length > 1 ? `${g.notes || g.goal_type}: ` : ''}
+            {g.available ? describeProjection(g) : g.detail || 'Not available for this goal.'}
+          </Text>
+        ))}
+      </>
+    );
   }
 
   if (tool === 'estimate_financing_payment') {

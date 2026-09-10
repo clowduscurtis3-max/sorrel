@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { computeBudgetStatus } = require('../budget');
-const { computeGoalProgress, computeNetSaved, projectFinishDate } = require('../goalProgress');
+const { projectFinishDate } = require('../goalProgress');
 const { INTERVAL_DAYS } = require('../recurring');
 
 // Phase 5 Step 1 extracted three pieces of already-shipped logic so the
@@ -18,6 +18,15 @@ const { INTERVAL_DAYS } = require('../recurring');
 // against the original implementations, copied verbatim below, so a future
 // change to the shared version can't silently alter what Phases 2-4 already
 // show the user.
+//
+// Phase 42 (multi-goal tracking, 2026-09-08): computeNetSaved/
+// computeGoalProgress (and their own pin tests below) were retired along
+// with the net-cash-flow goal model they belonged to - goals are
+// balance-tracked now (server/balanceProgress.js/goalProgress.js's
+// computeGoalBalanceProgress), and computeNetSaved/computeGoalProgress had
+// zero remaining callers anywhere in the app once that migration finished.
+// projectFinishDate survives unchanged (still reused by the balance model)
+// and keeps its own pin below.
 
 // --- Original implementations, copied from main@7fefa63 -------------------
 
@@ -51,16 +60,6 @@ function originalBudgetStatus({ budgets, actuals, SPEND_CATEGORIES }) {
       is_user_set: budgetByCategory[category]?.is_user_set ?? false,
     }))
     .sort((a, b) => a.category.localeCompare(b.category));
-}
-
-// Was inline in getGoalProgress (server/goalProgress.js).
-function originalNetSaved(transactions) {
-  let netSaved = 0;
-  for (const t of transactions || []) {
-    if (t.category === 'Transfers') continue;
-    netSaved -= t.amount;
-  }
-  return netSaved;
 }
 
 // Was inline in computeGoalProgress (server/goalProgress.js).
@@ -131,34 +130,6 @@ test('computeBudgetStatus stays sorted by category name', () => {
   assert.deepEqual(names, [...names].sort((a, b) => a.localeCompare(b)));
 });
 
-test('computeNetSaved matches the original accumulation loop', () => {
-  const cases = [
-    [],
-    null,
-    undefined,
-    [{ category: 'Income', amount: -2000 }],
-    [{ category: 'Dining', amount: 50 }],
-    [{ category: 'Transfers', amount: 900 }],
-    [{ category: 'Uncategorized', amount: 12.34 }],
-    [
-      { category: 'Income', amount: -2000 },
-      { category: 'Transfers', amount: 500 },
-      { category: 'Dining', amount: 120.5 },
-      { category: 'Uncategorized', amount: 9.99 },
-      { category: 'Shopping', amount: -15 }, // a refund
-    ],
-  ];
-
-  for (const txs of cases) {
-    assert.equal(computeNetSaved(txs), originalNetSaved(txs), `diverged on ${JSON.stringify(txs)}`);
-  }
-});
-
-test('computeNetSaved excludes Transfers but still counts Uncategorized as spend', () => {
-  assert.equal(computeNetSaved([{ category: 'Transfers', amount: 500 }]), 0);
-  assert.equal(computeNetSaved([{ category: 'Uncategorized', amount: 40 }]), -40);
-});
-
 test('projectFinishDate matches the original inline projection', () => {
   const now = new Date('2026-08-11T12:00:00Z');
   const cases = [
@@ -182,22 +153,6 @@ test('projectFinishDate returns null instead of a nonsense date on a non-positiv
   const now = new Date('2026-08-11T12:00:00Z');
   assert.equal(projectFinishDate({ saved: 100, target: 10000, monthlyPace: 0, now }), null);
   assert.equal(projectFinishDate({ saved: 100, target: 10000, monthlyPace: -50, now }), null);
-});
-
-test('computeGoalProgress still projects a date on the path that used the inline math', () => {
-  // The extraction sits on a branch that guarantees saved > 0, so the null
-  // return can never surface there. If that guard ever regresses, this test
-  // fails rather than the app crashing on .toISOString() of null.
-  const progress = computeGoalProgress({
-    goal: { goal_type: 'savings', target_amount: 10000, target_timeframe_months: 12 },
-    netSaved: 1200,
-    goalCreatedAt: new Date('2026-06-01T00:00:00Z'),
-    now: new Date('2026-08-11T12:00:00Z'),
-  });
-
-  assert.equal(progress.has_target, true);
-  assert.match(progress.projected_date, /^\d{4}-\d{2}-\d{2}$/);
-  assert.ok(progress.message.includes(progress.projected_date));
 });
 
 test('INTERVAL_DAYS stays in step with the detector cadence table', () => {

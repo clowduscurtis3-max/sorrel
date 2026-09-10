@@ -81,12 +81,27 @@ export function useGoalForm(initialGoal, { onSaved, onGoalProgressChanged } = {}
     setGoalNotes(g.notes || '');
   }
 
-  // Prefills when opened to edit an already-saved goal (first-run has
-  // `initialGoal === null`, so this is a no-op there and the fields stay at
-  // the defaults declared above).
+  // Prefills when opened to edit an already-saved goal. Also clears back to
+  // blank defaults when `initialGoal` becomes null (Phase 42, multi-goal
+  // tracking, 2026-09-08: the Goal tab is now a single long-lived component
+  // instance that switches between editing different existing goals AND
+  // adding a brand new one - a real, new transition the old single-goal
+  // app never had to handle, since `initialGoal` there only ever went
+  // null-to-truthy once, at first save, never truthy-to-null again mid-
+  // session). Without the else branch, switching from editing goal A into
+  // "add a new goal" would leave goal A's fields sitting in the form
+  // instead of clearing them - mirrors reset()'s own already-correct
+  // symmetric handling of both cases, just re-run automatically whenever
+  // the caller changes which goal (or none) this hook is pointed at.
   useEffect(() => {
-    if (!initialGoal) return;
-    applyInitialGoal(initialGoal);
+    if (initialGoal) {
+      applyInitialGoal(initialGoal);
+    } else {
+      setGoalType('savings');
+      setGoalAmount('');
+      setGoalTimeframe('');
+      setGoalNotes('');
+    }
   }, [initialGoal]);
 
   // Real bug found by adversarial review, 2026-08-13: the Goal tab's
@@ -116,10 +131,17 @@ export function useGoalForm(initialGoal, { onSaved, onGoalProgressChanged } = {}
     setSaving(true);
     setError(null);
     const body = {
+      // Phase 42 (multi-goal tracking, 2026-09-08): POST /goal now
+      // upserts by id, not by user_id - present means "update this goal,"
+      // absent means "create a new one." Without this, every save (even
+      // editing an already-existing goal) would silently create a second
+      // goal instead of updating the one being edited.
+      id: initialGoal?.id,
       goal_type: overrides.goal_type ?? goalType,
       target_amount: goalAmount ? parseDollarAmount(goalAmount) : null,
       target_timeframe_months: goalTimeframe ? Number(goalTimeframe) : null,
       notes: goalNotes || null,
+      account_ids: initialGoal?.account_ids,
       ...overrides,
     };
     try {
@@ -160,12 +182,20 @@ export function useGoalForm(initialGoal, { onSaved, onGoalProgressChanged } = {}
   // passes its own explicit target_amount: null override, ignoring
   // goalAmount entirely, so it must never be blocked by stale unparseable
   // text left in the field.
-  function save() {
+  // `overrides` (Phase 42, 2026-09-08): lets a caller merge extra fields
+  // into the save (e.g. (tabs)/goal.js's account-linking picker, which
+  // this shared hook has no field state of its own for). Every existing
+  // `onPress={form.save}` wiring was updated to `onPress={() =>
+  // form.save()}` at the same time this was added - Pressable's onPress
+  // otherwise calls its handler with the raw press event as the first
+  // argument, which would silently become `overrides` and get spread into
+  // the POST body.
+  function save(overrides = {}) {
     if (goalAmount && parseDollarAmount(goalAmount) == null) {
       setError('Enter a valid target amount, like $10,000, or leave it blank.');
       return;
     }
-    persist();
+    persist(overrides);
   }
 
   // The "no specific goal" default path - no target/timeframe/notes, so

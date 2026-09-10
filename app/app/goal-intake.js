@@ -81,7 +81,7 @@ export default function GoalIntake() {
         {form.saving ? (
           <ActivityIndicator />
         ) : (
-          <PrimaryButton title="Save goal" onPress={form.save} />
+          <PrimaryButton title="Save goal" onPress={() => form.save()} />
         )}
       </View>
       <StatusBar style="auto" />

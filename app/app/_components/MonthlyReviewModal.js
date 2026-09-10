@@ -76,9 +76,11 @@ export default function MonthlyReviewModal({ visible, onClose, monthlyReview }) 
             </View>
           )}
 
-          {monthlyReview.goal_pace?.message && (
-            <Text style={localStyles.goalPaceText}>{monthlyReview.goal_pace.message}</Text>
-          )}
+          {/* Phase 42: a user can have several goals now - one message line
+              per goal, same content each already carried individually. */}
+          {(monthlyReview.goals || []).map((g) => (
+            <Text key={g.id} style={localStyles.goalPaceText}>{g.message}</Text>
+          ))}
 
           {rows.length > 0 && (
             <>

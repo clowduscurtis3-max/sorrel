@@ -124,8 +124,17 @@ export function describeProjection(p) {
 // Exported for AffordabilityChat.js's own fallback opening-sections builder
 // (used only when explainScenario failed/returned the old shape - see that
 // file's buildOpeningSections).
+//
+// Phase 42 (multi-goal tracking, 2026-09-08): a goal with no linked
+// accounts is reported explicitly, not silently omitted the way any other
+// unavailable reason still is - real, actionable information ("link an
+// account to see this") rather than a generic fallback.
 export function describeGoalCallout(goalImpact) {
-  if (!goalImpact?.available) return null;
+  if (!goalImpact) return null;
+  if (goalImpact.reason === 'no_accounts_linked') {
+    return "No accounts are linked to this goal yet, so its impact can't be shown.";
+  }
+  if (!goalImpact.available) return null;
   if (goalImpact.stalls_goal) {
     return "This would stop your goal from advancing at its current pace.";
   }
@@ -136,6 +145,25 @@ export function describeGoalCallout(goalImpact) {
     `This pushes your projected goal date back about ${goalImpact.delay_days} ` +
     `day${goalImpact.delay_days === 1 ? '' : 's'}, to around ${formatDateMDY(goalImpact.projected_date_after)}.`
   );
+}
+
+// Phase 42: goal_impact now carries a `goals` array (one entry per active
+// goal, same per-goal shape describeGoalCallout/shortGoalImpactLabel
+// already handle) alongside the single worst-affected one at the top
+// level (kept for buildOpeningSections' own single-sentence use, and for
+// callers that only ever had one goal to begin with). This renders "for
+// each affected goal" instead of assuming there's only one - prefixed
+// with the goal's own name only when there's more than one to
+// disambiguate, so a single-goal account reads exactly as it always did.
+export function describeGoalCallouts(goalImpact) {
+  const goals = goalImpact?.goals || [];
+  return goals
+    .map((g) => {
+      const text = describeGoalCallout(g);
+      if (!text) return null;
+      return { goalId: g.goal_id, text: goals.length > 1 ? `${g.notes || g.goal_type}: ${text}` : text };
+    })
+    .filter(Boolean);
 }
 
 // Concrete "here's where the money could come from" line, straight off
@@ -259,11 +287,11 @@ const STATUS_TEXT_COLOR = { positive: colors.primary, caution: colors.warning, n
 // no tiering, no precision lost. See DigitAmountPicker.js's own header
 // for the full reasoning.
 export default function AffordabilityQuery() {
-  // "A few things to consider" (comparison screen) - goalProgress and
+  // "A few things to consider" (comparison screen) - goalsProgress and
   // subscriptionAudit are already fetched app-wide by AppDataProvider
   // (Home/Goal tabs already consume both), reused here with zero new
   // fetch plumbing.
-  const { goalProgress, subscriptionAudit } = useAppData();
+  const { goalsProgress, subscriptionAudit } = useAppData();
 
   // This component always renders directly on top of the Budget tab's
   // AppBackdrop (no card wrapper around its own header/status-label text)
@@ -839,10 +867,14 @@ export default function AffordabilityQuery() {
             </View>
           )}
 
-          {result.goal_impact?.available && (
+          {/* Phase 42: a user can have several goals now - one line per
+              affected goal, not just the single worst-affected one. */}
+          {describeGoalCallouts(result.goal_impact).length > 0 && (
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Your goal</Text>
-              <Text style={styles.smallText}>{describeGoalCallout(result.goal_impact)}</Text>
+              <Text style={styles.cardTitle}>Your goals</Text>
+              {describeGoalCallouts(result.goal_impact).map(({ goalId, text }) => (
+                <Text key={goalId} style={styles.smallText}>{text}</Text>
+              ))}
             </View>
           )}
 
@@ -963,14 +995,19 @@ export default function AffordabilityQuery() {
                         network calls. Each card only renders when its own
                         data is actually available - never a placeholder
                         or an invented number. */}
-                    {(goalProgress || subscriptionAudit) && (
+                    {((goalsProgress || []).length > 0 || subscriptionAudit) && (
                       <View style={{ gap: 8 }}>
                         <Text style={styles.cardTitle}>A few things to consider</Text>
 
-                        {goalProgress && (
+                        {/* Phase 42: a user can have several goals now -
+                            one line per goal, same content each already
+                            carried individually. */}
+                        {(goalsProgress || []).length > 0 && (
                           <View style={styles.card}>
                             <Text style={styles.cardTitle}>Goal progress</Text>
-                            <Text style={styles.smallText}>{goalProgress.message}</Text>
+                            {goalsProgress.map((g) => (
+                              <Text key={g.id} style={styles.smallText}>{g.message}</Text>
+                            ))}
                           </View>
                         )}
 
