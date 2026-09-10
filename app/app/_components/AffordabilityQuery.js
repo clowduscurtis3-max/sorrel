@@ -1058,9 +1058,26 @@ export default function AffordabilityQuery() {
         </View>
       )}
 
+      {/* Real bug found 2026-09-10: projectAffordableDate (server/scenario.js)
+          was rebuilt for Phase 42 (multi-goal tracking) to answer per goal
+          ({ available, goals: [...] }) instead of one flat object -
+          AffordabilityChat.js's own project_affordable_date tool renderer was
+          updated for this at the time, but this main-screen render path was
+          missed, so describeProjection was being called with the wrapper
+          object itself (no .status/.saved_amount/.monthly_pace) instead of a
+          per-goal entry - producing a nonsense sentence ("$NaN/month",
+          "Invalid Date") rather than a crash, so it went unnoticed until a
+          direct code read. Fixed to mirror AffordabilityChat.js's own
+          per-goal mapping exactly - one line per goal, prefixed with its name
+          only when there's more than one to disambiguate. */}
       {response?.status === 'result' && response.projection && (
         <View style={styles.card}>
-          <Text style={styles.smallText}>{describeProjection(response.projection)}</Text>
+          {(response.projection.goals || []).map((g) => (
+            <Text key={g.goal_id} style={styles.smallText}>
+              {response.projection.goals.length > 1 ? `${g.notes || g.goal_type}: ` : ''}
+              {g.available ? describeProjection(g) : g.detail || 'Not available for this goal.'}
+            </Text>
+          ))}
         </View>
       )}
 

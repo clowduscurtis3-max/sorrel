@@ -130,10 +130,6 @@ async function getEssentialExpenseEstimate(userId) {
 // estimate function above is unchanged and still reused as the
 // suggested-target starting point.
 
-function round2(n) {
-  return Math.round(n * 100) / 100;
-}
-
 // Thin wrapper, same isolation style as every other compute function in
 // this app. The actual "sum selected account balances toward a target"
 // math now lives in computeBalanceProgress (server/balanceProgress.js,

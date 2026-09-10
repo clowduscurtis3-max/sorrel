@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -283,6 +283,21 @@ export default function Goal() {
   const [viewingGoalId, setViewingGoalId] = useState(null);
   const [addingGoal, setAddingGoal] = useState(false);
   const viewingGoal = (goalsProgress || []).find((g) => g.id === viewingGoalId) || null;
+
+  // Found by /code-review (2026-09-10): the Calculator/Savings Planner
+  // requests below (runGoalCalculator/fetchMilestones) capture viewingGoalId
+  // in the request body, but resetGoalDependentTools only clears state
+  // synchronously on navigation - a slow in-flight request for Goal A that
+  // resolves AFTER the user has already navigated to Goal B still called
+  // setCalculatorResult/setMilestonesResult unconditionally, silently
+  // overwriting Goal B's just-cleared panel with Goal A's stale numbers.
+  // A ref (not the viewingGoalId state itself, which would be captured
+  // stale by the async closure at request time) lets each response check
+  // "is this still the goal actually on screen" against the live value.
+  const viewingGoalIdRef = useRef(viewingGoalId);
+  useEffect(() => {
+    viewingGoalIdRef.current = viewingGoalId;
+  }, [viewingGoalId]);
   const showingGoalDetail = addingGoal || viewingGoalId !== null;
 
   // Which real linked accounts this goal's balance is tracked against -
@@ -316,7 +331,19 @@ export default function Goal() {
   function openGoal(goalId) {
     setAddingGoal(false);
     setViewingGoalId(goalId);
-    setGoalAccountIds((goalsProgress || []).find((g) => g.id === goalId)?.account_ids || []);
+    // Found by /code-review (2026-09-10): a since-unlinked account's id
+    // stayed in account_ids forever, the same bug already found and fixed
+    // for Emergency Fund's own editor (openEmergencyFundEditor, above) -
+    // the checkbox list only renders currently-linked accounts, so a stale
+    // id had no checkbox to ever uncheck it with, and every save kept
+    // resending it, permanently failing the server's ownership check with
+    // an opaque, unrecoverable "SERVER_ERROR." Same filter, mirrored here.
+    const realAccountIds = new Set(depositoryAccounts.map((a) => a.id));
+    setGoalAccountIds(
+      ((goalsProgress || []).find((g) => g.id === goalId)?.account_ids || []).filter((id) =>
+        realAccountIds.has(id)
+      )
+    );
     setActiveEditor(null);
     setShowCalculationDetail(false);
     resetGoalDependentTools();
@@ -328,6 +355,16 @@ export default function Goal() {
     setActiveEditor(null);
     setShowCalculationDetail(false);
     resetGoalDependentTools();
+    // Found by /code-review (2026-09-10): initialGoal (passed into
+    // useGoalForm just below) goes null -> null on this transition
+    // whenever the previous state was already null (e.g. saving a new
+    // goal then immediately tapping "Add another goal" again) - GoalForm's
+    // own prefill effect bails out on a no-op dependency change, so the
+    // just-saved goal's values silently stayed in the form fields.
+    // Calling reset() explicitly (its own `if (initialGoal)` check reads
+    // the *current* closed-over value, which is genuinely null here,
+    // regardless of whether the effect fires) blanks them unconditionally.
+    form.reset();
   }
   function closeGoalDetail() {
     form.reset();
@@ -345,6 +382,10 @@ export default function Goal() {
       setAddingGoal(false);
       setGoalAccountIds([]);
       resetGoalDependentTools();
+      // Same null -> null gap as openAddGoal above, reached by saving a
+      // brand-new goal - without this, the just-saved values are still
+      // sitting in the form the moment "Add another goal" is tapped next.
+      form.reset();
     },
     onGoalProgressChanged: refetchGoalsProgress,
   });
@@ -725,22 +766,27 @@ export default function Goal() {
     setCalculatingGoal(true);
     setCalculatorError(null);
     setCalculatorResult(null);
+    const requestedGoalId = viewingGoalId;
     try {
       // Phase 42: a user can have several goals now - goal_id says which
       // one this hypothetical is projected against.
       const res = await apiFetch('/goal/calculator', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ goal_id: viewingGoalId, hypothetical_monthly_amount: amount }),
+        body: JSON.stringify({ goal_id: requestedGoalId, hypothetical_monthly_amount: amount }),
       });
       if (!res.ok) throw new Error('SERVER_ERROR');
       const data = await res.json();
+      // Found by /code-review (2026-09-10): discard a response for a goal
+      // the user has already navigated away from - see viewingGoalIdRef's
+      // own comment above for the full race.
+      if (viewingGoalIdRef.current !== requestedGoalId) return;
       setCalculatorResult(data.result);
     } catch (err) {
       console.error(err);
-      setCalculatorError(apiErrorMessage(err));
+      if (viewingGoalIdRef.current === requestedGoalId) setCalculatorError(apiErrorMessage(err));
     } finally {
-      setCalculatingGoal(false);
+      if (viewingGoalIdRef.current === requestedGoalId) setCalculatingGoal(false);
     }
   }
 
@@ -882,22 +928,27 @@ export default function Goal() {
     setLoadingMilestones(true);
     setMilestonesError(null);
     setMilestonesResult(null);
+    const requestedGoalId = viewingGoalId;
     try {
       // Phase 42: a user can have several goals now - goal_id says which
       // one these checkpoints are projected against.
       const res = await apiFetch('/goal/milestones', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ goal_id: viewingGoalId, hypothetical_monthly_amount: amount }),
+        body: JSON.stringify({ goal_id: requestedGoalId, hypothetical_monthly_amount: amount }),
       });
       if (!res.ok) throw new Error('SERVER_ERROR');
       const data = await res.json();
+      // Found by /code-review (2026-09-10): discard a response for a goal
+      // the user has already navigated away from - see viewingGoalIdRef's
+      // own comment above for the full race.
+      if (viewingGoalIdRef.current !== requestedGoalId) return;
       setMilestonesResult(data.result);
     } catch (err) {
       console.error(err);
-      setMilestonesError(apiErrorMessage(err));
+      if (viewingGoalIdRef.current === requestedGoalId) setMilestonesError(apiErrorMessage(err));
     } finally {
-      setLoadingMilestones(false);
+      if (viewingGoalIdRef.current === requestedGoalId) setLoadingMilestones(false);
     }
   }
 
