@@ -1,15 +1,14 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
 import { apiFetch, formatDecimal, formatDateMDY } from '../_lib/api';
-import { styles, colors } from '../_lib/styles';
+import { readableTextColor } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import { useAppData } from '../_lib/appData';
 import { iconForCategory } from '../_lib/categoryIcons';
-import { AppBackdrop, TopEdgeFade, isNightBackdrop } from '../_components/Illustrations';
 import SorrelWordmark from '../_components/SorrelWordmark';
 
 // Recurring tab restyle (2026-08-25, design-references/recurring-tab-mockup-
@@ -152,7 +151,14 @@ const INTERVAL_FILTERS = [
 // for either - scrolling to and revealing what's already there is a
 // truer answer than fabricating a new "due soon only" filtered list this
 // screen doesn't otherwise have.
+// Theme redesign (2026-09-11): these three are real components (not just
+// helper functions), each independently calling useTheme() - cheap
+// (Context reads don't re-render the whole tree) and simpler than
+// threading colors/recurringStyles down through props at every one of
+// their several call sites.
 function GlanceTile({ icon, label, value, sub, isLast, onPress, accessibilityLabel }) {
+  const { colors } = useTheme();
+  const recurringStyles = useMemo(() => buildRecurringStyles(colors), [colors]);
   return (
     <Pressable
       style={[recurringStyles.glanceTile, !isLast && recurringStyles.glanceTileDivider]}
@@ -171,6 +177,8 @@ function GlanceTile({ icon, label, value, sub, isLast, onPress, accessibilityLab
 }
 
 function RecurringRow({ entry }) {
+  const { colors, styles } = useTheme();
+  const recurringStyles = useMemo(() => buildRecurringStyles(colors), [colors]);
   return (
     <View style={recurringStyles.entryRow}>
       <View style={recurringStyles.entryIconCircle}>
@@ -188,6 +196,8 @@ function RecurringRow({ entry }) {
 }
 
 function GroupCard({ group, query, intervalFilter, expanded, onToggle }) {
+  const { colors, styles } = useTheme();
+  const recurringStyles = useMemo(() => buildRecurringStyles(colors), [colors]);
   const filtered = group.entries.filter((e) => matchesFilters(e, query, intervalFilter));
   // Hides the whole group card, not just its rows, whenever there's
   // nothing to show - either a real "zero charges in this bucket" (e.g. no
@@ -225,6 +235,12 @@ function GroupCard({ group, query, intervalFilter, expanded, onToggle }) {
 }
 
 export default function Recurring() {
+  // Theme redesign (2026-09-11): colors/styles now come from useTheme()
+  // and are themselves theme-reactive - the illustrated backdrop (and the
+  // scrollY/onScroll/onBackdropTextColor machinery that existed only to
+  // feed it) is gone from this screen entirely.
+  const { colors, styles, isNight } = useTheme();
+  const recurringStyles = useMemo(() => buildRecurringStyles(colors), [colors]);
   const router = useRouter();
   const { subscriptionAudit, refetchSubscriptionAudit } = useAppData();
 
@@ -278,11 +294,6 @@ export default function Recurring() {
     ? subscriptionAudit.subscriptions.length + subscriptionAudit.recurring_bills.length + subscriptionAudit.other_recurring.length
     : 0;
 
-  const scrollY = useSharedValue(0);
-  const onScroll = useAnimatedScrollHandler((event) => {
-    scrollY.value = event.contentOffset.y;
-  });
-
   // Measured on layout, used only to scroll the glance tiles to the
   // section they summarize - see GlanceTile's own comment for why these
   // jump to existing sections rather than a new filtered subview.
@@ -310,39 +321,33 @@ export default function Recurring() {
     scrollRef.current?.scrollTo({ y: savingsY.current, animated: true });
   }
 
-  // Text/icons rendered directly on top of AppBackdrop (not inside an
-  // opaque card) need to switch to a light color during the night
-  // backdrop - colors.darkest reads fine on the light morning/afternoon/
-  // evening tints but is unreadable on night's dark tint.
-  const night = isNightBackdrop();
-  const onBackdropTextColor = night ? colors.background : undefined;
+  // Real finding, theme redesign (2026-09-11): colors.primary (a dark
+  // green) genuinely fails contrast against the new night background/card
+  // when used as bare icon/text color (the "Manage" link below, not a
+  // filled shape) - same scoped exception already found and fixed on
+  // Budget's own INSIGHTS pill, same value reused here.
+  const onBackdropAccentColor = isNight ? '#9FD9B4' : undefined;
 
   const findings = subscriptionAudit ? [...subscriptionAudit.gradual_increases, ...subscriptionAudit.price_jumps] : [];
 
   return (
+    // Theme redesign: styles.container already carries a theme-reactive
+    // backgroundColor: colors.background - the old illustrated backdrop's
+    // artwork layer is gone, this flat container background is it now.
     <View style={styles.container}>
-      <View style={recurringStyles.backgroundLayer} pointerEvents="none">
-        <AppBackdrop scrollY={scrollY} />
-      </View>
-
       <View style={recurringStyles.wordmarkStrip}>
-        <SorrelWordmark layout="row" leafSize={30} showTagline={false} textColor={onBackdropTextColor} />
-        <MaterialIcons name="notifications-none" size={26} color={onBackdropTextColor || colors.darkest} />
+        <SorrelWordmark layout="row" leafSize={30} showTagline={false} />
+        <MaterialIcons name="notifications-none" size={26} color={colors.darkest} />
       </View>
 
-      <TopEdgeFade height={90}>
-      <Animated.ScrollView
+      <ScrollView
         ref={scrollRef}
         style={[styles.list, recurringStyles.transparentScroll]}
         contentContainerStyle={{ paddingBottom: 150 }}
-        onScroll={onScroll}
-        scrollEventThrottle={16}
       >
         <View style={recurringStyles.titleBlock}>
           <View style={recurringStyles.titleRow}>
-            <Text style={[recurringStyles.title, onBackdropTextColor && { color: onBackdropTextColor }]}>
-              Recurring
-            </Text>
+            <Text style={recurringStyles.title}>Recurring</Text>
             {/* Direct user request, 2026-09-03: "there should be an option
                 to edit recurring charges, or maybe add or remove recurring
                 charges" - a real mortgage payment that Plaid/Claude
@@ -354,15 +359,13 @@ export default function Recurring() {
               accessibilityRole="button"
               accessibilityLabel="Manage recurring charges"
             >
-              <MaterialIcons name="tune" size={16} color={onBackdropTextColor || colors.primary} />
-              <Text style={[recurringStyles.manageLinkText, onBackdropTextColor && { color: onBackdropTextColor }]}>
+              <MaterialIcons name="tune" size={16} color={onBackdropAccentColor || colors.primary} />
+              <Text style={[recurringStyles.manageLinkText, onBackdropAccentColor && { color: onBackdropAccentColor }]}>
                 Manage
               </Text>
             </Pressable>
           </View>
-          <Text
-            style={[recurringStyles.subtitle, night && { color: 'rgba(244, 246, 242, 0.75)' }]}
-          >
+          <Text style={recurringStyles.subtitle}>
             See all your recurring charges, upcoming payments, and opportunities to save.
           </Text>
         </View>
@@ -453,23 +456,13 @@ export default function Recurring() {
                 />
               </View>
               <Pressable
-                style={[
-                  recurringStyles.filtersButton,
-                  onBackdropTextColor && { borderColor: onBackdropTextColor },
-                ]}
+                style={recurringStyles.filtersButton}
                 onPress={() => setShowFilters((v) => !v)}
                 accessibilityRole="button"
                 accessibilityLabel="Filters"
               >
-                <MaterialIcons name="tune" size={16} color={onBackdropTextColor || colors.dark} />
-                <Text
-                  style={[
-                    recurringStyles.filtersButtonText,
-                    onBackdropTextColor && { color: onBackdropTextColor },
-                  ]}
-                >
-                  FILTERS
-                </Text>
+                <MaterialIcons name="tune" size={16} color={colors.dark} />
+                <Text style={recurringStyles.filtersButtonText}>FILTERS</Text>
               </Pressable>
             </View>
 
@@ -549,22 +542,18 @@ export default function Recurring() {
             )}
           </>
         )}
-      </Animated.ScrollView>
-      </TopEdgeFade>
+      </ScrollView>
 
       <StatusBar style="auto" />
     </View>
   );
 }
 
-const recurringStyles = StyleSheet.create({
-  backgroundLayer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo (both in the main component and in the three module-level
+// sub-components above, each keyed on colors).
+function buildRecurringStyles(colors) {
+  return StyleSheet.create({
   // Same values as every other tab's wordmarkStrip (2026-08-27, direct user
   // feedback - all five tabs should share one identical header, not five
   // slightly different ones; this one had drifted to its own paddingHorizontal/
@@ -582,10 +571,6 @@ const recurringStyles = StyleSheet.create({
   },
   titleBlock: {
     paddingHorizontal: 20,
-    // Pushed down past TopEdgeFade's 90px fade zone (Illustrations.js) -
-    // otherwise the title sat inside that zone even at rest (scroll
-    // position 0), reading as "already faded before scrolling" instead of
-    // only fading once actually scrolled up into it.
     paddingTop: 110,
     paddingBottom: 16,
     gap: 4,
@@ -765,8 +750,14 @@ const recurringStyles = StyleSheet.create({
     fontSize: 12,
     color: colors.dark,
   },
+  // Real contrast bug found (2026-09-11, theme redesign): this used to
+  // hardcode color: colors.background - correct by coincidence in the old
+  // static-day-only palette, but colors.primary (this pill's fixed fill)
+  // never changes at night while colors.background flips dark, dropping
+  // to 2.80:1 contrast. readableTextColor computes the actually-correct
+  // text color for this fixed fill in both modes.
   filterPillTextActive: {
-    color: colors.background,
+    color: readableTextColor(colors.primary, colors),
     fontWeight: '700',
   },
   groupHeaderRow: {
@@ -848,4 +839,5 @@ const recurringStyles = StyleSheet.create({
   findingLine: {
     flexShrink: 1,
   },
-});
+  });
+}

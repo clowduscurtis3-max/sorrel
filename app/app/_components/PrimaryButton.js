@@ -1,5 +1,5 @@
 import { Pressable, Text, ActivityIndicator } from 'react-native';
-import { styles, colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 
 // Dark pill button matching the Budget-tab Sorrel restyle's mockup
 // (SUBMIT AMOUNT / COMPARE / GOT IT). Scoped to that flow only - every
@@ -11,7 +11,12 @@ import { styles, colors } from '../_lib/styles';
 // default - matches this app's own established touch-target discipline
 // elsewhere in this exact flow (the mic button's circular hit area,
 // DigitAmountPicker's touch-target-doubling fix).
+//
+// Theme redesign (2026-09-11): colors/styles now come from useTheme() -
+// styles.primaryButton/primaryButtonText are a matched darkest/background
+// pair (both flip together at night, contrast preserved automatically).
 export default function PrimaryButton({ title, onPress, disabled, loading }) {
+  const { colors, styles } = useTheme();
   return (
     <Pressable
       onPress={onPress}

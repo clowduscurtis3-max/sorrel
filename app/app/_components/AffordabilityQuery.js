@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { View, Text, TextInput, ActivityIndicator, Pressable, StyleSheet } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import {
@@ -9,14 +9,14 @@ import {
   setAudioModeAsync,
 } from 'expo-audio';
 import { apiFetch, apiErrorMessage, formatDecimal, formatWhole, formatDateMDY } from '../_lib/api';
-import { styles, colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import { formatAmountLabel } from '../_lib/amountPicker';
 import { useAppData } from '../_lib/appData';
 import { ScenarioResult, describeComparisonDifference } from './ScenarioResult';
 import DigitAmountPicker from './DigitAmountPicker';
 import PrimaryButton from './PrimaryButton';
 import AffordabilityChat from './AffordabilityChat';
-import { LeafAvatar, CheckBadge, CarIllustration, MountainIllustration, isNightBackdrop } from './Illustrations';
+import { LeafAvatar, CheckBadge, CarIllustration, MountainIllustration } from './Illustrations';
 
 // "A few things to consider" (comparison screen) - 30 days, matching the
 // mockup's own "in the next 30 days" copy. Deliberately independent of
@@ -251,8 +251,13 @@ const STATUS_TONE = {
 
 // Text-color counterpart to STATUS_TONE/CheckBadge's fill colors, for the
 // smaller inline status labels (comparison cards, max_comfortable) that
-// show status as colored text rather than a full badge.
-const STATUS_TEXT_COLOR = { positive: colors.primary, caution: colors.warning, neutral: colors.muted };
+// show status as colored text rather than a full badge. Theme redesign
+// (2026-09-11): moved to a function taking colors as a parameter, same as
+// every other colors-dependent value in this file - was a module-level
+// object literal referencing the now-removed static colors import.
+function statusTextColorMap(colors) {
+  return { positive: colors.primary, caution: colors.warning, neutral: colors.muted };
+}
 
 // Long history (2026-08-19/20) of the wheel's amount-selection design,
 // worth keeping since the final answer isn't obvious from the code alone:
@@ -293,12 +298,15 @@ export default function AffordabilityQuery() {
   // fetch plumbing.
   const { goalsProgress, subscriptionAudit } = useAppData();
 
-  // This component always renders directly on top of the Budget tab's
-  // AppBackdrop (no card wrapper around its own header/status-label text)
-  // - only ever used there, so it's safe to compute this itself rather
-  // than threading a prop down from budget.js.
-  const night = isNightBackdrop();
-  const onBackdropTextColor = night ? colors.background : undefined;
+  // Theme redesign (2026-09-11): colors/styles now come from useTheme()
+  // and are themselves theme-reactive - the old isNightBackdrop()/
+  // onBackdropTextColor dance this component used to compute locally
+  // (since it renders directly on top of Budget's own now-deleted
+  // illustrated backdrop, no card wrapper) is gone; colors.darkest/
+  // colors.dark resolve correctly in both day and night automatically.
+  const { colors, styles } = useTheme();
+  const STATUS_TEXT_COLOR = useMemo(() => statusTextColorMap(colors), [colors]);
+  const inlineStyles = useMemo(() => buildInlineStyles(colors), [colors]);
 
   const [text, setText] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -576,12 +584,8 @@ export default function AffordabilityQuery() {
     <View style={{ gap: 16 }}>
       <View style={{ alignItems: 'center', gap: 4 }}>
         <LeafAvatar size={48} />
-        <Text style={[styles.cardTitle, { fontSize: 19 }, onBackdropTextColor && { color: onBackdropTextColor }]}>
-          Can I afford this?
-        </Text>
-        <Text style={[styles.smallText, night && { color: 'rgba(244, 246, 242, 0.75)' }]}>
-          Tell Sorrel what you're thinking about.
-        </Text>
+        <Text style={[styles.cardTitle, { fontSize: 19 }]}>Can I afford this?</Text>
+        <Text style={styles.smallText}>Tell Sorrel what you're thinking about.</Text>
       </View>
 
       {pendingContext && (
@@ -635,17 +639,13 @@ export default function AffordabilityQuery() {
               anything. */}
           <View style={inlineStyles.inputRow}>
             <TextInput
-              style={[
-                styles.input,
-                inlineStyles.input,
-                night && { borderColor: 'rgba(244, 246, 242, 0.4)', color: colors.background },
-              ]}
+              style={[styles.input, inlineStyles.input]}
               value={text}
               onChangeText={setText}
               placeholder={
                 awaitingFinanceTerm ? 'e.g. 60 months' : pendingContext ? 'e.g. $50' : 'e.g. Can I afford a $50 dinner?'
               }
-              placeholderTextColor={night ? 'rgba(244, 246, 242, 0.5)' : colors.placeholder}
+              placeholderTextColor={colors.placeholder}
               editable={!submitting && !transcribing}
             />
             {transcribing ? (
@@ -706,13 +706,7 @@ export default function AffordabilityQuery() {
         <View style={{ gap: 16 }}>
           <View style={{ alignItems: 'center', gap: 8 }}>
             <CheckBadge size={56} tone={tone} />
-            <Text
-              style={[
-                styles.cardTitle,
-                { fontSize: 20, textAlign: 'center' },
-                onBackdropTextColor && { color: onBackdropTextColor },
-              ]}
-            >
+            <Text style={[styles.cardTitle, { fontSize: 20, textAlign: 'center' }]}>
               {result.status_label}
             </Text>
           </View>
@@ -1091,7 +1085,10 @@ export default function AffordabilityQuery() {
   );
 }
 
-const inlineStyles = StyleSheet.create({
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo inside the component (keyed on colors).
+function buildInlineStyles(colors) {
+  return StyleSheet.create({
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1121,4 +1118,5 @@ const inlineStyles = StyleSheet.create({
   micButtonRecording: {
     backgroundColor: colors.error,
   },
-});
+  });
+}

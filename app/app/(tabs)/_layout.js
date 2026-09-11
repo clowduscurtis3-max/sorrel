@@ -5,8 +5,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppDataProvider } from '../_lib/appData';
 import { apiFetch } from '../_lib/api';
-import { styles, colors } from '../_lib/styles';
-import { isNightBackdrop } from '../_components/Illustrations';
+import { useTheme } from '../_lib/theme';
 
 // Phase 38 Step 8 (cross-cutting settings: tab visibility/reorder,
 // default landing tab). React Navigation's tab navigator expects a
@@ -60,18 +59,22 @@ const TAB_TITLES = {
 };
 
 export default function TabsLayout() {
+  // Theme redesign (2026-09-11): colors/styles/isNight now come from
+  // useTheme() (live-updated on a 60s interval, see _lib/theme.js) rather
+  // than a fresh isNightBackdrop() call - genuinely reactive now, not
+  // "eventually correct on some later render."
+  //
   // Floating pill tab bar (2026-08-27), matching the user's own reference
   // mockup exactly: a rounded, inset-from-the-edges bar rather than a
   // flat edge-to-edge one, with a light (colors.card) fill during the day
   // and a dark (colors.darkest) fill at night - previously always the
-  // platform-default white bar regardless of AppBackdrop's own time-of-day
-  // theme, which read as a jarring light bar sitting on top of the night
-  // backdrop. `night` is computed once per render, same "no live-updating
-  // timer, a re-render eventually happening is enough" convention already
-  // used everywhere else this app switches on time-of-day (see
-  // isNightBackdrop's own callers) - this isn't a countdown clock, a
-  // several-times-an-hour discrepancy at a period boundary is fine.
-  const night = isNightBackdrop();
+  // platform-default white bar regardless of the old illustrated
+  // backdrop's own time-of-day theme, which read as a jarring light bar
+  // sitting on top of the night backdrop. The active/inactive tint colors
+  // below are a genuine, deliberate design choice (not a contrast fix
+  // like most of this redesign) - a specific sage/translucent-cream pair
+  // for the floating pill at night, kept exactly as designed.
+  const { colors, styles, isNight } = useTheme();
   // Real device gesture-bar/nav-bar clearance (2026-08-27, direct user
   // feedback: the previous fixed `bottom: 20` sat half-underneath the OS
   // gesture controls) - this app renders edge-to-edge, so Android reports
@@ -152,8 +155,8 @@ export default function TabsLayout() {
           // still what drives the tab bar's own label text, independent
           // of whether the header itself is shown.
           headerShown: false,
-          tabBarActiveTintColor: night ? colors.sage : colors.primary,
-          tabBarInactiveTintColor: night ? 'rgba(244, 246, 242, 0.45)' : colors.muted,
+          tabBarActiveTintColor: isNight ? colors.sage : colors.primary,
+          tabBarInactiveTintColor: isNight ? 'rgba(244, 246, 242, 0.45)' : colors.muted,
           tabBarIcon: ({ color, size }) => (
             <MaterialIcons name={TAB_ICONS[route.name]} size={size} color={color} />
           ),
@@ -184,7 +187,16 @@ export default function TabsLayout() {
             paddingBottom: 10,
             borderRadius: 28,
             borderTopWidth: 0,
-            backgroundColor: night ? colors.darkest : colors.card,
+            // Real bug found (2026-09-11, theme redesign): the old
+            // `night ? colors.darkest : colors.card` ternary relied on
+            // colors.darkest always being dark - but darkest and
+            // background now swap roles at night (see _lib/styles.js's
+            // NIGHT_COLOR_OVERRIDES), so colors.darkest is LIGHT at
+            // night, which would have made this bar light instead of
+            // dark, the opposite of the original design intent.
+            // colors.card alone is already correctly theme-reactive
+            // (light day, dark night) - no ternary needed.
+            backgroundColor: colors.card,
             elevation: 8,
             shadowColor: '#000',
             shadowOpacity: 0.15,

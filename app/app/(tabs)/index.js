@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -17,13 +17,12 @@ import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { createPlaidLinkSession } from 'react-native-plaid-link-sdk';
 import { MaterialIcons } from '@expo/vector-icons';
-import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
 import { apiFetch, apiErrorMessage, formatAmount, formatDecimal, formatWhole, CATEGORIES } from '../_lib/api';
-import { styles, colors, readableTextColor, isValidHexColor } from '../_lib/styles';
+import { readableTextColor, isValidHexColor } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import { useAppData } from '../_lib/appData';
 import { useSessionContext } from '../_lib/session';
 import SorrelWordmark from '../_components/SorrelWordmark';
-import { AppBackdrop, TopEdgeFade, SeasonalHills, isNightBackdrop } from '../_components/Illustrations';
 import NetWorthChart from '../_components/NetWorthChart';
 import PrimaryButton from '../_components/PrimaryButton';
 import { iconForAccount } from '../_lib/accountIcons';
@@ -42,13 +41,23 @@ import MonthlyReviewModal from '../_components/MonthlyReviewModal';
 import SpentSoFarModal from '../_components/SpentSoFarModal';
 
 const STATUS_ICON = { ok: 'check-circle', warning: 'warning', severe: 'error' };
-const STATUS_COLOR = {
-  ok: colors.positive,
-  warning: colors.warning,
-  severe: colors.error,
-  neutral: colors.muted,
-};
-const HEALTH_PILL_COLOR = { positive: colors.positive, warning: colors.warning, error: colors.error };
+
+// Theme redesign (2026-09-11): these two were module-level object
+// literals referencing the (now-removed) static `colors` import - moved
+// to functions taking `colors` as a parameter, computed inside the
+// component from useTheme()'s value instead, same pattern as every other
+// colors-dependent value in this file.
+function statusColorMap(colors) {
+  return {
+    ok: colors.positive,
+    warning: colors.warning,
+    severe: colors.error,
+    neutral: colors.muted,
+  };
+}
+function healthPillColorMap(colors) {
+  return { positive: colors.positive, warning: colors.warning, error: colors.error };
+}
 
 function formatGoalType(goalType) {
   if (!goalType) return 'Goal';
@@ -244,20 +253,16 @@ export default function Home() {
   const [showMonthlyReviewDetail, setShowMonthlyReviewDetail] = useState(false);
   const [showSpentSoFarDetail, setShowSpentSoFarDetail] = useState(false);
 
-  // Kept for the Overview branch's Animated.ScrollView onScroll wiring
-  // below - no longer drives the backdrop itself (AppBackdrop is a
-  // static full-screen layer, not scroll-parallaxed).
-  const scrollY = useSharedValue(0);
-  const onScroll = useAnimatedScrollHandler((event) => {
-    scrollY.value = event.contentOffset.y;
-  });
-
-  // Text/icons rendered directly on top of AppBackdrop (not inside an
-  // opaque card) need to switch to a light color during the night
-  // backdrop - colors.darkest reads fine on the light morning/afternoon/
-  // evening tints but is unreadable on night's dark tint.
-  const night = isNightBackdrop();
-  const onBackdropTextColor = night ? colors.background : undefined;
+  // Theme redesign (2026-09-11): the illustrated backdrop (and the
+  // scrollY/onScroll/onBackdropTextColor machinery that existed only to
+  // feed it and to keep bare text legible against its artwork) is gone -
+  // colors/styles now come from useTheme() and are themselves
+  // theme-reactive, so every existing colors.darkest/colors.dark style
+  // resolves correctly in both day and night with no special-casing.
+  const { colors, styles, isNight } = useTheme();
+  const homeStyles = useMemo(() => buildHomeStyles(colors), [colors]);
+  const STATUS_COLOR = useMemo(() => statusColorMap(colors), [colors]);
+  const HEALTH_PILL_COLOR = useMemo(() => healthPillColorMap(colors), [colors]);
 
   const [transactions, setTransactions] = useState([]);
   const [loadingTransactions, setLoadingTransactions] = useState(false);
@@ -774,23 +779,20 @@ export default function Home() {
                 ]}
               />
             </View>
-            <View style={homeStyles.progressCaptionRow}>
-              <View>
-                {/* Found live 2026-09-11 (real screenshot, a custom dark
-                    Home card color): these two lines were the only bare
-                    text in this whole card never given the computed
-                    textColor above - title/reason text two elements up
-                    already had it, these were simply missed, leaving them
-                    stuck on their light-card-oriented default and nearly
-                    invisible against a dark custom card. */}
-                <Text style={[homeStyles.progressCaption, textColor && { color: textColor }]}>
-                  {monthProgress.daysElapsed} days into {monthName}
-                </Text>
-                <Text style={[homeStyles.progressCaption, textColor && { color: textColor }]}>
-                  {monthProgress.daysRemaining} days remaining
-                </Text>
-              </View>
-              <SeasonalHills width={110} height={70} />
+            <View>
+              {/* Found live 2026-09-11 (real screenshot, a custom dark
+                  Home card color): these two lines were the only bare
+                  text in this whole card never given the computed
+                  textColor above - title/reason text two elements up
+                  already had it, these were simply missed, leaving them
+                  stuck on their light-card-oriented default and nearly
+                  invisible against a dark custom card. */}
+              <Text style={[homeStyles.progressCaption, textColor && { color: textColor }]}>
+                {monthProgress.daysElapsed} days into {monthName}
+              </Text>
+              <Text style={[homeStyles.progressCaption, textColor && { color: textColor }]}>
+                {monthProgress.daysRemaining} days remaining
+              </Text>
             </View>
           </>
         )}
@@ -1097,29 +1099,19 @@ export default function Home() {
   }
 
   return (
+    // Theme redesign (2026-09-11): styles.container already carries a
+    // theme-reactive backgroundColor: colors.background - the old
+    // illustrated backdrop's own absolutely-positioned artwork layer is
+    // gone, this flat container background is the whole "backdrop" now.
     <View style={styles.container}>
-      {/* Full-page time-of-day backdrop (2026-08-26) - a persistent,
-          absolutely-positioned, full-screen background layer behind
-          everything below (error banner, loading/not-linked states, and
-          the Overview Animated.ScrollView all render on top of it,
-          transparent-background where relevant), matching the same
-          shared AppBackdrop every other tab now uses - see
-          Illustrations.js's own AppBackdrop comment for the full
-          reasoning. */}
-      {viewingItemId === null && (
-        <View style={homeStyles.backgroundLayer} pointerEvents="none">
-          <AppBackdrop scrollY={scrollY} />
-        </View>
-      )}
-
       {viewingItemId === null && (
         <View style={homeStyles.wordmarkStrip}>
-          <SorrelWordmark layout="row" leafSize={30} showTagline={false} textColor={onBackdropTextColor} />
+          <SorrelWordmark layout="row" leafSize={30} showTagline={false} />
           {/* Plain icon, not a Pressable - there's no notification
               center built yet (Phase 16, "what changed"), so this is
               visual-only for now rather than implying functionality
               that doesn't exist. */}
-          <MaterialIcons name="notifications-none" size={26} color={onBackdropTextColor || colors.darkest} />
+          <MaterialIcons name="notifications-none" size={26} color={colors.darkest} />
         </View>
       )}
 
@@ -1254,37 +1246,23 @@ export default function Home() {
         // per bank + net worth) - a plain ScrollView is correct here, not a
         // SectionList; there is no long transaction feed on this screen
         // anymore for a nested-VirtualizedList concern to even apply to.
-        // Animated.ScrollView (react-native-reanimated), transparent
-        // background so AppBackdrop shows through behind it
-        // - the first scroll-driven reanimated wiring in this codebase
-        // (NumberScrollWheel.js's own reanimated usage is gesture-driven,
-        // not scroll-driven), see this rework's own plan notes for why
-        // that's a real (if low, given the same library's already proven
-        // stable here) first-of-its-kind risk worth tap-testing carefully.
-        <TopEdgeFade height={90}>
-        <Animated.ScrollView
+        // Theme redesign (2026-09-11): plain ScrollView, not
+        // Animated.ScrollView - onScroll/scrollY only ever fed the now-
+        // deleted illustrated backdrop's parallax, nothing else in this
+        // file ever read scrollY.value. TopEdgeFade (the alpha-mask that
+        // faded content to reveal that backdrop's artwork underneath) is
+        // gone too - nothing left for it to reveal.
+        <ScrollView
           style={[styles.list, homeStyles.transparentScroll]}
           contentContainerStyle={{ paddingBottom: 150 }}
-          onScroll={onScroll}
-          scrollEventThrottle={16}
         >
           {/* Greeting moved off the old fixed header block and into the
-              scroll content itself, per the background rework - it now
-              scrolls away naturally with everything else instead of
-              sitting pinned above a hard boundary. Padding-top pushes it
-              down into the calmer part of the scene (below the sun/glow,
-              toward the hills) rather than sitting directly over the
-              busiest part of the artwork. */}
+              scroll content itself, per the earlier background rework -
+              it scrolls away naturally with everything else instead of
+              sitting pinned above a hard boundary. */}
           <View style={homeStyles.greetingBlock}>
-            <Text style={[homeStyles.greeting, onBackdropTextColor && { color: onBackdropTextColor }]}>
-              {greeting(session)}
-            </Text>
-            <Text
-              style={[
-                homeStyles.greetingSubtitle,
-                night && { color: 'rgba(244, 246, 242, 0.75)' },
-              ]}
-            >
+            <Text style={homeStyles.greeting}>{greeting(session)}</Text>
+            <Text style={homeStyles.greetingSubtitle}>
               Here's your financial snapshot for {monthName}.
             </Text>
           </View>
@@ -1394,8 +1372,7 @@ export default function Home() {
           </View>
 
           {orderedCardsAfterStats.map(renderHomeCard)}
-        </Animated.ScrollView>
-        </TopEdgeFade>
+        </ScrollView>
       )}
 
       <ProjectedSpendModal
@@ -1435,22 +1412,13 @@ export default function Home() {
 // in the shared _lib/styles.js; only what's genuinely new for this screen
 // lives here, same split sign-in.js's own local StyleSheet already
 // established.
-const homeStyles = StyleSheet.create({
-  // Full-page backdrop rework (2026-08-26): the artwork is an absolutely
-  // -positioned layer filling the whole screen (top/left/right/bottom:0)
-  // behind everything else, instead of the old headerBlock/headerSceneWrap
-  // pairing that reserved real layout space above the ScrollView, or the
-  // later ~340px-tall header-only strip. See AppBackdrop (Illustrations.js)
-  // for the actual tint/wave-line/sparkle rendering.
-  backgroundLayer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  // A small, always-visible, non-scrolling strip (transparent background,
-  // so the artwork shows through behind it) - kept minimal (just the
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo inside the component (keyed on colors) - StyleSheet.create
+// bakes values in once at call time, so it can never itself react to the
+// active theme changing.
+function buildHomeStyles(colors) {
+  return StyleSheet.create({
+  // A small, always-visible, non-scrolling strip - kept minimal (just the
   // wordmark + notification bell) so branding stays consistent across
   // every Home state (loading/not-linked/loaded), while the greeting
   // itself moves into the scroll content below (greetingBlock) rather
@@ -1463,8 +1431,10 @@ const homeStyles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 8,
   },
-  // Transparent so Animated.ScrollView doesn't paint over
-  // AppBackdrop with its own opaque default background.
+  // Theme redesign: no longer needs to be transparent for any artwork
+  // layer to show through - kept as its own key since the outer
+  // container already carries the real theme background and this
+  // ScrollView should never paint its own separate opaque one over it.
   transparentScroll: {
     backgroundColor: 'transparent',
   },
@@ -1607,11 +1577,6 @@ const homeStyles = StyleSheet.create({
     fontSize: 13,
     color: colors.darkest,
     fontWeight: '600',
-  },
-  progressCaptionRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
   },
   insightCard: {
     flexDirection: 'row',
@@ -1881,4 +1846,5 @@ const homeStyles = StyleSheet.create({
     color: colors.dark,
     lineHeight: 18,
   },
-});
+  });
+}

@@ -10,7 +10,8 @@ import {
 } from 'expo-audio';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { apiFetch, apiErrorMessage, GOAL_TYPES, parseDollarAmount } from '../_lib/api';
-import { styles, colors } from '../_lib/styles';
+import { readableTextColor } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import { useSessionContext } from '../_lib/session';
 
 // Mirrors server/goalProgress.js's AVG_DAYS_PER_MONTH - kept as its own
@@ -232,14 +233,15 @@ export function useGoalForm(initialGoal, { onSaved, onGoalProgressChanged } = {}
 // The middle section only - type picker, "something else" description,
 // target amount/timeframe, and any error. No Save/Skip/Cancel buttons and
 // no outer screen chrome (see the module comment above for why).
-// `textColor`: optional override for goal-intake.js's own night-backdrop
-// adaptation (2026-08-31) - only ever passed by that one caller (see this
-// file's own header comment on GoalFormFields' current sole usage), so a
-// simple prop rather than a context is enough. Only applied to the bare
-// labels sitting directly on the backdrop; input text/error text are
-// untouched (inputs render on their own opaque box, error text stays red
-// regardless of backdrop, matching every other screen's own convention).
-export function GoalFormFields({ form, textColor }) {
+//
+// Theme redesign (2026-09-11): the `textColor` prop this used to accept
+// (goal-intake.js's own night-backdrop adaptation) is removed -
+// colors.darkest is itself theme-reactive now (_lib/theme.js), so the
+// plain default already resolves correctly in both day and night without
+// any override, same as SorrelWordmark's own equivalent change.
+export function GoalFormFields({ form }) {
+  const { colors, styles } = useTheme();
+  const localStyles = useMemo(() => buildLocalStyles(colors), [colors]);
   const [showDatePicker, setShowDatePicker] = useState(false);
 
   // Derived display-only date from the persisted months value, computed
@@ -319,9 +321,7 @@ export function GoalFormFields({ form, textColor }) {
 
   return (
     <>
-      <Text style={[styles.text, textColor && { color: textColor }]}>
-        What are you hoping to achieve financially?
-      </Text>
+      <Text style={styles.text}>What are you hoping to achieve financially?</Text>
       {/* Two-segment toggle (2026-09-01, replaced a 3-item Button row of
           "Save for a house / Pay off debt / Something else") - per direct
           user feedback, 'house' sitting next to 'other' as if they were
@@ -329,22 +329,25 @@ export function GoalFormFields({ form, textColor }) {
           functionally distinct from 'other'. Debt vs. savings is the only
           real fork (see server/index.js's GOAL_TYPES comment); what a
           savings goal is actually for is the always-visible field below.
-          Unselected: hollow, outlined in `textColor` (matches whatever
-          this screen's other labels are using for the current backdrop -
-          cream at night, dark by day) so it stays legible either way, per
-          further direct user feedback. Selected: green fill, outline/text
-          fixed to colors.background regardless of backdrop, since that
-          combination reads fine against the green either way. */}
+          Unselected: hollow, outlined in colors.darkest (theme-reactive,
+          correct in both day and night automatically). Selected: green
+          fill - text/outline color computed via readableTextColor rather
+          than hardcoded (real contrast bug found 2026-09-11: colors.primary
+          is a fixed brand green that never changes at night, so a
+          hardcoded colors.background text color went unreadable once
+          background itself became theme-reactive - see this file's own
+          buildLocalStyles for the equivalent fix on typeToggleTextSelected,
+          this inline version exists because the style array also needs
+          the *unselected* branch, which stays colors.darkest). */}
       <View style={localStyles.typeToggleRow}>
         {GOAL_TYPES.map((g) => {
           const selected = form.goalType === g.value;
-          const outlineColor = textColor || colors.darkest;
           return (
             <Pressable
               key={g.value}
               style={[
                 localStyles.typeToggleOption,
-                !selected && { borderColor: outlineColor },
+                !selected && { borderColor: colors.darkest },
                 selected && localStyles.typeToggleOptionSelected,
               ]}
               onPress={() => form.setGoalType(g.value)}
@@ -354,7 +357,7 @@ export function GoalFormFields({ form, textColor }) {
               <Text
                 style={[
                   localStyles.typeToggleText,
-                  !selected && { color: outlineColor },
+                  !selected && { color: colors.darkest },
                   selected && localStyles.typeToggleTextSelected,
                 ]}
               >
@@ -365,7 +368,7 @@ export function GoalFormFields({ form, textColor }) {
         })}
       </View>
 
-      <Text style={[styles.smallText, textColor && { color: textColor }]}>What's this for? (optional)</Text>
+      <Text style={styles.smallText}>What's this for? (optional)</Text>
       <TextInput
         style={styles.input}
         placeholder="e.g. a house, a wedding, the Chase card"
@@ -374,7 +377,7 @@ export function GoalFormFields({ form, textColor }) {
         onChangeText={form.setGoalNotes}
       />
 
-      <Text style={[styles.smallText, textColor && { color: textColor }]}>Target amount (optional)</Text>
+      <Text style={styles.smallText}>Target amount (optional)</Text>
       <View style={localStyles.amountInputRow}>
         <TextInput
           style={[styles.input, localStyles.amountInput]}
@@ -397,10 +400,17 @@ export function GoalFormFields({ form, textColor }) {
               recorderState.isRecording ? localStyles.micButtonRecording : localStyles.micButtonIdle,
             ]}
           >
+            {/* Real contrast bug found (2026-09-11, theme redesign): this
+                icon used to hardcode color: colors.background - correct
+                for the recording state (colors.error gets a lighter night
+                variant), but wrong for the idle state (colors.primary is
+                a fixed dark green that never changes at night).
+                readableTextColor computes the correct color for whichever
+                fill is actually active. */}
             <MaterialIcons
               name={recorderState.isRecording ? 'stop' : 'mic'}
               size={20}
-              color={colors.background}
+              color={readableTextColor(recorderState.isRecording ? colors.error : colors.primary, colors)}
             />
           </Pressable>
         )}
@@ -411,13 +421,13 @@ export function GoalFormFields({ form, textColor }) {
           <Text style={localStyles.clearLink}>Clear target amount</Text>
         </Pressable>
       )}
-      <Text style={[styles.smallText, textColor && { color: textColor }]}>Target date (optional)</Text>
+      <Text style={styles.smallText}>Target date (optional)</Text>
       <Pressable
-        style={[localStyles.dateButton, { borderColor: textColor || colors.darkest }]}
+        style={[localStyles.dateButton, { borderColor: colors.darkest }]}
         onPress={() => setShowDatePicker(true)}
         accessibilityRole="button"
       >
-        <Text style={[localStyles.dateButtonText, textColor && { color: textColor }]}>
+        <Text style={localStyles.dateButtonText}>
           {targetDate ? targetDate.toLocaleDateString() : 'Pick a target date'}
         </Text>
       </Pressable>
@@ -452,72 +462,86 @@ export function GoalFormFields({ form, textColor }) {
 // Mirrors (tabs)/goal.js's calculatorInputRow/calculatorInput/
 // calculatorMicButton* exactly - same text+mic pattern, different screen,
 // no reason for the two to drift visually.
-const localStyles = StyleSheet.create({
-  amountInputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  amountInput: {
-    flex: 1,
-  },
-  micButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  micButtonIdle: {
-    backgroundColor: colors.primary,
-  },
-  micButtonRecording: {
-    backgroundColor: colors.error,
-  },
-  typeToggleRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  typeToggleOption: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-    borderWidth: 1.5,
-  },
-  typeToggleOptionSelected: {
-    backgroundColor: colors.primary,
-    borderColor: colors.background,
-  },
-  typeToggleText: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  typeToggleTextSelected: {
-    color: colors.background,
-  },
-  // Matches (tabs)/goal.js's own inlineEditorLink ("Remove date"/"Clear
-  // amount") - same destructive-ish text-link treatment for the same kind
-  // of action, just duplicated locally rather than shared (this file's own
-  // established convention, see the header comment on this StyleSheet).
-  clearLink: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.error,
-    textDecorationLine: 'underline',
-  },
-  dateButton: {
-    borderWidth: 1.5,
-    borderRadius: 22,
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dateButtonText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-});
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo inside GoalFormFields (keyed on colors).
+function buildLocalStyles(colors) {
+  // Real contrast bug found this session: typeToggleOptionSelected/
+  // typeToggleTextSelected used to hardcode colors.background for both
+  // the border and text sitting on a colors.primary fill - correct only
+  // because colors.primary and colors.background happened to be a
+  // light/dark pair in the old static-day-only palette. colors.primary
+  // is a fixed brand green that never changes at night, so once
+  // colors.background itself became theme-reactive (flips dark), that
+  // hardcoded pairing dropped to 2.80:1 contrast. Computed once here via
+  // readableTextColor instead, correct for whichever theme is active.
+  const selectedFillTextColor = readableTextColor(colors.primary, colors);
+  return StyleSheet.create({
+    amountInputRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    amountInput: {
+      flex: 1,
+    },
+    micButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    micButtonIdle: {
+      backgroundColor: colors.primary,
+    },
+    micButtonRecording: {
+      backgroundColor: colors.error,
+    },
+    typeToggleRow: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    typeToggleOption: {
+      flex: 1,
+      paddingVertical: 12,
+      borderRadius: 22,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'transparent',
+      borderWidth: 1.5,
+    },
+    typeToggleOptionSelected: {
+      backgroundColor: colors.primary,
+      borderColor: selectedFillTextColor,
+    },
+    typeToggleText: {
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    typeToggleTextSelected: {
+      color: selectedFillTextColor,
+    },
+    // Matches (tabs)/goal.js's own inlineEditorLink ("Remove date"/"Clear
+    // amount") - same destructive-ish text-link treatment for the same kind
+    // of action, just duplicated locally rather than shared (this file's own
+    // established convention, see the header comment on this StyleSheet).
+    clearLink: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.error,
+      textDecorationLine: 'underline',
+    },
+    dateButton: {
+      borderWidth: 1.5,
+      borderRadius: 22,
+      paddingVertical: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    dateButtonText: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+  });
+}

@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   Image,
   ActivityIndicator,
   Alert,
+  ScrollView,
   StyleSheet,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
@@ -14,12 +15,10 @@ import * as WebBrowser from 'expo-web-browser';
 import { useFocusEffect } from '@react-navigation/native';
 import { createPlaidLinkSession } from 'react-native-plaid-link-sdk';
 import { MaterialIcons } from '@expo/vector-icons';
-import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
 import { apiFetch, apiErrorMessage, GMAIL_REDIRECT } from '../_lib/api';
-import { styles, colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import { useSessionContext } from '../_lib/session';
 import { useAppData } from '../_lib/appData';
-import { AppBackdrop, TopEdgeFade, isNightBackdrop } from '../_components/Illustrations';
 import PrimaryButton from '../_components/PrimaryButton';
 import SorrelWordmark from '../_components/SorrelWordmark';
 
@@ -56,6 +55,12 @@ function hasRealPlaidError(error) {
 }
 
 export default function Account() {
+  // Theme redesign (2026-09-11): colors/styles now come from useTheme()
+  // and are themselves theme-reactive - the illustrated backdrop (and the
+  // scrollY/onScroll/onBackdropTextColor machinery that existed only to
+  // feed it) is gone from this screen entirely.
+  const { colors, styles } = useTheme();
+  const accountStyles = useMemo(() => buildAccountStyles(colors), [colors]);
   const router = useRouter();
   const { session } = useSessionContext();
   const { signOut, refetchAccounts, notifyBankRelinked, plaidItems, refetchPlaidItems } = useAppData();
@@ -67,21 +72,6 @@ export default function Account() {
   const [error, setError] = useState(null);
   const [signingOut, setSigningOut] = useState(false);
   const [actioningItemId, setActioningItemId] = useState(null);
-
-  // Kept for Animated.ScrollView's own onScroll wiring below - no longer
-  // drives the backdrop (AppBackdrop is a static full-screen layer, not
-  // scroll-parallaxed), the shared background concept every tab now uses.
-  const scrollY = useSharedValue(0);
-  const onScroll = useAnimatedScrollHandler((event) => {
-    scrollY.value = event.contentOffset.y;
-  });
-
-  // Text rendered directly on top of AppBackdrop (not inside an opaque
-  // card) needs to switch to a light color during the night backdrop -
-  // colors.darkest reads fine on the light morning/afternoon/evening
-  // tints but is unreadable on night's dark tint.
-  const night = isNightBackdrop();
-  const onBackdropTextColor = night ? colors.background : undefined;
 
   async function fetchGmailStatus() {
     try {
@@ -283,39 +273,26 @@ export default function Account() {
   }
 
   return (
+    // Theme redesign: styles.container already carries a theme-reactive
+    // backgroundColor: colors.background - the old illustrated backdrop's
+    // artwork layer is gone, this flat container background is it now.
     <View style={styles.container}>
-      <View style={accountStyles.backgroundLayer} pointerEvents="none">
-        <AppBackdrop scrollY={scrollY} />
-      </View>
-
       {/* Same fixed wordmark strip every other tab uses (2026-08-27, direct
           user feedback - "they need to all have the same sorrel logo at
           the top"). Account was the one tab with no header row above its
           scroll content at all. */}
       <View style={accountStyles.wordmarkStrip}>
-        <SorrelWordmark layout="row" leafSize={30} showTagline={false} textColor={onBackdropTextColor} />
-        <MaterialIcons name="notifications-none" size={26} color={onBackdropTextColor || colors.darkest} />
+        <SorrelWordmark layout="row" leafSize={30} showTagline={false} />
+        <MaterialIcons name="notifications-none" size={26} color={colors.darkest} />
       </View>
 
-      <TopEdgeFade height={90}>
-      <Animated.ScrollView
+      <ScrollView
         style={[styles.list, accountStyles.transparentScroll]}
         contentContainerStyle={{ paddingBottom: 150 }}
-        onScroll={onScroll}
-        scrollEventThrottle={16}
       >
         <View style={accountStyles.signedInBlock}>
-          <Text
-            style={[
-              accountStyles.signedInLabel,
-              night && { color: 'rgba(244, 246, 242, 0.75)' },
-            ]}
-          >
-            SIGNED IN AS
-          </Text>
-          <Text style={[accountStyles.signedInEmail, onBackdropTextColor && { color: onBackdropTextColor }]}>
-            {session.user.email}
-          </Text>
+          <Text style={accountStyles.signedInLabel}>SIGNED IN AS</Text>
+          <Text style={accountStyles.signedInEmail}>{session.user.email}</Text>
         </View>
 
         {/* Phase 38 Step 1: the Settings tab's entry point - a nested
@@ -499,22 +476,17 @@ export default function Account() {
             </Pressable>
           )}
         </View>
-      </Animated.ScrollView>
-      </TopEdgeFade>
+      </ScrollView>
 
       <StatusBar style="auto" />
     </View>
   );
 }
 
-const accountStyles = StyleSheet.create({
-  backgroundLayer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo inside the component (keyed on colors).
+function buildAccountStyles(colors) {
+  return StyleSheet.create({
   // Same values as every other tab's wordmarkStrip - kept identical on
   // purpose so the header reads as one consistent piece across tabs.
   wordmarkStrip: {
@@ -686,4 +658,5 @@ const accountStyles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 4,
   },
-});
+  });
+}

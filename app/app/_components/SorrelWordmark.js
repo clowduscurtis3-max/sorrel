@@ -1,6 +1,7 @@
+import { useMemo } from 'react';
 import { useFonts, Lora_700Bold } from '@expo-google-fonts/lora';
 import { StyleSheet, Text, View } from 'react-native';
-import { colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import { LeafAvatar } from './Illustrations';
 
 // The brand lockup from the user's own reference mockup (2026-08-22,
@@ -31,40 +32,34 @@ import { LeafAvatar } from './Illustrations';
 // stack) or 'row' (Home tab's compact horizontal header, leaf beside the
 // wordmark rather than above it) - added rather than duplicating the font-
 // loading hook in a second component.
-// `textColor`/`taglineColor`: optional overrides, both default to
-// `undefined` (falls through to this file's own colors.darkest/
-// colors.primary below) - added so the tab screens that render this
-// directly on top of AppBackdrop (Home/Goal/Recurring's wordmarkStrip)
-// can switch to a light color during the night backdrop, without
-// changing the default used by every other caller (sign-in, the
-// biometric/MFA lock screens, CreateAccountForm) which sit on their own
-// plain, non-time-of-day backgrounds and must keep the original colors.
-export default function SorrelWordmark({
-  leafSize = 64,
-  showTagline = true,
-  layout = 'column',
-  textColor,
-  taglineColor,
-}) {
+//
+// Theme redesign (2026-09-11): the `textColor`/`taglineColor` override
+// props this component used to accept (so callers rendering it directly
+// on top of the now-deleted illustrated backdrop could switch to a light
+// color at night) are removed - colors.darkest/colors.primary are
+// themselves theme-reactive now (_lib/theme.js), so the plain default
+// already resolves correctly in both day and night without any override.
+export default function SorrelWordmark({ leafSize = 64, showTagline = true, layout = 'column' }) {
+  const { colors } = useTheme();
   const [fontsLoaded] = useFonts({ Lora_700Bold });
   const isRow = layout === 'row';
+  const themedStyles = useMemo(() => buildStyles(colors), [colors]);
 
   return (
-    <View style={isRow ? styles.containerRow : styles.container}>
+    <View style={isRow ? themedStyles.containerRow : themedStyles.container}>
       <LeafAvatar size={leafSize} />
       <Text
         style={[
-          styles.wordmark,
+          themedStyles.wordmark,
           { fontSize: leafSize * 0.72 },
-          isRow && styles.wordmarkRow,
+          isRow && themedStyles.wordmarkRow,
           fontsLoaded && { fontFamily: 'Lora_700Bold' },
-          textColor && { color: textColor },
         ]}
       >
         sorrel
       </Text>
       {showTagline ? (
-        <Text style={[styles.tagline, taglineColor && { color: taglineColor }]}>
+        <Text style={themedStyles.tagline}>
           Your money. Your goals.{'\n'}We'll guide the way.
         </Text>
       ) : null}
@@ -72,26 +67,28 @@ export default function SorrelWordmark({
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    alignItems: 'center',
-  },
-  containerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  wordmark: {
-    color: colors.darkest,
-    marginTop: 8,
-  },
-  wordmarkRow: {
-    marginTop: 0,
-    marginLeft: 8,
-  },
-  tagline: {
-    marginTop: 8,
-    fontSize: 15,
-    color: colors.primary,
-    textAlign: 'center',
-  },
-});
+function buildStyles(colors) {
+  return StyleSheet.create({
+    container: {
+      alignItems: 'center',
+    },
+    containerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    wordmark: {
+      color: colors.darkest,
+      marginTop: 8,
+    },
+    wordmarkRow: {
+      marginTop: 0,
+      marginLeft: 8,
+    },
+    tagline: {
+      marginTop: 8,
+      fontSize: 15,
+      color: colors.primary,
+      textAlign: 'center',
+    },
+  });
+}

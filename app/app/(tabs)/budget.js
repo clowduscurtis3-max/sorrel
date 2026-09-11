@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Button, Pressable, ActivityIndicator, TextInput, ScrollView, StyleSheet, Alert } from 'react-native';
 // Reverted from react-native-gesture-handler's ScrollView back to plain
 // React Native (2026-08-19). It was switched to RNGH's version in Phase 13
@@ -21,9 +21,8 @@ import { StatusBar } from 'expo-status-bar';
 import { useLocalSearchParams } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
-import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
 import { apiFetch, apiErrorMessage, formatDecimal, formatAmount, logRecommendationEvent } from '../_lib/api';
-import { styles, colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import { useAppData } from '../_lib/appData';
 import { iconForCategory } from '../_lib/categoryIcons';
 import { statusForCategory, computeSpendStats, computePace, computeMonthProgress } from '../_lib/homeSummary';
@@ -31,14 +30,18 @@ import AffordabilityQuery from '../_components/AffordabilityQuery';
 import PrimaryButton from '../_components/PrimaryButton';
 import BudgetInsightModal from '../_components/BudgetInsightModal';
 import SorrelWordmark from '../_components/SorrelWordmark';
-import { LeafAvatar, AppBackdrop, TopEdgeFade, isNightBackdrop } from '../_components/Illustrations';
 
-const STATUS_COLOR = {
-  ok: colors.positive,
-  warning: colors.warning,
-  severe: colors.error,
-  neutral: colors.sage,
-};
+// Theme redesign (2026-09-11): module-level object literal referencing
+// colors - moved to a function taking colors as a parameter, same as
+// every other colors-dependent value in this file.
+function statusColorMap(colors) {
+  return {
+    ok: colors.positive,
+    warning: colors.warning,
+    severe: colors.error,
+    neutral: colors.sage,
+  };
+}
 
 // Phase 7 Step 1 sub-step 1.4, redesigned 2026-08-24 to match the user's
 // own reference mockup (dark "let Sorrel do the heavy lifting" banner,
@@ -52,6 +55,9 @@ const STATUS_COLOR = {
 // Financial Health tiles (`statusForCategory` in _lib/homeSummary.js) -
 // one rule, not two independently-drifting copies.
 export default function Budget() {
+  const { colors, styles, isNight } = useTheme();
+  const budgetLocalStyles = useMemo(() => buildBudgetLocalStyles(colors), [colors]);
+  const STATUS_COLOR = useMemo(() => statusColorMap(colors), [colors]);
   const { refetchAlerts, alerts } = useAppData();
 
   // Direct user request: tapping a category should show the transactions
@@ -126,14 +132,6 @@ export default function Budget() {
   // specific gap: the very first tap sets it before any async work starts,
   // so a second tap in the same instant sees it already true.
   const resetPendingRef = useRef(false);
-
-  // Drives AppBackdrop's scroll-linked parallax/wiggle - Budget was the
-  // one tab with a plain (non-Animated) ScrollView, since it predates the
-  // background rework this reuses.
-  const scrollY = useSharedValue(0);
-  const onScroll = useAnimatedScrollHandler((event) => {
-    scrollY.value = event.contentOffset.y;
-  });
 
   // Budget Insight pill (2026-08-24) - stateless, recomputed fresh on every
   // fetch, same convention as budgetStatus/alerts. Fetched independently
@@ -506,24 +504,21 @@ export default function Budget() {
   const showCategoryReasoning = budgetSettings.show_category_reasoning !== false;
   const showInsightPill = budgetSettings.show_insight_pill !== false;
 
-  // Text/icons rendered directly on top of AppBackdrop (not inside an
-  // opaque card) need to switch to a light color during the night
-  // backdrop - colors.darkest/colors.primary read fine on the light
-  // morning/afternoon/evening tints but are unreadable on night's dark
-  // tint.
-  const night = isNightBackdrop();
-  const onBackdropTextColor = night ? colors.background : undefined;
-  const onBackdropAccentColor = night ? '#9FD9B4' : undefined;
+  // Real finding, theme redesign (2026-09-11): colors.primary (a dark
+  // green) genuinely fails contrast against the new night background/card
+  // when used as bare text/icon/border color (the INSIGHTS pill below,
+  // outlined+text, not a filled shape) - the plan's own "primary/accent/
+  // sage stay unchanged, always painted as filled shapes" assumption
+  // doesn't hold for this one call site. Kept as a scoped override, same
+  // lighter value already proven here, just sourced from useTheme()'s
+  // isNight instead of the now-deleted isNightBackdrop().
+  const onBackdropAccentColor = isNight ? '#9FD9B4' : undefined;
 
   return (
+    // Theme redesign: styles.container already carries a theme-reactive
+    // backgroundColor: colors.background - the old illustrated backdrop's
+    // artwork layer is gone, this flat container background is it now.
     <View style={styles.container}>
-      {/* Same shared full-page AppBackdrop every other tab uses
-          (Illustrations.js) - Budget was the one tab that never had it,
-          since it predates the Home background rework this reuses. */}
-      <View style={budgetLocalStyles.backgroundLayer} pointerEvents="none">
-        <AppBackdrop scrollY={scrollY} />
-      </View>
-
       {/* Same fixed wordmark strip every other tab uses (2026-08-27,
           direct user feedback - "they need to all have the same sorrel
           logo at the top"). Budget was the one tab still using an
@@ -536,8 +531,8 @@ export default function Budget() {
           already makes for its wordmarkStrip. */}
       {viewingCategory === null && (
         <View style={budgetLocalStyles.wordmarkStrip}>
-          <SorrelWordmark layout="row" leafSize={30} showTagline={false} textColor={onBackdropTextColor} />
-          <MaterialIcons name="notifications-none" size={26} color={onBackdropTextColor || colors.darkest} />
+          <SorrelWordmark layout="row" leafSize={30} showTagline={false} />
+          <MaterialIcons name="notifications-none" size={26} color={colors.darkest} />
         </View>
       )}
 
@@ -553,11 +548,9 @@ export default function Budget() {
                   accessibilityRole="button"
                   accessibilityLabel="Back to Budget"
                 >
-                  <MaterialIcons name="arrow-back" size={26} color={onBackdropTextColor || colors.darkest} />
+                  <MaterialIcons name="arrow-back" size={26} color={colors.darkest} />
                 </Pressable>
-                <Text
-                  style={[budgetLocalStyles.categoryDetailTitle, onBackdropTextColor && { color: onBackdropTextColor }]}
-                >
+                <Text style={budgetLocalStyles.categoryDetailTitle}>
                   {viewingCategory}
                 </Text>
                 <View style={budgetLocalStyles.categoryDetailBackButton} />
@@ -607,21 +600,7 @@ export default function Budget() {
                     </View>
                   )}
 
-                  {/* Code review, 2026-09-05: these two sit directly on
-                      AppBackdrop (unlike the rows/cards around them, which
-                      are opaque and don't need this), but were missing the
-                      same onBackdropTextColor adaptation the back
-                      arrow/title two lines up already use - the exact
-                      contrast bug class CLAUDE.md already documents fixing
-                      twice elsewhere (Recurring's Filters pill,
-                      colors.placeholder), reproduced here in a screen that
-                      didn't exist yet either of those times. */}
-                  <Text
-                    style={[
-                      budgetLocalStyles.categoryDetailSectionLabel,
-                      onBackdropTextColor && { color: onBackdropTextColor },
-                    ]}
-                  >
+                  <Text style={budgetLocalStyles.categoryDetailSectionLabel}>
                     TRANSACTIONS {categoryTransactions ? `(${categoryTransactions.length})` : ''}
                   </Text>
 
@@ -630,7 +609,7 @@ export default function Budget() {
                   ) : categoryTransactions === null ? (
                     <ActivityIndicator />
                   ) : categoryTransactions.length === 0 ? (
-                    <Text style={[styles.smallText, onBackdropTextColor && { color: onBackdropTextColor }]}>
+                    <Text style={styles.smallText}>
                       No transactions in this category this period.
                     </Text>
                   ) : (
@@ -673,18 +652,13 @@ export default function Budget() {
           <ActivityIndicator />
         </View>
       ) : (
-        <TopEdgeFade height={90}>
-        <Animated.ScrollView
+        <ScrollView
           ref={scrollRef}
           style={budgetLocalStyles.screen}
           contentContainerStyle={{ paddingBottom: 260 }}
-          onScroll={onScroll}
-          scrollEventThrottle={16}
         >
           <View style={budgetLocalStyles.headerRow}>
-            <Text style={[budgetLocalStyles.title, onBackdropTextColor && { color: onBackdropTextColor }]}>
-              Budget
-            </Text>
+            <Text style={budgetLocalStyles.title}>Budget</Text>
             {showInsightPill && (
               <Pressable
                 style={[
@@ -725,46 +699,29 @@ export default function Budget() {
               (2026-08-20) - the two were visually running together. */}
           <View style={budgetLocalStyles.sectionDivider} />
 
-          {/* Generate/regenerate banner - was a plain <Button>, restyled
-              2026-08-24 to match the reference mockup's dark card. Same
-              generateBudget() call either way, just a different trigger. */}
-          <View style={budgetLocalStyles.generateCard}>
-            <View style={budgetLocalStyles.generateTopRow}>
-              <View style={budgetLocalStyles.generateIconCircle}>
-                <MaterialIcons name="auto-fix-high" size={20} color={colors.background} />
-              </View>
-              <View style={budgetLocalStyles.generateTextCol}>
-                <Text style={budgetLocalStyles.generateTitle}>Let Sorrel do the heavy lifting.</Text>
-                <Text style={budgetLocalStyles.generateSubtitle}>
-                  We'll analyze your spending and suggest a smarter budget for you.
-                </Text>
-              </View>
-              {generatingBudget ? (
-                <ActivityIndicator color={colors.background} />
-              ) : (
-                <Pressable
-                  style={budgetLocalStyles.generateChip}
-                  onPress={generateBudget}
-                  accessibilityRole="button"
-                  accessibilityLabel={hasAnyBudget ? 'Regenerate budget' : 'Generate budget'}
-                >
-                  <Text style={budgetLocalStyles.generateChipText}>
-                    {hasAnyBudget ? 'REGENERATE BUDGET' : 'GENERATE BUDGET'}
-                  </Text>
-                  <Text style={budgetLocalStyles.generateChipSubtext}>from spending history</Text>
-                </Pressable>
-              )}
-            </View>
-            {/* Its own row below the button, not an absolutely-positioned
-                overlay (2026-08-27, direct user feedback, twice now - a
-                corner watermark that overlaps or gets clipped by the card's
-                own rounded edge keeps reading as broken/invisible instead of
-                a deliberate flourish). A real flow row guarantees genuine,
-                unclippable space from both the chip above it and the card's
-                own edges, without needing to fight the chip's exact width. */}
-            <View style={budgetLocalStyles.generateLeafRow}>
-              <LeafAvatar size={22} color={colors.background} />
-            </View>
+          {/* Generate/regenerate prompt - was a dark card (2026-08-24
+              restyle); real bug found live during the theme redesign
+              (2026-09-11): its backgroundColor: colors.darkest flips to
+              LIGHT at night (darkest and background swap roles - see
+              _lib/styles.js's NIGHT_COLOR_OVERRIDES), turning a bold dark
+              banner into a jarring bright-white box against the rest of
+              the now-dark screen. Per direct user request, simplified
+              instead of chasing a "correct" dark-at-night color for it -
+              no card/background/icon/watermark at all now, just text and
+              a button, same generateBudget() call either way. */}
+          <View style={budgetLocalStyles.generateSection}>
+            <Text style={budgetLocalStyles.generateTitle}>Let Sorrel do the heavy lifting.</Text>
+            <Text style={budgetLocalStyles.generateSubtitle}>
+              We'll analyze your spending and suggest a smarter budget for you.
+            </Text>
+            {generatingBudget ? (
+              <ActivityIndicator />
+            ) : (
+              <PrimaryButton
+                title={hasAnyBudget ? 'Regenerate budget' : 'Generate budget'}
+                onPress={generateBudget}
+              />
+            )}
           </View>
 
           {/* Stat tiles - same visual language and same underlying pure
@@ -1045,8 +1002,7 @@ export default function Budget() {
               </Pressable>
             );
           })}
-        </Animated.ScrollView>
-        </TopEdgeFade>
+        </ScrollView>
       ))}
       <BudgetInsightModal
         visible={insightModalVisible}
@@ -1077,14 +1033,12 @@ function periodLabel(periodStart) {
   });
 }
 
-const budgetLocalStyles = StyleSheet.create({
-  backgroundLayer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo inside the component (keyed on colors) - StyleSheet.create
+// bakes values in once at call time, so it can never itself react to the
+// active theme changing.
+function buildBudgetLocalStyles(colors) {
+  return StyleSheet.create({
   // Same values as every other tab's wordmarkStrip (Home/Recurring/Goal) -
   // kept identical on purpose so the header reads as one consistent piece
   // across tabs, not five slightly different ones.
@@ -1099,10 +1053,6 @@ const budgetLocalStyles = StyleSheet.create({
   screen: {
     flex: 1,
     paddingHorizontal: 16,
-    // Pushed down past TopEdgeFade's 90px fade zone (Illustrations.js) -
-    // otherwise the "Budget" title/INSIGHTS pill sat inside that zone
-    // even at rest (scroll position 0), reading as "already faded before
-    // scrolling" instead of only fading once actually scrolled up into it.
     paddingTop: 110,
   },
   headerRow: {
@@ -1142,73 +1092,23 @@ const budgetLocalStyles = StyleSheet.create({
     borderBottomColor: colors.sage,
     marginVertical: 12,
   },
-  // Column, not row (2026-08-27) - the leaf watermark used to be an
-  // absolutely-positioned overlay directly on this container, which kept
-  // either covering the REGENERATE BUDGET chip or getting clipped down to
-  // an unrecognizable sliver by the corner's own borderRadius, depending
-  // on how it was tuned. generateTopRow (below) now holds the original
-  // row content; the leaf gets its own row underneath instead.
-  generateCard: {
-    backgroundColor: colors.darkest,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-  },
-  generateTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  generateIconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  generateTextCol: {
-    flex: 1,
-    gap: 4,
+  // Simplified 2026-09-11, direct user request (real on-device screenshot
+  // at night: the old dark card's background flipped to bright white,
+  // see this section's own JSX comment) - no card/background/icon/
+  // watermark, just smaller plain text and a button.
+  generateSection: {
+    gap: 6,
+    marginBottom: 16,
   },
   generateTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.background,
-  },
-  generateSubtitle: {
-    fontSize: 12,
-    color: colors.sage,
-  },
-  generateChip: {
-    backgroundColor: colors.background,
-    borderRadius: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    alignItems: 'center',
-  },
-  generateChipText: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: '700',
     color: colors.darkest,
   },
-  generateChipSubtext: {
-    fontSize: 9,
-    color: colors.dark,
-  },
-  // A real flow row, not an absolute overlay (2026-08-27, after two prior
-  // absolute-positioned attempts both kept either covering the REGENERATE
-  // BUDGET chip or getting clipped by the card's own rounded corner down
-  // to an unrecognizable sliver) - guarantees genuine gaps from the chip
-  // above (marginTop) and from the card's own edges (paddingRight/
-  // paddingBottom, well inside generateCard's own 16px padding) rather
-  // than depending on exact pixel overlap math against the chip's width.
-  generateLeafRow: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    marginTop: 10,
-    paddingRight: 2,
-    paddingBottom: 2,
+  generateSubtitle: {
+    fontSize: 11,
+    color: colors.muted,
+    marginBottom: 4,
   },
   // Sits inside a category card (styles.card, light background), same
   // context as cancelText right next to it - colors.error (not colors.sage,
@@ -1483,4 +1383,5 @@ const budgetLocalStyles = StyleSheet.create({
     fontWeight: '600',
     color: colors.darkest,
   },
-});
+  });
+}

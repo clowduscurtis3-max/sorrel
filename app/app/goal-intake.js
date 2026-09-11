@@ -1,11 +1,10 @@
+import { useMemo } from 'react';
 import { View, Text, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
-import { useSharedValue } from 'react-native-reanimated';
-import { styles, colors } from './_lib/styles';
+import { useTheme } from './_lib/theme';
 import { useSessionContext } from './_lib/session';
 import { useGoalForm, GoalFormFields } from './_components/GoalForm';
-import { AppBackdrop, isNightBackdrop } from './_components/Illustrations';
 import PrimaryButton from './_components/PrimaryButton';
 
 // Ported from the old app/App.js's `editingGoal` branch (Phase 7 Step 1
@@ -16,6 +15,12 @@ import PrimaryButton from './_components/PrimaryButton';
 // - same dual purpose the old branch always had, just as its own route.
 export default function GoalIntake() {
   const router = useRouter();
+  // Theme redesign (2026-09-11): colors/styles now come from useTheme()
+  // and are themselves theme-reactive - the illustrated backdrop (a
+  // "warm, welcome" atmospheric layer this screen used to mount) is gone;
+  // styles.container already carries a theme-reactive background.
+  const { colors, styles } = useTheme();
+  const intakeStyles = useMemo(() => buildIntakeStyles(colors), [colors]);
   // Phase 42 (multi-goal tracking, 2026-09-08): this screen is only ever
   // reached via the root gate when `goals.length === 0` (see
   // requiredRoute in _layout.js) - there is never an existing goal to
@@ -25,23 +30,8 @@ export default function GoalIntake() {
   const hasExistingGoal = goals && goals.length > 0;
   const form = useGoalForm(null, { onSaved: () => router.replace('/') });
 
-  // Atmospheric backdrop (2026-08-31, direct user request) - the first
-  // real "welcome" moment after account creation, matching the warm
-  // advisor voice the rest of the app already has. Scoped to this screen
-  // and CreateAccountForm.js only, deliberately not sign-in/biometric-
-  // lock/MFA (fast, transactional security gates, not onboarding). No real
-  // scroll on this screen, so scrollY never changes - AppBackdrop still
-  // requires a real shared value, not a plain number.
-  const scrollY = useSharedValue(0);
-  const night = isNightBackdrop();
-  const onBackdropTextColor = night ? colors.background : undefined;
-
   return (
     <View style={styles.container}>
-      <View style={intakeStyles.backgroundLayer} pointerEvents="none">
-        <AppBackdrop scrollY={scrollY} />
-      </View>
-
       {/* Cancel (top-left) / Skip (top-right) live in their own corner row,
           outside the main form flow - deliberately separate from Save goal
           (per direct user feedback, 2026-08-12). Mutually exclusive by
@@ -52,24 +42,20 @@ export default function GoalIntake() {
         <View>
           {hasExistingGoal && !form.saving && (
             <Pressable onPress={() => router.replace('/')} accessibilityRole="button" hitSlop={8}>
-              <Text style={[intakeStyles.cornerLink, onBackdropTextColor && { color: onBackdropTextColor }]}>
-                Cancel
-              </Text>
+              <Text style={intakeStyles.cornerLink}>Cancel</Text>
             </Pressable>
           )}
         </View>
         <View>
           {!hasExistingGoal && !form.saving && (
             <Pressable onPress={form.skip} accessibilityRole="button" hitSlop={8}>
-              <Text style={[intakeStyles.cornerLink, onBackdropTextColor && { color: onBackdropTextColor }]}>
-                Skip
-              </Text>
+              <Text style={intakeStyles.cornerLink}>Skip</Text>
             </Pressable>
           )}
         </View>
       </View>
       <View style={styles.goalScreen}>
-        <GoalFormFields form={form} textColor={onBackdropTextColor} />
+        <GoalFormFields form={form} />
 
         {/* Pushes Save goal to the true bottom of the screen, separate from
             the fields above, instead of just being the next item in the
@@ -89,19 +75,14 @@ export default function GoalIntake() {
   );
 }
 
-const intakeStyles = StyleSheet.create({
-  // Absolutely positioned so AppBackdrop fills the screen regardless of
-  // styles.container's own layout - same pattern every tab already uses.
-  backgroundLayer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  cornerLink: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-});
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo inside the component (keyed on colors).
+function buildIntakeStyles(colors) {
+  return StyleSheet.create({
+    cornerLink: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+  });
+}

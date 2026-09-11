@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   AppState,
+  ScrollView,
   StyleSheet,
   Switch,
 } from 'react-native';
@@ -14,7 +15,6 @@ import { StatusBar } from 'expo-status-bar';
 import { MaterialIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
-import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   useAudioRecorder,
@@ -32,12 +32,12 @@ import {
   formatWhole,
   logRecommendationEvent,
 } from '../_lib/api';
-import { styles, colors } from '../_lib/styles';
+import { readableTextColor } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import { useSessionContext } from '../_lib/session';
 import { useAppData } from '../_lib/appData';
 import { useGoalForm, computeTargetDateFromTimeframe } from '../_components/GoalForm';
 import { formatAmountLabel } from '../_lib/amountPicker';
-import { AppBackdrop, TopEdgeFade, isNightBackdrop } from '../_components/Illustrations';
 import SorrelWordmark from '../_components/SorrelWordmark';
 import PrimaryButton from '../_components/PrimaryButton';
 
@@ -112,7 +112,11 @@ function goalDisplayName(goalType, notes) {
 // historical data yet to honestly support a pace/on-track claim (see
 // server/goalPace.js's own header). A plain percent-complete badge is the
 // honest replacement, not a fabricated pace signal.
-function goalStatusBadge(goalProgress) {
+// `colors` (2026-09-11, theme redesign): now passed in explicitly rather
+// than read from a static module-level import, since this function is
+// called from within the component render, where colors is theme-reactive
+// (useTheme()).
+function goalStatusBadge(goalProgress, colors) {
   if (goalProgress.no_accounts_linked) {
     return { label: 'Not tracking yet', color: colors.muted };
   }
@@ -268,6 +272,12 @@ function computeGoalAdvisorTip({ goalProgress, subscriptionAudit, budgetStatus }
 // picture - kept here unedited as a historical note, not corrected in
 // place.
 export default function Goal() {
+  // Theme redesign (2026-09-11): colors/styles now come from useTheme()
+  // and are themselves theme-reactive - the illustrated backdrop (and the
+  // scrollY/onScroll/onBackdropTextColor machinery that existed only to
+  // feed it) is gone from this screen entirely.
+  const { colors, styles, isNight } = useTheme();
+  const goalStyles = useMemo(() => buildGoalStyles(colors), [colors]);
   const { refetchGoal } = useSessionContext();
   const { goalsProgress, refetchGoalsProgress, subscriptionAudit, budgetStatus, accounts } = useAppData();
 
@@ -504,15 +514,6 @@ export default function Goal() {
       startEditAmountRecording();
     }
   }
-
-  // Own scroll tracking for the editing screen's ScrollView (separate from
-  // the read-only Overview's own scrollY below) - same AppBackdrop
-  // parallax + TopEdgeFade pattern every other screen in this app already
-  // uses, so this redesigned screen doesn't look or behave like a one-off.
-  const editScrollY = useSharedValue(0);
-  const onEditScroll = useAnimatedScrollHandler((event) => {
-    editScrollY.value = event.contentOffset.y;
-  });
 
   function closeEditorAnd(fn) {
     setActiveEditor(null);
@@ -1048,22 +1049,6 @@ export default function Goal() {
     if (!roundUpsResult) fetchRoundUps();
   }
 
-  // Kept for the Overview branch's Animated.ScrollView onScroll handler -
-  // no longer drives the backdrop itself (AppBackdrop is a static
-  // full-screen layer, not scroll-parallaxed), but still needed to
-  // satisfy Animated.ScrollView's own onScroll wiring below.
-  const scrollY = useSharedValue(0);
-  const onScroll = useAnimatedScrollHandler((event) => {
-    scrollY.value = event.contentOffset.y;
-  });
-
-  // Text/icons rendered directly on top of AppBackdrop (not inside an
-  // opaque card) need to switch to a light color during the night
-  // backdrop - colors.darkest reads fine on the light morning/afternoon/
-  // evening tints but is unreadable on night's dark tint.
-  const night = isNightBackdrop();
-  const onBackdropTextColor = night ? colors.background : undefined;
-
   // Real bug found by adversarial review, 2026-08-13: Cancel used to only
   // toggle the detail view closed, leaving any discarded edits sitting in
   // `form`'s state (this component instance, and therefore `form`, stays
@@ -1109,10 +1094,6 @@ export default function Goal() {
         // shared middle-section component to serve both well (documented
         // in that file's own header comment).
         <>
-          <View style={goalStyles.backgroundLayer} pointerEvents="none">
-            <AppBackdrop scrollY={editScrollY} />
-          </View>
-
           <View style={goalStyles.editHeaderRow}>
             <Pressable
               style={goalStyles.backButton}
@@ -1120,27 +1101,20 @@ export default function Goal() {
               accessibilityRole="button"
               accessibilityLabel="Back, discard unsaved changes"
             >
-              <MaterialIcons
-                name="arrow-back"
-                size={26}
-                color={night ? colors.background : colors.darkest}
-              />
+              <MaterialIcons name="arrow-back" size={26} color={colors.darkest} />
             </Pressable>
             <View style={goalStyles.editHeaderTextCol}>
-              <Text style={[goalStyles.editHeaderTitle, night && { color: colors.background }]}>
+              <Text style={goalStyles.editHeaderTitle}>
                 {addingGoal ? 'Add Goal' : 'Edit Goal'}
               </Text>
-              <Text
-                style={[goalStyles.editHeaderSubtitle, night && { color: 'rgba(244, 246, 242, 0.75)' }]}
-              >
+              <Text style={goalStyles.editHeaderSubtitle}>
                 {addingGoal ? 'Set up a new goal.' : 'Make changes to your goal.'}
               </Text>
             </View>
             <View style={{ width: 40 }} />
           </View>
 
-          <TopEdgeFade height={90}>
-          <Animated.ScrollView
+          <ScrollView
             style={goalStyles.editingScroll}
             // 150 (the default every other tab uses) wasn't enough here -
             // this screen's content (a couple of short cards) is close
@@ -1154,8 +1128,6 @@ export default function Goal() {
             // the 150 default for the same reason and was already tuned
             // against a real device.
             contentContainerStyle={{ paddingBottom: 260 }}
-            onScroll={onEditScroll}
-            scrollEventThrottle={16}
           >
             {/* Goal Summary - informational only, no button here (the old
                 screen's giant "SAVE FOR A HOUSE"-style buttons lived in the
@@ -1817,36 +1789,22 @@ export default function Goal() {
                 <Text style={goalStyles.deleteGoalButtonText}>Archive Goal</Text>
               </Pressable>
             )}
-          </Animated.ScrollView>
-          </TopEdgeFade>
+          </ScrollView>
         </>
       ) : (
         <>
-          <View style={goalStyles.backgroundLayer} pointerEvents="none">
-            <AppBackdrop scrollY={scrollY} />
-          </View>
-
           <View style={goalStyles.wordmarkStrip}>
-            <SorrelWordmark layout="row" leafSize={30} showTagline={false} textColor={onBackdropTextColor} />
-            <MaterialIcons name="notifications-none" size={26} color={onBackdropTextColor || colors.darkest} />
+            <SorrelWordmark layout="row" leafSize={30} showTagline={false} />
+            <MaterialIcons name="notifications-none" size={26} color={colors.darkest} />
           </View>
 
-          <TopEdgeFade height={90}>
-          <Animated.ScrollView
+          <ScrollView
             style={[styles.list, goalStyles.transparentScroll]}
             contentContainerStyle={{ paddingBottom: 150 }}
-            onScroll={onScroll}
-            scrollEventThrottle={16}
           >
             <View style={goalStyles.titleBlock}>
-              <Text style={[goalStyles.title, onBackdropTextColor && { color: onBackdropTextColor }]}>
-                Your Goals
-              </Text>
-              <Text
-                style={[goalStyles.subtitle, night && { color: 'rgba(244, 246, 242, 0.75)' }]}
-              >
-                Build the future you want.
-              </Text>
+              <Text style={goalStyles.title}>Your Goals</Text>
+              <Text style={goalStyles.subtitle}>Build the future you want.</Text>
             </View>
 
             {/* Phase 42 (multi-goal tracking, 2026-09-08): the single
@@ -1880,7 +1838,7 @@ export default function Goal() {
             ) : (
               <>
                 {goalsProgress.map((g) => {
-                  const badge = goalStatusBadge(g);
+                  const badge = goalStatusBadge(g, colors);
                   const percent = Math.min(100, Math.max(0, g.percent_complete || 0));
                   return (
                     <Pressable
@@ -1903,7 +1861,21 @@ export default function Goal() {
                           </Text>
                         </View>
                         <View style={[goalStyles.badge, { backgroundColor: badge.color }]}>
-                          <Text style={goalStyles.badgeText}>{badge.label}</Text>
+                          {/* Real contrast bug found (2026-09-11, theme
+                              redesign): badgeText used to hardcode
+                              color: colors.background, correct only for
+                              two of the three real badge fills
+                              (muted/positive) - the third (primary,
+                              "X% there," the single most common case) is
+                              a fixed dark green that never changes at
+                              night, while colors.background flips dark
+                              too - 2.80:1 contrast, unreadable.
+                              readableTextColor computes the actually-
+                              correct text color for whatever the real
+                              fill is, in both modes. */}
+                          <Text style={[goalStyles.badgeText, { color: readableTextColor(badge.color, colors) }]}>
+                            {badge.label}
+                          </Text>
                         </View>
                       </View>
 
@@ -2322,8 +2294,7 @@ export default function Goal() {
                 </>
               )}
             </View>
-          </Animated.ScrollView>
-          </TopEdgeFade>
+          </ScrollView>
         </>
       )}
       <StatusBar style="auto" />
@@ -2331,10 +2302,13 @@ export default function Goal() {
   );
 }
 
-const goalStyles = StyleSheet.create({
-  // Home Affordability's state Picker (2026-09-11) - see that Picker's own
-  // JSX comment for the full "why." Same values settings/goal.js's already-
-  // fixed pickerControl/pickerItem use.
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo inside the component (keyed on colors).
+function buildGoalStyles(colors) {
+  return StyleSheet.create({
+  // Home Affordability's state Picker - see that Picker's own JSX comment
+  // for the full "why." Same values settings/goal.js's already-fixed
+  // pickerControl/pickerItem use.
   homeStatePickerControl: {
     color: colors.darkest,
     backgroundColor: colors.background,
@@ -2342,13 +2316,6 @@ const goalStyles = StyleSheet.create({
   homeStatePickerItem: {
     color: colors.darkest,
     backgroundColor: colors.background,
-  },
-  backgroundLayer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
   },
   wordmarkStrip: {
     flexDirection: 'row',
@@ -2565,10 +2532,8 @@ const goalStyles = StyleSheet.create({
   },
   titleBlock: {
     paddingHorizontal: 24,
-    // Pushed down past TopEdgeFade's 90px fade zone (Illustrations.js) -
-    // otherwise the title sat inside that zone even at rest (scroll
-    // position 0), reading as "already faded before scrolling" instead of
-    // only fading once actually scrolled up into it.
+    // Same top clearance every other tab's own first scroll-item uses,
+    // below the fixed wordmark strip above it.
     paddingTop: 110,
     paddingBottom: 24,
     gap: 4,
@@ -2848,4 +2813,5 @@ const goalStyles = StyleSheet.create({
     flexShrink: 1,
     alignSelf: 'stretch',
   },
-});
+  });
+}

@@ -1,11 +1,9 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useSharedValue } from 'react-native-reanimated';
-import { colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import { API_URL } from '../_lib/api';
 import SorrelWordmark from './SorrelWordmark';
-import { AppBackdrop, isNightBackdrop } from './Illustrations';
 
 const MIN_USERNAME_LENGTH = 3;
 const MIN_PASSWORD_LENGTH = 8;
@@ -21,6 +19,11 @@ const MIN_PASSWORD_LENGTH = 8;
 // fragile requiredRoute gate from needing a second unauthenticated route
 // to special-case).
 export default function CreateAccountForm({ onBack, onCreated }) {
+  // Theme redesign (2026-09-11): colors now comes from useTheme() and is
+  // itself theme-reactive - the illustrated backdrop (and the scrollY/
+  // onBackdropTextColor machinery that existed only to feed it) is gone.
+  const { colors } = useTheme();
+  const styles = useMemo(() => buildStyles(colors), [colors]);
   const [step, setStep] = useState(1);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -28,16 +31,6 @@ export default function CreateAccountForm({ onBack, onCreated }) {
   const [email, setEmail] = useState('');
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
-
-  // Atmospheric backdrop (2026-08-31, direct user request), scoped to this
-  // screen and goal-intake.js only - a "warm, welcome" moment like the rest
-  // of the actual app, unlike sign-in/biometric-lock/MFA which stay flat by
-  // deliberate choice (fast, transactional security gates, not onboarding).
-  // No real scroll on this screen, so scrollY never changes - AppBackdrop
-  // still requires a real shared value, not a plain number.
-  const scrollY = useSharedValue(0);
-  const night = isNightBackdrop();
-  const onBackdropTextColor = night ? colors.background : undefined;
 
   function continueToEmailStep() {
     setError(null);
@@ -77,15 +70,12 @@ export default function CreateAccountForm({ onBack, onCreated }) {
   }
 
   return (
+    // Theme redesign: container already carries a theme-reactive
+    // backgroundColor: colors.background - the old illustrated backdrop's
+    // artwork layer is gone, this flat container background is it now.
     <View style={styles.container}>
-      <View style={styles.backgroundLayer} pointerEvents="none">
-        <AppBackdrop scrollY={scrollY} />
-      </View>
-
-      <SorrelWordmark leafSize={64} textColor={onBackdropTextColor} taglineColor={onBackdropTextColor} />
-      <Text style={[styles.title, onBackdropTextColor && { color: onBackdropTextColor }]}>
-        Create your account
-      </Text>
+      <SorrelWordmark leafSize={64} />
+      <Text style={styles.title}>Create your account</Text>
 
       {step === 1 ? (
         <>
@@ -132,14 +122,12 @@ export default function CreateAccountForm({ onBack, onCreated }) {
             <Text style={styles.ctaText}>Continue</Text>
           </Pressable>
           <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel="Back to sign in">
-            <Text style={[styles.linkText, onBackdropTextColor && { color: onBackdropTextColor }]}>
-              Back to sign in
-            </Text>
+            <Text style={styles.linkText}>Back to sign in</Text>
           </Pressable>
         </>
       ) : (
         <>
-          <Text style={[styles.subtitle, onBackdropTextColor && { color: onBackdropTextColor }]}>
+          <Text style={styles.subtitle}>
             One last step - we'll check this against the list of people allowed to use Sorrel.
           </Text>
           <View style={styles.fieldRow}>
@@ -173,9 +161,7 @@ export default function CreateAccountForm({ onBack, onCreated }) {
             accessibilityRole="button"
             accessibilityLabel="Back"
           >
-            <Text style={[styles.linkText, onBackdropTextColor && { color: onBackdropTextColor }]}>
-              Back
-            </Text>
+            <Text style={styles.linkText}>Back</Text>
           </Pressable>
         </>
       )}
@@ -183,23 +169,16 @@ export default function CreateAccountForm({ onBack, onCreated }) {
   );
 }
 
-const styles = StyleSheet.create({
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo inside the component (keyed on colors).
+function buildStyles(colors) {
+  return StyleSheet.create({
   container: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.background,
     padding: 24,
-  },
-  // Absolutely positioned so AppBackdrop fills the container regardless of
-  // the container's own centered flex alignment - same pattern every tab
-  // already uses for its own background layer.
-  backgroundLayer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
   },
   title: { fontSize: 20, fontWeight: '700', color: colors.darkest, marginTop: 18, marginBottom: 24 },
   subtitle: {
@@ -247,4 +226,5 @@ const styles = StyleSheet.create({
   ctaText: { color: colors.background, fontSize: 16, fontWeight: '600' },
   linkText: { color: colors.dark, fontSize: 14, marginTop: 18, textDecorationLine: 'underline' },
   spinner: { marginTop: 16 },
-});
+  });
+}
