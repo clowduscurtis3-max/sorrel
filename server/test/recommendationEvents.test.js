@@ -5,10 +5,10 @@ const assert = require('node:assert/strict');
 
 const { logRecommendationEvent, VALID_TYPES, VALID_STATUSES } = require('../recommendationEvents');
 
-test('VALID_TYPES matches the three real propose-then-apply surfaces confirmed in the client code', () => {
+test('VALID_TYPES matches the four real propose-then-apply surfaces confirmed in the client code', () => {
   assert.deepEqual(
     [...VALID_TYPES].sort(),
-    ['budget_insight_cuts', 'budget_rebalance', 'emergency_fund_target']
+    ['budget_insight_cuts', 'budget_rebalance', 'emergency_fund_target', 'goal_timeframe_extend']
   );
 });
 

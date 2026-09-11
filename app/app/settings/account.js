@@ -1,10 +1,10 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { View, Text, Pressable, TextInput, ActivityIndicator, Alert, Switch, ScrollView, StyleSheet } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
 import { apiFetch, apiErrorMessage } from '../_lib/api';
-import { styles, colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import { useSessionContext } from '../_lib/session';
 import { supabase } from '../../lib/supabase';
 import { getBiometricLockEnabled, setBiometricLockEnabled } from '../_lib/biometricPreference';
@@ -34,6 +34,8 @@ const SESSION_TIMEOUT_OPTIONS = [
 // (tabs)/account.js so there's exactly one copy of each, not two that
 // could drift.
 export default function AccountSecuritySettings() {
+  const { colors, styles } = useTheme();
+  const accountSecurityStyles = useMemo(() => buildAccountSecurityStyles(colors), [colors]);
   const router = useRouter();
   const { session, signOut } = useSessionContext();
 
@@ -769,7 +771,10 @@ export default function AccountSecuritySettings() {
   );
 }
 
-const accountSecurityStyles = StyleSheet.create({
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo inside the component (keyed on colors).
+function buildAccountSecurityStyles(colors) {
+  return StyleSheet.create({
   bodyScroll: {
     flex: 1,
   },
@@ -915,4 +920,5 @@ const accountSecurityStyles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 4,
   },
-});
+  });
+}

@@ -1,6 +1,7 @@
+import { useMemo } from 'react';
 import { View, Text, Modal, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { styles, colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import { formatDecimal } from '../_lib/api';
 import { iconForCategory } from '../_lib/categoryIcons';
 import { statusForCategory } from '../_lib/homeSummary';
@@ -20,14 +21,19 @@ import { statusForCategory } from '../_lib/homeSummary';
 // identical "neutral" severity, and a code-review pass (2026-09-05)
 // caught this file using colors.sage instead, a real inconsistency
 // visible by opening this modal right next to the tile it describes.
-const STATUS_COLOR = {
-  ok: colors.positive,
-  warning: colors.warning,
-  severe: colors.error,
-  neutral: colors.muted,
-};
+function statusColorMap(colors) {
+  return {
+    ok: colors.positive,
+    warning: colors.warning,
+    severe: colors.error,
+    neutral: colors.muted,
+  };
+}
 
 export default function SpentSoFarModal({ visible, onClose, budgetStatus, alerts, spendStats, onSelectCategory }) {
+  const { colors, styles } = useTheme();
+  const localStyles = useMemo(() => buildLocalStyles(colors), [colors]);
+  const STATUS_COLOR = useMemo(() => statusColorMap(colors), [colors]);
   if (!budgetStatus) return null;
 
   const rows = [...(budgetStatus.status || [])].sort((a, b) => b.actual - a.actual);
@@ -102,7 +108,8 @@ export default function SpentSoFarModal({ visible, onClose, budgetStatus, alerts
   );
 }
 
-const localStyles = StyleSheet.create({
+function buildLocalStyles(colors) {
+  return StyleSheet.create({
   closeButton: {
     width: 36,
     height: 36,
@@ -170,4 +177,5 @@ const localStyles = StyleSheet.create({
     height: '100%',
     borderRadius: 3,
   },
-});
+  });
+}

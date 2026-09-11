@@ -1,9 +1,9 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { View, Text, ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Picker } from '@react-native-picker/picker';
 import { apiFetch, apiErrorMessage, patchSettings } from '../_lib/api';
-import { styles, colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import SettingsScreenChrome from '../_components/SettingsScreenChrome';
 import SettingsFetchGate from '../_components/SettingsFetchGate';
 
@@ -20,7 +20,10 @@ const SENSITIVITY_OPTIONS = [
   { value: 'high', label: 'High (3%+)' },
 ];
 
+// Theme redesign (2026-09-11): colors/styles now come from useTheme().
 export default function RecurringSettings() {
+  const { colors, styles } = useTheme();
+  const recurringSettingsStyles = useMemo(() => buildRecurringSettingsStyles(colors), [colors]);
   const router = useRouter();
   const [settings, setSettings] = useState(null);
   const [error, setError] = useState(null);
@@ -137,67 +140,71 @@ export default function RecurringSettings() {
   );
 }
 
-const recurringSettingsStyles = StyleSheet.create({
-  bodyScroll: {
-    flex: 1,
-  },
-  body: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 40,
-    gap: 12,
-  },
-  card: {
-    gap: 8,
-  },
-  description: {
-    textAlign: 'left',
-  },
-  pillRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 4,
-  },
-  pill: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.sage,
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    backgroundColor: colors.card,
-  },
-  pillActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  pillText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.dark,
-  },
-  pillTextActive: {
-    color: colors.background,
-  },
-  pillSpinner: {
-    marginLeft: 4,
-  },
-  picker: {
-    marginTop: 4,
-  },
-  // See settings/goal.js's identical pickerControl for why this is needed
-  // directly on the Picker itself, not just its wrapping View (confirmed
-  // on-device, 2026-09-05).
-  pickerControl: {
-    color: colors.darkest,
-    backgroundColor: colors.background,
-  },
-  // See settings/goal.js's identical pickerItem for why this is needed on
-  // the Picker.Item itself, not just the Picker/its wrapping View
-  // (confirmed on-device, 2026-09-06: the open dropdown's item list still
-  // rendered dark/illegible without this even after mode="dropdown").
-  pickerItem: {
-    color: colors.darkest,
-    backgroundColor: colors.background,
-  },
-});
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo inside the component (keyed on colors).
+function buildRecurringSettingsStyles(colors) {
+  return StyleSheet.create({
+    bodyScroll: {
+      flex: 1,
+    },
+    body: {
+      paddingHorizontal: 16,
+      paddingTop: 8,
+      paddingBottom: 40,
+      gap: 12,
+    },
+    card: {
+      gap: 8,
+    },
+    description: {
+      textAlign: 'left',
+    },
+    pillRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: 4,
+    },
+    pill: {
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.sage,
+      borderRadius: 16,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      backgroundColor: colors.card,
+    },
+    pillActive: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    pillText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.dark,
+    },
+    pillTextActive: {
+      color: colors.background,
+    },
+    pillSpinner: {
+      marginLeft: 4,
+    },
+    picker: {
+      marginTop: 4,
+    },
+    // See settings/goal.js's identical pickerControl for why this is needed
+    // directly on the Picker itself, not just its wrapping View (confirmed
+    // on-device, 2026-09-05).
+    pickerControl: {
+      color: colors.darkest,
+      backgroundColor: colors.background,
+    },
+    // See settings/goal.js's identical pickerItem for why this is needed on
+    // the Picker.Item itself, not just the Picker/its wrapping View
+    // (confirmed on-device, 2026-09-06: the open dropdown's item list still
+    // rendered dark/illegible without this even after mode="dropdown").
+    pickerItem: {
+      color: colors.darkest,
+      backgroundColor: colors.background,
+    },
+  });
+}

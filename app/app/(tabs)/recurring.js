@@ -321,13 +321,6 @@ export default function Recurring() {
     scrollRef.current?.scrollTo({ y: savingsY.current, animated: true });
   }
 
-  // Real finding, theme redesign (2026-09-11): colors.primary (a dark
-  // green) genuinely fails contrast against the new night background/card
-  // when used as bare icon/text color (the "Manage" link below, not a
-  // filled shape) - same scoped exception already found and fixed on
-  // Budget's own INSIGHTS pill, same value reused here.
-  const onBackdropAccentColor = isNight ? '#9FD9B4' : undefined;
-
   const findings = subscriptionAudit ? [...subscriptionAudit.gradual_increases, ...subscriptionAudit.price_jumps] : [];
 
   return (
@@ -359,10 +352,8 @@ export default function Recurring() {
               accessibilityRole="button"
               accessibilityLabel="Manage recurring charges"
             >
-              <MaterialIcons name="tune" size={16} color={onBackdropAccentColor || colors.primary} />
-              <Text style={[recurringStyles.manageLinkText, onBackdropAccentColor && { color: onBackdropAccentColor }]}>
-                Manage
-              </Text>
+              <MaterialIcons name="tune" size={16} color={colors.primary} />
+              <Text style={recurringStyles.manageLinkText}>Manage</Text>
             </Pressable>
           </View>
           <Text style={recurringStyles.subtitle}>

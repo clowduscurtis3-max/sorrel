@@ -11,7 +11,8 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 import { MaterialIcons } from '@expo/vector-icons';
-import { colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
+import { readableTextColor } from '../_lib/styles';
 
 // Phase 38 Step 3, replacing up/down arrows per direct user feedback
 // ("i dont like the way there are up and down arrows to move each box up
@@ -29,7 +30,7 @@ import { colors } from '../_lib/styles';
 // dependency for the drag/wiggle itself.
 const SLOT_HEIGHT = 76;
 
-function Row({ itemKey, node, index, editing, onLongPress, onEditingChange, onDragUpdate, onDragEnd, onDelete }) {
+function Row({ itemKey, node, index, editing, onLongPress, onEditingChange, onDragUpdate, onDragEnd, onDelete, colors, showDelete }) {
   const translateY = useSharedValue(index * SLOT_HEIGHT);
   const isDragging = useSharedValue(false);
   const wiggle = useSharedValue(0);
@@ -52,6 +53,7 @@ function Row({ itemKey, node, index, editing, onLongPress, onEditingChange, onDr
   // "wherever the list currently thinks it is" is the standard fix for
   // this class of drag-reorder bug.
   const dragStartIndex = useSharedValue(index);
+  const localStyles = useMemo(() => buildLocalStyles(colors), [colors]);
 
   // Always-current refs for the callbacks the memoized gesture below
   // calls via runOnJS. Necessary specifically because the gestures are
@@ -172,7 +174,7 @@ function Row({ itemKey, node, index, editing, onLongPress, onEditingChange, onDr
   return (
     <GestureDetector gesture={editing ? Gesture.Race(pan, tap) : longPress}>
       <Animated.View style={[localStyles.row, animatedStyle]}>
-        {editing && (
+        {editing && showDelete && (
           <Pressable
             style={localStyles.deleteBadge}
             onPress={() => onDelete(itemKey)}
@@ -180,7 +182,7 @@ function Row({ itemKey, node, index, editing, onLongPress, onEditingChange, onDr
             accessibilityRole="button"
             accessibilityLabel="Remove"
           >
-            <MaterialIcons name="close" size={14} color={colors.background} />
+            <MaterialIcons name="close" size={14} color={readableTextColor(colors.error, colors)} />
           </Pressable>
         )}
         {node}
@@ -197,7 +199,8 @@ function Row({ itemKey, node, index, editing, onLongPress, onEditingChange, onDr
 // can share one edit-mode toggle - entering edit mode on any row's long
 // press puts every list on the screen into edit mode together, matching
 // the iOS home-screen behavior this is modeled on.
-export default function DraggableCardList({ items, onReorder, onDelete, editing, onEditingChange }) {
+export default function DraggableCardList({ items, onReorder, onDelete, editing, onEditingChange, showDelete = true }) {
+  const { colors } = useTheme();
   const [liveOrder, setLiveOrder] = useState(items.map((i) => i.key));
 
   useEffect(() => {
@@ -254,32 +257,38 @@ export default function DraggableCardList({ items, onReorder, onDelete, editing,
           onDragUpdate={handleDragUpdate}
           onDragEnd={handleDragEnd}
           onDelete={onDelete}
+          showDelete={showDelete}
+          colors={colors}
         />
       ))}
     </Pressable>
   );
 }
 
-const localStyles = StyleSheet.create({
-  row: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: SLOT_HEIGHT - 8,
-  },
-  deleteBadge: {
-    position: 'absolute',
-    top: -6,
-    left: -6,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: colors.error,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 20,
-    borderWidth: 2,
-    borderColor: colors.background,
-  },
-});
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo inside Row (keyed on colors).
+function buildLocalStyles(colors) {
+  return StyleSheet.create({
+    row: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      height: SLOT_HEIGHT - 8,
+    },
+    deleteBadge: {
+      position: 'absolute',
+      top: -6,
+      left: -6,
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      backgroundColor: colors.error,
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 20,
+      borderWidth: 2,
+      borderColor: colors.background,
+    },
+  });
+}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   View,
@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { apiFetch, apiErrorMessage, formatDecimal, formatDateMDY } from '../_lib/api';
-import { styles, colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import { ScenarioResult } from './ScenarioResult';
 import { describeProjection, buildOpeningSections } from './AffordabilityQuery';
 import PrimaryButton from './PrimaryButton';
@@ -29,7 +29,7 @@ import PrimaryButton from './PrimaryButton';
 // branches AffordabilityQuery.js already has for the single-shot flow
 // (`response.max_comfortable`/`response.projection`), just keyed off the
 // tool name instead of a response status.
-function renderToolResult({ tool, result }) {
+function renderToolResult({ tool, result }, styles) {
   if (tool === 'evaluate_scenario') {
     return <ScenarioResult result={result} />;
   }
@@ -166,6 +166,8 @@ function sectionsToPlainText(sections) {
 }
 
 export default function AffordabilityChat({ visible, onClose, anchorResult }) {
+  const { colors, styles } = useTheme();
+  const chatStyles = useMemo(() => buildChatStyles(colors), [colors]);
   const [messages, setMessages] = useState(() => {
     const sections = buildOpeningSections(anchorResult);
     const text = sectionsToPlainText(sections);
@@ -260,7 +262,7 @@ export default function AffordabilityChat({ visible, onClose, anchorResult }) {
             accessibilityLabel="Back"
             hitSlop={12}
           >
-            <MaterialIcons name="arrow-back" size={24} color="#000" />
+            <MaterialIcons name="arrow-back" size={24} color={colors.darkest} />
           </Pressable>
           <View />
         </View>
@@ -342,7 +344,7 @@ export default function AffordabilityChat({ visible, onClose, anchorResult }) {
                 it - the dispatcher was defined but never actually wired in,
                 so the crash this same session's own adversarial review
                 found and "fixed" was never actually fixed on this line. */}
-            {latestResult && <View style={styles.card}>{renderToolResult(latestResult)}</View>}
+            {latestResult && <View style={styles.card}>{renderToolResult(latestResult, styles)}</View>}
 
             {sending && <ActivityIndicator />}
             {error && <Text style={styles.errorText}>{error}</Text>}
@@ -391,17 +393,19 @@ export default function AffordabilityChat({ visible, onClose, anchorResult }) {
   );
 }
 
-const chatStyles = StyleSheet.create({
-  sectionsCard: {
-    gap: 14,
-  },
-  sectionBlock: {
-    gap: 4,
-  },
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    color: colors.dark,
-  },
-});
+function buildChatStyles(colors) {
+  return StyleSheet.create({
+    sectionsCard: {
+      gap: 14,
+    },
+    sectionBlock: {
+      gap: 4,
+    },
+    sectionLabel: {
+      fontSize: 11,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+      color: colors.dark,
+    },
+  });
+}

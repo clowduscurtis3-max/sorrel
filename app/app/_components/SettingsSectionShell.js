@@ -1,8 +1,8 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { View, Text, Switch, ActivityIndicator, StyleSheet } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { apiFetch, apiErrorMessage, patchSettings } from '../_lib/api';
-import { styles, colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import SettingsScreenChrome from './SettingsScreenChrome';
 import SettingsFetchGate from './SettingsFetchGate';
 
@@ -16,6 +16,8 @@ import SettingsFetchGate from './SettingsFetchGate';
 // its own content instead - settings/index.js's own section list doesn't
 // need to change either way.
 export default function SettingsSectionShell({ section, title, subtitle }) {
+  const { colors, styles } = useTheme();
+  const shellStyles = useMemo(() => buildShellStyles(colors), [colors]);
   const router = useRouter();
   const [settings, setSettings] = useState(null);
   const [error, setError] = useState(null);
@@ -90,24 +92,26 @@ export default function SettingsSectionShell({ section, title, subtitle }) {
   );
 }
 
-const shellStyles = StyleSheet.create({
-  body: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-  placeholderCard: {
-    gap: 10,
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 4,
-  },
-  toggleLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-});
+function buildShellStyles(colors) {
+  return StyleSheet.create({
+    body: {
+      flex: 1,
+      paddingHorizontal: 16,
+      paddingTop: 8,
+    },
+    placeholderCard: {
+      gap: 10,
+    },
+    toggleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginTop: 4,
+    },
+    toggleLabel: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+  });
+}

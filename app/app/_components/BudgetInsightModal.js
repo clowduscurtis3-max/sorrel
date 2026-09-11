@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { View, Text, Modal, Pressable, ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { apiFetch, apiErrorMessage, formatDecimal, logRecommendationEvent } from '../_lib/api';
-import { styles, colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import PrimaryButton from './PrimaryButton';
 
 // Budget Insight pill's modal (2026-08-24) - see CLAUDE.md's own "Sorrel —
@@ -18,6 +18,8 @@ import PrimaryButton from './PrimaryButton';
 // (read-only, safe) or proposes-then-requires-an-explicit-tap-to-apply -
 // nothing here ever silently changes a budget.
 export default function BudgetInsightModal({ visible, onClose, insight, onBudgetChanged }) {
+  const { colors, styles } = useTheme();
+  const localStyles = useMemo(() => buildLocalStyles(colors), [colors]);
   const [explainResult, setExplainResult] = useState(null);
   const [explainLoading, setExplainLoading] = useState(false);
   const [cutsProposal, setCutsProposal] = useState(null);
@@ -259,7 +261,8 @@ export default function BudgetInsightModal({ visible, onClose, insight, onBudget
   );
 }
 
-const localStyles = StyleSheet.create({
+function buildLocalStyles(colors) {
+  return StyleSheet.create({
   closeButton: {
     width: 36,
     height: 36,
@@ -323,4 +326,5 @@ const localStyles = StyleSheet.create({
     color: colors.muted,
     fontWeight: '600',
   },
-});
+  });
+}

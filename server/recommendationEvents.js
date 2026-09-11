@@ -21,7 +21,10 @@
 
 const supabaseAdmin = require('./supabaseAdmin');
 
-const VALID_TYPES = new Set(['budget_rebalance', 'budget_insight_cuts', 'emergency_fund_target']);
+// 'goal_timeframe_extend' added 2026-09-11 (goal-driven budget funding) -
+// accepting Sorrel's computed realistic date for a goal that can't hit
+// its stated deadline at the user's current realistic savings capacity.
+const VALID_TYPES = new Set(['budget_rebalance', 'budget_insight_cuts', 'emergency_fund_target', 'goal_timeframe_extend']);
 const VALID_STATUSES = new Set(['accepted', 'rejected']);
 
 async function logRecommendationEvent({ userId, recommendationType, status, context = {} }) {

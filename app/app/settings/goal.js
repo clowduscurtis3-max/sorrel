@@ -1,9 +1,9 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { View, Text, Switch, ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Picker } from '@react-native-picker/picker';
 import { apiFetch, apiErrorMessage, patchSettings } from '../_lib/api';
-import { styles, colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import SettingsScreenChrome from '../_components/SettingsScreenChrome';
 import SettingsFetchGate from '../_components/SettingsFetchGate';
 
@@ -24,7 +24,11 @@ const AUTO_SAVE_FREQUENCY_OPTIONS = [
 // fresh" instruction, that requirement is already satisfied, not rebuilt
 // here. This screen links to it rather than duplicating a second copy of
 // that editor's state/validation.
+//
+// Theme redesign (2026-09-11): colors/styles now come from useTheme().
 export default function GoalSettings() {
+  const { colors, styles } = useTheme();
+  const goalSettingsStyles = useMemo(() => buildGoalSettingsStyles(colors), [colors]);
   const router = useRouter();
   // NOT useAppData() here - unlike (tabs)/goal.js, this screen lives
   // outside the (tabs) route group (app/settings/ is a sibling directory
@@ -227,78 +231,79 @@ export default function GoalSettings() {
   );
 }
 
-const goalSettingsStyles = StyleSheet.create({
-  bodyScroll: {
-    flex: 1,
-  },
-  body: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 40,
-    gap: 12,
-  },
-  card: {
-    gap: 8,
-  },
-  description: {
-    textAlign: 'left',
-  },
-  linkRow: {
-    marginTop: 4,
-  },
-  linkText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  toggleTextCol: {
-    flex: 1,
-    gap: 2,
-  },
-  toggleLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-  pickerLabel: {
-    marginTop: 6,
-  },
-  picker: {
-    marginTop: 4,
-  },
-  // The wrapping View's own `color` (styles.picker in _lib/styles.js)
-  // does NOT reach the native Android Picker/Spinner's own text - that
-  // widget needs its color/background set directly on the Picker itself
-  // (confirmed on-device, 2026-09-05: both dropdowns rendered as blank
-  // boxes with invisible text without this). Home Affordability's own
-  // Picker ((tabs)/goal.js) relies on the ancestor-only styling and
-  // hasn't shown this - left untouched here since fixing it isn't part
-  // of this step, but the same fix would apply there if it ever surfaces.
-  // Also: `mode="dropdown"` on every <Picker> in this file (confirmed
-  // on-device, 2026-09-06) - the library's Android default (`'dialog'`)
-  // renders a full-screen-dimming modal AlertDialog behind the item list,
-  // reported as "turns the whole screen darker and greys out the menu."
-  // 'dropdown' anchors the item list directly to the picker instead, no
-  // full-screen scrim.
-  pickerControl: {
-    color: colors.darkest,
-    backgroundColor: colors.background,
-  },
-  // Confirmed on-device, 2026-09-06: even with mode="dropdown" (no more
-  // full-screen scrim), the open dropdown's own item list still rendered
-  // with a dark, illegible background independent of pickerControl above -
-  // that style only reaches the closed box, not the popup list. Android's
-  // Picker.Item DOES honor 'backgroundColor'/'color' in its own `style`
-  // prop (unlike the Picker's ancestor View, which reaches neither) - this
-  // is the one prop that actually controls the open list's own rendering.
-  pickerItem: {
-    color: colors.darkest,
-    backgroundColor: colors.background,
-  },
-});
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo inside the component (keyed on colors).
+function buildGoalSettingsStyles(colors) {
+  return StyleSheet.create({
+    bodyScroll: {
+      flex: 1,
+    },
+    body: {
+      paddingHorizontal: 16,
+      paddingTop: 8,
+      paddingBottom: 40,
+      gap: 12,
+    },
+    card: {
+      gap: 8,
+    },
+    description: {
+      textAlign: 'left',
+    },
+    linkRow: {
+      marginTop: 4,
+    },
+    linkText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.primary,
+    },
+    toggleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    toggleTextCol: {
+      flex: 1,
+      gap: 2,
+    },
+    toggleLabel: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+    pickerLabel: {
+      marginTop: 6,
+    },
+    picker: {
+      marginTop: 4,
+    },
+    // The wrapping View's own `color` (styles.picker in _lib/styles.js)
+    // does NOT reach the native Android Picker/Spinner's own text - that
+    // widget needs its color/background set directly on the Picker itself
+    // (confirmed on-device, 2026-09-05: both dropdowns rendered as blank
+    // boxes with invisible text without this).
+    // Also: `mode="dropdown"` on every <Picker> in this file (confirmed
+    // on-device, 2026-09-06) - the library's Android default (`'dialog'`)
+    // renders a full-screen-dimming modal AlertDialog behind the item list,
+    // reported as "turns the whole screen darker and greys out the menu."
+    // 'dropdown' anchors the item list directly to the picker instead, no
+    // full-screen scrim.
+    pickerControl: {
+      color: colors.darkest,
+      backgroundColor: colors.background,
+    },
+    // Confirmed on-device, 2026-09-06: even with mode="dropdown" (no more
+    // full-screen scrim), the open dropdown's own item list still rendered
+    // with a dark, illegible background independent of pickerControl above -
+    // that style only reaches the closed box, not the popup list. Android's
+    // Picker.Item DOES honor 'backgroundColor'/'color' in its own `style`
+    // prop (unlike the Picker's ancestor View, which reaches neither) - this
+    // is the one prop that actually controls the open list's own rendering.
+    pickerItem: {
+      color: colors.darkest,
+      backgroundColor: colors.background,
+    },
+  });
+}

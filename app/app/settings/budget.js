@@ -1,9 +1,9 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { View, Text, Switch, ActivityIndicator, Pressable, Alert, StyleSheet } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { apiFetch, apiErrorMessage, patchSettings } from '../_lib/api';
-import { styles, colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import SettingsScreenChrome from '../_components/SettingsScreenChrome';
 import SettingsFetchGate from '../_components/SettingsFetchGate';
 
@@ -18,7 +18,11 @@ const SECTION = 'budget_settings';
 // untouched by this step. The per-category "Reset to AI-suggested" link
 // (also Phase 37) is Budget-tab UI and already closed - nothing to do for
 // it here either.
+//
+// Theme redesign (2026-09-11): colors/styles now come from useTheme().
 export default function BudgetSettings() {
+  const { colors, styles } = useTheme();
+  const budgetSettingsStyles = useMemo(() => buildBudgetSettingsStyles(colors), [colors]);
   const router = useRouter();
   const [settings, setSettings] = useState(null);
   const [error, setError] = useState(null);
@@ -179,60 +183,64 @@ export default function BudgetSettings() {
   );
 }
 
-const budgetSettingsStyles = StyleSheet.create({
-  body: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    gap: 12,
-  },
-  card: {
-    gap: 8,
-  },
-  regenerateSpacing: {
-    marginTop: 4,
-  },
-  destructiveButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.error,
-    backgroundColor: colors.background,
-    borderRadius: 22,
-    paddingVertical: 10,
-    minHeight: 40,
-  },
-  destructiveButtonText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.error,
-    letterSpacing: 0.3,
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    paddingVertical: 6,
-  },
-  toggleRowDivider: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.sage,
-    marginTop: 4,
-    paddingTop: 12,
-  },
-  toggleTextCol: {
-    flex: 1,
-    gap: 2,
-  },
-  toggleLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-  toggleDescription: {
-    textAlign: 'left',
-  },
-});
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo inside the component (keyed on colors).
+function buildBudgetSettingsStyles(colors) {
+  return StyleSheet.create({
+    body: {
+      flex: 1,
+      paddingHorizontal: 16,
+      paddingTop: 8,
+      gap: 12,
+    },
+    card: {
+      gap: 8,
+    },
+    regenerateSpacing: {
+      marginTop: 4,
+    },
+    destructiveButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.error,
+      backgroundColor: colors.background,
+      borderRadius: 22,
+      paddingVertical: 10,
+      minHeight: 40,
+    },
+    destructiveButtonText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.error,
+      letterSpacing: 0.3,
+    },
+    toggleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      paddingVertical: 6,
+    },
+    toggleRowDivider: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.sage,
+      marginTop: 4,
+      paddingTop: 12,
+    },
+    toggleTextCol: {
+      flex: 1,
+      gap: 2,
+    },
+    toggleLabel: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+    toggleDescription: {
+      textAlign: 'left',
+    },
+  });
+}

@@ -31,6 +31,7 @@ import {
   formatDecimal,
   formatWhole,
   logRecommendationEvent,
+  patchSettings,
 } from '../_lib/api';
 import { readableTextColor } from '../_lib/styles';
 import { useTheme } from '../_lib/theme';
@@ -38,8 +39,10 @@ import { useSessionContext } from '../_lib/session';
 import { useAppData } from '../_lib/appData';
 import { useGoalForm, computeTargetDateFromTimeframe } from '../_components/GoalForm';
 import { formatAmountLabel } from '../_lib/amountPicker';
+import { orderGoalsByPriority, describeRealisticDateInsight, goalDisplayName } from '../_lib/goalFunding';
 import SorrelWordmark from '../_components/SorrelWordmark';
 import PrimaryButton from '../_components/PrimaryButton';
+import DraggableCardList from '../_components/DraggableCardList';
 
 // Edit Goal redesign (2026-08-27) - per-goal-type icon (reusing the same
 // icon-circle visual language already established by targetIconCircle/
@@ -94,15 +97,6 @@ const DTI_TIER_COPY = {
   tight: 'tight against typical lending guidelines',
   over_typical_guidelines: 'above typical lending guidelines for this loan amount',
 };
-
-// The goal's own display name - `notes` (the always-visible "what's this
-// for?" field, since the goal_type collapse 2026-09-01) whenever the user
-// has typed one, falling back to the generic per-type GOAL_TYPES label
-// only when they haven't.
-function goalDisplayName(goalType, notes) {
-  if (notes) return notes;
-  return GOAL_TYPES.find((g) => g.value === goalType)?.label || 'Your goal';
-}
 
 // Status badge for a goal card - derived entirely from goalProgress's own
 // already-computed fields, never a new judgment call of its own.
@@ -1016,6 +1010,63 @@ export default function Goal() {
     }, [])
   );
 
+  // Goal-driven budget funding (2026-09-11): the current funding
+  // allocation across every deadline-having active goal - drives the
+  // per-goal "this date isn't realistic" insight below. Refetched
+  // alongside goalsProgress wherever that already refetches (a goal
+  // save/archive, or regenerating the budget changes what's actually
+  // achievable) via the same wrapper, fundingPlan.
+  const [fundingPlan, setFundingPlan] = useState(null);
+
+  async function fetchFundingPlan() {
+    try {
+      const res = await apiFetch('/goal/funding-plan');
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      setFundingPlan((await res.json()).funding_plan);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchFundingPlan();
+    }, [])
+  );
+
+  function allocationFor(goalId) {
+    return (fundingPlan?.allocations || []).find((a) => a.goal_id === goalId) || null;
+  }
+
+  // Priority reorder (drag-to-reorder, matching Home/General Settings'
+  // own DraggableCardList precedent) - stored in the same goal_settings
+  // jsonb column the fetch above already reads, via the existing generic
+  // patchSettings helper (already serializes concurrent patch calls).
+  const [editingGoalOrder, setEditingGoalOrder] = useState(false);
+
+  function reorderGoalPriority(newOrderIds) {
+    setGoalSettings((prev) => ({ ...prev, goal_priority_order: newOrderIds }));
+    patchSettings('goal_settings', { goal_priority_order: newOrderIds }).catch((err) => console.error(err));
+  }
+
+  const [acceptingRealisticDateFor, setAcceptingRealisticDateFor] = useState(null);
+  const [acceptRealisticDateError, setAcceptRealisticDateError] = useState(null);
+
+  async function acceptRealisticDate(goalId) {
+    setAcceptingRealisticDateFor(goalId);
+    setAcceptRealisticDateError(null);
+    try {
+      const res = await apiFetch(`/goal/${goalId}/accept-realistic-date`, { method: 'POST' });
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      await Promise.all([refetchGoalsProgress(), fetchFundingPlan()]);
+    } catch (err) {
+      console.error(err);
+      setAcceptRealisticDateError(apiErrorMessage(err));
+    } finally {
+      setAcceptingRealisticDateFor(null);
+    }
+  }
+
   // Phase 31 (Round-Ups v1, 2026-08-25): simulation/tracking only - this
   // app has no real money-movement capability (see server/roundUps.js's
   // own header), so this shows what round-ups WOULD add up to from real
@@ -1837,66 +1888,106 @@ export default function Goal() {
               </View>
             ) : (
               <>
-                {goalsProgress.map((g) => {
-                  const badge = goalStatusBadge(g, colors);
-                  const percent = Math.min(100, Math.max(0, g.percent_complete || 0));
-                  return (
-                    <Pressable
-                      key={g.id}
-                      style={[styles.card, goalStyles.cardMargin]}
-                      onPress={() => openGoal(g.id)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`View ${goalDisplayName(g.goal_type, g.notes)}`}
-                    >
-                      <View style={goalStyles.primaryGoalHeaderRow}>
-                        <View style={goalStyles.targetIconCircle}>
-                          <MaterialIcons name={GOAL_TYPE_ICON[g.goal_type] || 'flag'} size={20} color={colors.dark} />
-                        </View>
-                        <View style={goalStyles.primaryGoalHeaderText}>
-                          <Text style={goalStyles.primaryGoalEyebrow}>
-                            {goalDisplayName(g.goal_type, g.notes)}
-                          </Text>
-                          <Text style={goalStyles.primaryGoalTarget}>
-                            {g.has_target ? `$${formatDecimal(g.target_amount)} Target` : 'No target set'}
-                          </Text>
-                        </View>
-                        <View style={[goalStyles.badge, { backgroundColor: badge.color }]}>
-                          {/* Real contrast bug found (2026-09-11, theme
-                              redesign): badgeText used to hardcode
-                              color: colors.background, correct only for
-                              two of the three real badge fills
-                              (muted/positive) - the third (primary,
-                              "X% there," the single most common case) is
-                              a fixed dark green that never changes at
-                              night, while colors.background flips dark
-                              too - 2.80:1 contrast, unreadable.
-                              readableTextColor computes the actually-
-                              correct text color for whatever the real
-                              fill is, in both modes. */}
-                          <Text style={[goalStyles.badgeText, { color: readableTextColor(badge.color, colors) }]}>
-                            {badge.label}
-                          </Text>
-                        </View>
-                      </View>
-
-                      {g.has_target && (
-                        <>
-                          <View style={goalStyles.savedRow}>
-                            <Text style={goalStyles.savedAmount}>
-                              ${formatDecimal(g.saved_amount)} saved
-                            </Text>
-                            <Text style={goalStyles.savedPercent}>{Math.round(percent)}%</Text>
+                <DraggableCardList
+                  items={orderGoalsByPriority(goalsProgress, goalSettings.goal_priority_order).map((g) => {
+                    const badge = goalStatusBadge(g, colors);
+                    const percent = Math.min(100, Math.max(0, g.percent_complete || 0));
+                    const allocation = allocationFor(g.id);
+                    const insight = describeRealisticDateInsight(allocation, goalDisplayName(g.goal_type, g.notes));
+                    return {
+                      key: g.id,
+                      node: (
+                        <Pressable
+                          style={[styles.card, goalStyles.cardMargin]}
+                          onPress={() => openGoal(g.id)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`View ${goalDisplayName(g.goal_type, g.notes)}`}
+                        >
+                          <View style={goalStyles.primaryGoalHeaderRow}>
+                            <View style={goalStyles.targetIconCircle}>
+                              <MaterialIcons name={GOAL_TYPE_ICON[g.goal_type] || 'flag'} size={20} color={colors.dark} />
+                            </View>
+                            <View style={goalStyles.primaryGoalHeaderText}>
+                              <Text style={goalStyles.primaryGoalEyebrow}>
+                                {goalDisplayName(g.goal_type, g.notes)}
+                              </Text>
+                              <Text style={goalStyles.primaryGoalTarget}>
+                                {g.has_target ? `$${formatDecimal(g.target_amount)} Target` : 'No target set'}
+                              </Text>
+                            </View>
+                            <View style={[goalStyles.badge, { backgroundColor: badge.color }]}>
+                              {/* Real contrast bug found (2026-09-11, theme
+                                  redesign): badgeText used to hardcode
+                                  color: colors.background, correct only for
+                                  two of the three real badge fills
+                                  (muted/positive) - the third (primary,
+                                  "X% there," the single most common case) is
+                                  a fixed dark green that never changes at
+                                  night, while colors.background flips dark
+                                  too - 2.80:1 contrast, unreadable.
+                                  readableTextColor computes the actually-
+                                  correct text color for whatever the real
+                                  fill is, in both modes. */}
+                              <Text style={[goalStyles.badgeText, { color: readableTextColor(badge.color, colors) }]}>
+                                {badge.label}
+                              </Text>
+                            </View>
                           </View>
-                          <View style={goalStyles.progressTrack}>
-                            <View style={[goalStyles.progressFill, { width: `${percent}%` }]} />
-                          </View>
-                        </>
-                      )}
 
-                      <Text style={[styles.smallText, { marginTop: 8 }]}>{g.message}</Text>
-                    </Pressable>
-                  );
-                })}
+                          {g.has_target && (
+                            <>
+                              <View style={goalStyles.savedRow}>
+                                <Text style={goalStyles.savedAmount}>
+                                  ${formatDecimal(g.saved_amount)} saved
+                                </Text>
+                                <Text style={goalStyles.savedPercent}>{Math.round(percent)}%</Text>
+                              </View>
+                              <View style={goalStyles.progressTrack}>
+                                <View style={[goalStyles.progressFill, { width: `${percent}%` }]} />
+                              </View>
+                            </>
+                          )}
+
+                          <Text style={[styles.smallText, { marginTop: 8 }]}>{g.message}</Text>
+
+                          {/* Goal-driven budget funding (2026-09-11): a
+                              deadline-having goal that can't hit its
+                              stated date at the current realistic savings
+                              capacity gets an honest insight here, with a
+                              one-tap accept when a real achievable date
+                              exists - matches this app's propose-then-
+                              accept rule, never silently applied. */}
+                          {insight && (
+                            <View style={goalStyles.fundingInsightRow}>
+                              <Text style={goalStyles.fundingInsightText}>{insight}</Text>
+                              {allocation?.realistic_date && (
+                                acceptingRealisticDateFor === g.id ? (
+                                  <ActivityIndicator style={{ marginTop: 6 }} size="small" />
+                                ) : (
+                                  <Pressable
+                                    onPress={() => acceptRealisticDate(g.id)}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Use this realistic date as the new target date"
+                                  >
+                                    <Text style={goalStyles.fundingInsightLink}>Use this date</Text>
+                                  </Pressable>
+                                )
+                              )}
+                              {acceptRealisticDateError && acceptingRealisticDateFor === null && (
+                                <Text style={styles.errorText}>{acceptRealisticDateError}</Text>
+                              )}
+                            </View>
+                          )}
+                        </Pressable>
+                      ),
+                    };
+                  })}
+                  editing={editingGoalOrder}
+                  onEditingChange={setEditingGoalOrder}
+                  onReorder={reorderGoalPriority}
+                  onDelete={() => {}}
+                  showDelete={false}
+                />
 
                 <View style={goalStyles.cardMargin}>
                   <PrimaryButton title="ADD ANOTHER GOAL" onPress={openAddGoal} />
@@ -2622,6 +2713,23 @@ function buildGoalStyles(colors) {
     height: 6,
     borderRadius: 3,
     backgroundColor: colors.darkest,
+  },
+  fundingInsightRow: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.sage,
+    gap: 4,
+  },
+  fundingInsightText: {
+    fontSize: 12,
+    color: colors.warningText,
+    lineHeight: 17,
+  },
+  fundingInsightLink: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primary,
   },
   editGoalSpacing: {
     marginTop: 16,

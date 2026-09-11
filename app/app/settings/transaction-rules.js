@@ -1,10 +1,10 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { View, Text, Pressable, ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
 import { apiFetch, apiErrorMessage, CATEGORIES } from '../_lib/api';
-import { styles, colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import SettingsScreenChrome from '../_components/SettingsScreenChrome';
 import SettingsFetchGate from '../_components/SettingsFetchGate';
 
@@ -14,7 +14,11 @@ import SettingsFetchGate from '../_components/SettingsFetchGate';
 // GET/PATCH/DELETE /merchant-preferences (server/index.js) - editing here
 // reuses the exact same retroactive-apply logic as that inline flow
 // (applyMerchantCategoryRetroactively), so the two paths can't disagree.
+//
+// Theme redesign (2026-09-11): colors/styles now come from useTheme().
 export default function TransactionRulesSettings() {
+  const { colors, styles } = useTheme();
+  const transactionRulesStyles = useMemo(() => buildTransactionRulesStyles(colors), [colors]);
   const router = useRouter();
   const [rules, setRules] = useState(null);
   const [error, setError] = useState(null);
@@ -150,7 +154,10 @@ export default function TransactionRulesSettings() {
   );
 }
 
-const transactionRulesStyles = StyleSheet.create({
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo inside the component (keyed on colors).
+function buildTransactionRulesStyles(colors) {
+  return StyleSheet.create({
   bodyScroll: {
     flex: 1,
   },
@@ -193,4 +200,5 @@ const transactionRulesStyles = StyleSheet.create({
     color: colors.darkest,
     backgroundColor: colors.background,
   },
-});
+  });
+}

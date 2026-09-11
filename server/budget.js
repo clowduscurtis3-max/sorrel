@@ -1,8 +1,49 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const supabaseAdmin = require('./supabaseAdmin');
-const { SPEND_CATEGORIES, ESSENTIAL_CATEGORIES } = require('./categorize');
+const { SPEND_CATEGORIES, ESSENTIAL_CATEGORIES, DISCRETIONARY_CATEGORIES } = require('./categorize');
+const { HISTORY_DAYS, summarizeSpending, monthRange, currentMonthRange } = require('./spendingAverages');
+const { DISCRETIONARY_FLOOR_RATIO, getGoalFundingPlan } = require('./goalFunding');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}
+
+// Pure, mutates `rows` in place (an array of { category, budgeted_amount,
+// ... }, matching generateBudget's own row shape). Deterministically
+// corrects a proposed discretionary total to exactly `target`, verified
+// rather than trusted - Claude's own arithmetic can drift, and a real
+// financial commitment ("this budget frees up $X for your goals") can't
+// rest on a hopeful AI estimate. A category's own floor
+// (average * DISCRETIONARY_FLOOR_RATIO) is a harder constraint than the
+// target - if flooring pushes the rescaled total back over target, that's
+// the honest, surfaced outcome (goal funding legitimately comes up
+// short), never silently forced to match anyway.
+function rescaleDiscretionaryRows({ rows, discretionaryCategories, target, averages, floorRatio = DISCRETIONARY_FLOOR_RATIO }) {
+  const discretionaryRows = rows.filter((r) => discretionaryCategories.includes(r.category));
+  if (discretionaryRows.length === 0) return;
+
+  const actualTotal = round2(discretionaryRows.reduce((sum, r) => sum + r.budgeted_amount, 0));
+  if (Math.abs(actualTotal - target) <= 0.01) return;
+
+  if (actualTotal > 0) {
+    const scale = target / actualTotal;
+    for (const r of discretionaryRows) {
+      const floor = round2((averages[r.category] || 0) * floorRatio);
+      r.budgeted_amount = Math.max(floor, round2(r.budgeted_amount * scale));
+    }
+  } else {
+    // Claude proposed $0 across every discretionary category - no
+    // proportion to scale from, so split the target evenly instead
+    // (still respecting each category's own floor).
+    const evenShare = round2(target / discretionaryRows.length);
+    for (const r of discretionaryRows) {
+      const floor = round2((averages[r.category] || 0) * floorRatio);
+      r.budgeted_amount = Math.max(floor, evenShare);
+    }
+  }
+}
 
 // Thrown for a client-state precondition (no data to budget from yet),
 // not a server fault - lets index.js return 400 instead of 500 and the
@@ -45,87 +86,6 @@ function extractJson(text) {
   return cleaned;
 }
 
-// How far back to look for spending history. Plaid Sandbox only generates
-// a few months of synthetic data anyway, and a 90-day window keeps the
-// "average" reasonably representative of *current* habits for a real user
-// too, rather than being dragged down by a one-off large purchase from a
-// year ago.
-const HISTORY_DAYS = 90;
-
-// Phase 11: generalizes currentMonthRange's own date math to an arbitrary
-// calendar month, not just "now" - `monthsBack` months before `now`'s own
-// month (0 = the current month, 1 = last month, etc.). `monthRange(0, x)`
-// is byte-for-byte what currentMonthRange(x) already computed, so
-// currentMonthRange is reimplemented on top of this rather than duplicated
-// - every existing caller (alerts.js, scenarioContext.js, roundUps.js,
-// several places in this file, in index.js, notificationEvents.js,
-// budgetInsight.js) is completely unaffected, same signature, same output.
-function monthRange(monthsBack = 0, now = new Date()) {
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - monthsBack, 1));
-  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - monthsBack + 1, 0));
-  const toDateStr = (d) => d.toISOString().slice(0, 10);
-  return { period_start: toDateStr(start), period_end: toDateStr(end) };
-}
-
-// `now` is injectable so a caller that already has a fixed clock (the Phase 5
-// scenario context) gets a period consistent with it. Defaults to the real
-// clock, so every existing call site is unchanged.
-function currentMonthRange(now = new Date()) {
-  return monthRange(0, now);
-}
-
-// Averages each spend category's actual spend over however many distinct
-// calendar months of history are actually available in the window, so a
-// partial first/last month doesn't skew things the way a flat "divide by
-// 3" would with e.g. only 6 weeks of data. Transfers and Uncategorized are
-// deliberately excluded - transfers aren't spend, and an unreviewed guess
-// shouldn't be allowed to shape a budget number.
-//
-// `anchorDate` is optional (Phase 11) - defaults to the real clock, so this
-// is unchanged for every existing caller. Passed explicitly by the
-// historical backfill path (backfillBudgetHistory, below) so a past
-// month's "budget" is computed only from data that genuinely existed
-// before that month - the upper-bound `d < now` filter added below is a
-// no-op for the live/default case (no real transaction is ever dated in
-// the future) but is what actually prevents look-ahead bias for a
-// historical anchor.
-function summarizeSpending(transactions, anchorDate = new Date()) {
-  // UTC-consistent with currentMonthRange() below and with how `t.date`
-  // (a plain 'YYYY-MM-DD' string) gets parsed - Date treats date-only ISO
-  // strings as UTC midnight, so computing the cutoff from local Date
-  // methods (getDate/setDate) could shift the 90-day boundary by up to a
-  // day depending on the server's timezone. Using UTC components on both
-  // sides avoids that.
-  const now = anchorDate;
-  const cutoff = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - HISTORY_DAYS)
-  );
-  const recent = transactions.filter((t) => {
-    const d = new Date(t.date);
-    return d >= cutoff && d < now;
-  });
-
-  const months = new Set(recent.map((t) => t.date.slice(0, 7)));
-  const monthCount = Math.max(1, months.size);
-
-  const totals = Object.fromEntries(SPEND_CATEGORIES.map((c) => [c, 0]));
-  let totalIncome = 0;
-
-  for (const t of recent) {
-    if (t.category === 'Income') {
-      totalIncome += Math.abs(t.amount);
-    } else if (Object.prototype.hasOwnProperty.call(totals, t.category)) {
-      totals[t.category] += t.amount;
-    }
-  }
-
-  const round2 = (n) => Math.round(n * 100) / 100;
-  const averages = Object.fromEntries(
-    SPEND_CATEGORIES.map((c) => [c, round2(totals[c] / monthCount)])
-  );
-
-  return { averages, averageMonthlyIncome: round2(totalIncome / monthCount), monthCount };
-}
 
 function describeGoal(goal) {
   const parts = [`Goal type: ${goal.goal_type}.`];
@@ -228,6 +188,51 @@ async function generateBudget(userId, target = {}) {
   // Nothing left for the AI to propose - every category is user-set.
   if (categoriesToGenerate.length === 0) return userSetBudgetRows;
 
+  // Goal-driven funding (2026-09-11): a hard, computed discretionary
+  // target instead of a vague "roughly target/timeframe" AI estimate -
+  // see server/goalFunding.js's own header for the full compute chain.
+  // getGoalFundingPlan does its own independent goals/accounts/settings
+  // fetch (needs account balances/priority order this function's own
+  // `goals` query above doesn't have) - a second, small set of queries,
+  // not a duplicated implementation.
+  const discretionaryCategoriesToGenerate = DISCRETIONARY_CATEGORIES.filter((c) => categoriesToGenerate.includes(c));
+  const discretionaryAverageTotal = discretionaryCategoriesToGenerate.reduce(
+    (sum, c) => sum + Math.max(0, averages[c] || 0),
+    0
+  );
+  const discretionaryFloorTotal = round2(discretionaryAverageTotal * DISCRETIONARY_FLOOR_RATIO);
+  const fundingPlan = await getGoalFundingPlan(userId);
+  const totalGoalFundingNeeded = round2(
+    fundingPlan.allocations.reduce((sum, a) => sum + a.funded_monthly_amount, 0)
+  );
+  // Clamped defensively - by construction this should already never dip
+  // below the floor (getGoalFundingPlan's own capacity computation
+  // already respects it), but a hard target handed to an AI prompt
+  // should never rely on that alone.
+  const discretionaryTarget = Math.max(
+    discretionaryFloorTotal,
+    round2(discretionaryAverageTotal - totalGoalFundingNeeded)
+  );
+  const hasGoalFunding = discretionaryCategoriesToGenerate.length > 0 && totalGoalFundingNeeded > 0.01;
+
+  const goalFundingInstruction = hasGoalFunding
+    ? `Across your active goals, the realistic amount to free up in your ` +
+      `discretionary budget this month is $${totalGoalFundingNeeded.toFixed(2)} - ` +
+      `already computed from your real income, essential spending, and goal ` +
+      `priorities, accounting for what's actually achievable. The combined ` +
+      `budgeted_amount across only these discretionary categories - ` +
+      `${discretionaryCategoriesToGenerate.join(', ')} - must sum to exactly ` +
+      `$${discretionaryTarget.toFixed(2)} (a firm total, not a suggestion), ` +
+      `distributed however best fits the real spend pattern below. Never ` +
+      `propose any single one of them under 70% of its own actual average.`
+    : `If a savings target and timeframe are given, the required monthly savings ` +
+      `is roughly (target amount / timeframe in months) - trim discretionary ` +
+      `categories (${DISCRETIONARY_CATEGORIES.join(', ')}) enough ` +
+      `to plausibly work toward that, without proposing anything under 70% of a ` +
+      `category's actual average (drastic cuts don't stick). If no specific goal ` +
+      `was given, trim obvious waste modestly (5-15% below average on discretionary ` +
+      `categories).`;
+
   const message = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 2048,
@@ -240,14 +245,8 @@ async function generateBudget(userId, target = {}) {
       `second person ("you") or neutral active voice. Given a user's ` +
       `average monthly spend per category (from their real transaction history) ` +
       `and their stated financial goal, propose a monthly budget per category. ` +
-      `If a savings target and timeframe are given, the required monthly savings ` +
-      `is roughly (target amount / timeframe in months) - trim discretionary ` +
-      `categories (Dining, Entertainment, Shopping, Subscriptions, Travel) enough ` +
-      `to plausibly work toward that, without proposing anything under 70% of a ` +
-      `category's actual average (drastic cuts don't stick). If no specific goal ` +
-      `was given, trim obvious waste modestly (5-15% below average on discretionary ` +
-      `categories) and leave necessities (${ESSENTIAL_CATEGORIES.join(', ')}) close ` +
-      `to their average. Some ` +
+      `${goalFundingInstruction} Leave necessities ` +
+      `(${ESSENTIAL_CATEGORIES.join(', ')}) close to their average regardless. Some ` +
       `categories may already be fixed by the user (see user_fixed_budgets) - ` +
       `you do not propose numbers for those, they're already decided and not ` +
       `in the category list below, but you can mention them in a category's ` +
@@ -330,6 +329,20 @@ async function generateBudget(userId, target = {}) {
 
   if (rows.length === 0) {
     throw new Error('AI budget generation returned no usable categories.');
+  }
+
+  // Goal-driven funding (2026-09-11): verify Claude's discretionary total
+  // actually hit the hard target computed above, and deterministically
+  // correct it if not - a real financial commitment is being implied to
+  // the user ("this budget frees up $X for your goals"), so this can't be
+  // left as a hopeful AI estimate the way the old prompt-only guidance was.
+  if (hasGoalFunding && discretionaryCategoriesToGenerate.length > 0) {
+    rescaleDiscretionaryRows({
+      rows,
+      discretionaryCategories: discretionaryCategoriesToGenerate,
+      target: discretionaryTarget,
+      averages,
+    });
   }
 
   // Sanity check, not a hard failure - a total wildly above income points
@@ -601,8 +614,8 @@ async function proposeCategoryTrim({ amountNeeded, candidates, framing }) {
       `${framing} Propose which of the given categories should be reduced to ` +
       `cover exactly $${amountNeeded.toFixed(2)}, and by how much each. Prefer ` +
       `trimming categories with the most room (largest current amounts, or ` +
-      `discretionary spend like Dining/Entertainment/Shopping/Subscriptions/` +
-      `Travel) over cutting something already tight or a necessity. Never propose ` +
+      `discretionary spend like ${DISCRETIONARY_CATEGORIES.join('/')}) over ` +
+      `cutting something already tight or a necessity. Never propose ` +
       `reducing a category below $0, and never propose more total reduction than ` +
       `$${amountNeeded.toFixed(2)}. Drawing from just one or two categories is ` +
       `fine if that reads more sensibly than spreading thin across all of them. ` +
@@ -846,6 +859,7 @@ async function applyBudgetEdit(userId, category, newAmount, adjustments = []) {
 
 module.exports = {
   generateBudget,
+  rescaleDiscretionaryRows,
   resetCategoryToAI,
   computeBudgetStatus,
   recomputeBudgetActuals,

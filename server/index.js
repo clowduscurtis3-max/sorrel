@@ -42,7 +42,8 @@ const { getTransactionsCsv, getBudgetHistoryCsv, getNetWorthCsv } = require('./c
 const { getMonthlyReview } = require('./monthlyReview');
 const { detectRecurringTransactions, INTERVALS } = require('./recurring');
 const { recomputeOverspendAlerts } = require('./alerts');
-const { getGoalsProgress, getGoalBalanceProgressById } = require('./goalProgress');
+const { getGoalsProgress, getGoalBalanceProgressById, monthsBetween } = require('./goalProgress');
+const { getGoalFundingPlan, computeBudgetEditFundingImpact } = require('./goalFunding');
 const { validateOwnedAccountIds } = require('./accountOwnership');
 const { getSubscriptionAudit } = require('./subscriptionAudit');
 const { refreshAccountBalances, getAccountsSummary } = require('./accounts');
@@ -823,6 +824,102 @@ app.get('/goal/progress', requireUser, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load goal progress' });
+  }
+});
+
+// Goal-driven budget funding (2026-09-11): read the current funding
+// allocation across every deadline-having active goal, independent of
+// regenerating the budget - so the Goal tab can show a "this date isn't
+// realistic" insight without forcing a regenerate first. See
+// server/goalFunding.js's own header for the full compute chain.
+app.get('/goal/funding-plan', requireUser, async (req, res) => {
+  try {
+    const fundingPlan = await getGoalFundingPlan(req.userId);
+    res.json({ funding_plan: fundingPlan });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load goal funding plan' });
+  }
+});
+
+// Accept a computed realistic date for a goal that can't hit its stated
+// deadline at the user's current realistic savings capacity - the
+// propose-then-accept UX confirmed directly with the user (never
+// auto-applied). Re-derives everything server-side rather than trusting a
+// client-echoed date - same "never trust a client-sent dollar/date figure
+// for something that could be stale" precedent as
+// /scenarios/suggestion-split. Deliberately its own narrow route, not a
+// reuse of POST /goal (a whole-row upsert via `?? null` on every field -
+// reusing it for a single-field update risks silently nulling everything
+// else not resent).
+app.post('/goal/:id/accept-realistic-date', requireUser, async (req, res) => {
+  try {
+    const { data: goal, error: goalError } = await supabaseAdmin
+      .from('user_goals')
+      .select('id, target_amount, target_timeframe_months, created_at')
+      .eq('id', req.params.id)
+      .eq('user_id', req.userId)
+      .is('archived_at', null)
+      .maybeSingle();
+    if (goalError) throw goalError;
+    if (!goal) return res.status(404).json({ error: 'Goal not found' });
+    if (!goal.target_timeframe_months) {
+      return res.status(400).json({ error: 'This goal has no deadline to extend.' });
+    }
+
+    const fundingPlan = await getGoalFundingPlan(req.userId);
+    const allocation = fundingPlan.allocations.find((a) => a.goal_id === goal.id);
+    if (!allocation) {
+      return res.status(400).json({ error: 'This goal has no funding data yet.' });
+    }
+    if (allocation.is_realistic) {
+      return res.status(400).json({ error: 'This goal is already on pace for its stated date.' });
+    }
+    if (!allocation.realistic_date) {
+      return res.status(400).json({
+        error: "There's no realistic date to suggest yet - free up room in your budget first.",
+      });
+    }
+
+    const newTimeframeMonths = Math.max(
+      1,
+      Math.ceil(monthsBetween(new Date(goal.created_at), new Date(allocation.realistic_date)))
+    );
+
+    const { error: updateError } = await supabaseAdmin
+      .from('user_goals')
+      .update({ target_timeframe_months: newTimeframeMonths, updated_at: new Date().toISOString() })
+      .eq('id', goal.id)
+      .eq('user_id', req.userId);
+    if (updateError) throw updateError;
+
+    // Best-effort, same treatment as POST /goal's own save path - a
+    // changed timeframe can immediately cross a milestone.
+    try {
+      await recomputeNotificationEvents(req.userId);
+    } catch (err) {
+      logError('Failed to recompute notification events after accepting a realistic goal date (non-fatal):', err);
+    }
+    try {
+      await logRecommendationEvent({
+        userId: req.userId,
+        recommendationType: 'goal_timeframe_extend',
+        status: 'accepted',
+        context: {
+          goal_id: goal.id,
+          previous_target_timeframe_months: goal.target_timeframe_months,
+          new_target_timeframe_months: newTimeframeMonths,
+          realistic_date: allocation.realistic_date,
+        },
+      });
+    } catch (err) {
+      logError('Failed to log goal_timeframe_extend recommendation event (non-fatal):', err);
+    }
+
+    res.json({ success: true, target_timeframe_months: newTimeframeMonths, target_date: allocation.realistic_date });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to accept realistic date' });
   }
 });
 
@@ -2881,8 +2978,18 @@ app.post('/budget/rebalance-proposal', requireUser, async (req, res) => {
     return res.status(400).json({ error: 'budgeted_amount must be a finite, non-negative number' });
   }
   try {
-    const proposal = await proposeRebalance(req.userId, category, budgeted_amount);
-    res.json({ proposal });
+    // Goal-driven funding (2026-09-11): alongside the existing rebalance
+    // reasoning, also surface how this specific edit would affect goal
+    // funding - reuses computeBudgetEditFundingImpact (goalFunding.js),
+    // which returns null whenever nothing meaningful changed (a rebalance
+    // that fully offsets an increase leaves the committed discretionary
+    // total unchanged, so there's nothing to report there) or there are
+    // no deadline-having goals to report against.
+    const [proposal, funding_impact] = await Promise.all([
+      proposeRebalance(req.userId, category, budgeted_amount),
+      computeBudgetEditFundingImpact(req.userId, category, budgeted_amount),
+    ]);
+    res.json({ proposal, funding_impact });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message || 'Failed to generate re-balance proposal' });

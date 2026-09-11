@@ -84,30 +84,50 @@ const DAY_COLORS = {
   placeholder: 'rgba(100, 100, 100, 0.8)',
 };
 
-// Theme redesign (2026-09-11): night-mode overrides for the 8 keys that
-// actually need one. `primary`/`accent`/`sage`/`warning`/`reviewWarning`/
-// `placeholder` are deliberately NOT here - they're always painted as
-// filled shapes (buttons/progress bars/borders) rather than bare text
-// sitting directly on a background, or (warning/reviewWarning) already
-// pass real contrast against the new night background/card as-is, so
-// they carry over unchanged in both modes per the decided scope.
+// Theme redesign (2026-09-11): night-mode overrides for the 9 keys that
+// actually need one. `accent`/`sage`/`warning`/`reviewWarning`/
+// `placeholder` are NOT here - they're always painted as filled shapes
+// (buttons/progress bars/borders) rather than bare text sitting directly
+// on a background, or (warning/reviewWarning) already pass real contrast
+// against the new night background/card as-is, so they carry over
+// unchanged in both modes per the decided scope.
+//
+// `primary` WAS assumed to belong in that same "always a filled shape"
+// group when this file was first written - real on-device testing (plus
+// a code-review pass) found that assumption false at real scale: 20+
+// call sites across this app use colors.primary as bare link/text/icon
+// color with no fill of its own (Settings link rows, SorrelWordmark's
+// tagline, "See the exact split"-style underlined links, a mic-button
+// icon whose OWN fill is colors.primary but whose icon color was a
+// separately-hardcoded colors.background that broke independently -
+// 2.32-2.80:1 contrast in every case, all below the 4.5:1 AA floor).
+// Chasing each call site individually (the first fix attempted, see this
+// file's git history) doesn't scale and leaves the next new screen to
+// rediscover the same bug. Giving primary its own real night value fixes
+// all of them - including ones not yet found - in one place; every
+// filled-shape use (a button, a badge, a pill) already computes its own
+// paired text/icon color dynamically via readableTextColor rather than
+// assuming primary stays fixed-dark, so changing primary's own value
+// doesn't break those - they simply compute a different, still-correct
+// answer for whatever primary now resolves to.
 //
 // Every value below is a night-mode replacement for a key that either (a)
-// IS the background/card itself, or (b) renders as bare text and fails
-// real WCAG contrast against the new night colors using its day value -
-// computed via readableTextColor's own contrast formula, not guessed:
-// warningText (2.86:1), error (2.44:1), positive (2.85:1), muted (3.11:1)
-// - all below the 4.5:1 AA floor for body text against the new night
-// background/card. Where an existing palette color already passes at
-// full contrast, it's reused rather than inventing a new hex (darkest ->
-// background, dark -> sage, warningText -> warning, positive -> accent) -
-// only error and muted needed genuinely new values, chosen from the same
-// hue family as their day counterparts.
+// IS the background/card itself, or (b) renders as bare text/link/icon
+// and fails real WCAG contrast against the new night colors using its
+// day value - computed via readableTextColor's own contrast formula, not
+// guessed: warningText (2.86:1), error (2.44:1), positive (2.85:1),
+// muted (3.11:1), primary (2.32-2.80:1 depending on card vs background)
+// - all below the 4.5:1 AA floor. Where an existing palette color already
+// passes at full contrast, it's reused rather than inventing a new hex
+// (darkest -> background, dark -> sage, warningText -> warning,
+// positive/primary -> accent) - only error and muted needed genuinely
+// new values, chosen from the same hue family as their day counterparts.
 const NIGHT_COLOR_OVERRIDES = {
   background: '#14181A',
   card: '#242924',
   darkest: '#F4F6F2', // reuses DAY_COLORS.background - 16.4:1 vs night bg
   dark: '#A7CBB3', // reuses DAY_COLORS.sage - 10.1:1 vs night bg
+  primary: '#6DAF8A', // reuses DAY_COLORS.accent - 6.9:1 vs night bg, 5.75:1 vs night card
   warningText: '#b8860b', // reuses DAY_COLORS.warning - 5.49:1 vs night bg
   error: '#EF9A9A', // lighter red, same hue family as DAY_COLORS.error - 8.3:1 vs night bg
   positive: '#6DAF8A', // reuses DAY_COLORS.accent - 6.9:1 vs night bg
@@ -123,12 +143,6 @@ const NIGHT_COLOR_OVERRIDES = {
 export function buildColors(isNight) {
   return isNight ? { ...DAY_COLORS, ...NIGHT_COLOR_OVERRIDES } : { ...DAY_COLORS };
 }
-
-// Static day-mode colors - kept alongside buildColors (not replaced) so
-// every file not yet migrated to useTheme() keeps working exactly as
-// before. Remove once the final sweep (theme redesign plan, Step 6)
-// confirms zero remaining imports of this export.
-export const colors = buildColors(false);
 
 // Shared subset of the old app/App.js styles object, copied verbatim
 // (Phase 7 Step 1 sub-step 1.2). Only the keys needed by sign-in.js/
@@ -467,8 +481,3 @@ export function buildStyles(colors) {
   });
 }
 
-// Static day-mode styles - kept alongside buildStyles (not replaced) so
-// every file not yet migrated to useTheme() keeps working exactly as
-// before. Remove once the final sweep (theme redesign plan, Step 6)
-// confirms zero remaining imports of this export.
-export const styles = buildStyles(colors);

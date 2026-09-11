@@ -26,6 +26,7 @@ import { useTheme } from '../_lib/theme';
 import { useAppData } from '../_lib/appData';
 import { iconForCategory } from '../_lib/categoryIcons';
 import { statusForCategory, computeSpendStats, computePace, computeMonthProgress } from '../_lib/homeSummary';
+import { describeFundingImpactLine, goalDisplayName } from '../_lib/goalFunding';
 import AffordabilityQuery from '../_components/AffordabilityQuery';
 import PrimaryButton from '../_components/PrimaryButton';
 import BudgetInsightModal from '../_components/BudgetInsightModal';
@@ -58,7 +59,7 @@ export default function Budget() {
   const { colors, styles, isNight } = useTheme();
   const budgetLocalStyles = useMemo(() => buildBudgetLocalStyles(colors), [colors]);
   const STATUS_COLOR = useMemo(() => statusColorMap(colors), [colors]);
-  const { refetchAlerts, alerts } = useAppData();
+  const { refetchAlerts, alerts, goalsProgress } = useAppData();
 
   // Direct user request: tapping a category should show the transactions
   // counting toward it plus insight/reasoning and possible actions. Built
@@ -81,6 +82,7 @@ export default function Budget() {
   const [budgetEditAmount, setBudgetEditAmount] = useState('');
   const [budgetProposal, setBudgetProposal] = useState(null);
   const [budgetAdjustments, setBudgetAdjustments] = useState([]);
+  const [fundingImpact, setFundingImpact] = useState(null);
   const [loadingProposal, setLoadingProposal] = useState(false);
   const [applyingBudgetEdit, setApplyingBudgetEdit] = useState(false);
   const [error, setError] = useState(null);
@@ -400,6 +402,7 @@ export default function Budget() {
     setBudgetEditAmount(currentAmount != null ? String(currentAmount) : '');
     setBudgetProposal(null);
     setBudgetAdjustments([]);
+    setFundingImpact(null);
     setError(null);
   }
 
@@ -408,6 +411,7 @@ export default function Budget() {
     setBudgetEditAmount('');
     setBudgetProposal(null);
     setBudgetAdjustments([]);
+    setFundingImpact(null);
   }
 
   // Step 4: asks the AI where the money should come from for the amount
@@ -430,8 +434,9 @@ export default function Budget() {
         body: JSON.stringify({ category: editingBudgetCategory, budgeted_amount: amount }),
       });
       if (!res.ok) throw new Error('SERVER_ERROR');
-      const { proposal } = await res.json();
+      const { proposal, funding_impact } = await res.json();
       setBudgetProposal(proposal);
+      setFundingImpact(funding_impact || null);
       // Local, independently-editable copy of the AI's proposed reductions -
       // this is the "adjust" part of accept/reject/adjust: the user can
       // change any number here before applying, the AI's numbers are just
@@ -503,16 +508,6 @@ export default function Budget() {
   const hasAnyBudget = rows.some((s) => s.budgeted != null);
   const showCategoryReasoning = budgetSettings.show_category_reasoning !== false;
   const showInsightPill = budgetSettings.show_insight_pill !== false;
-
-  // Real finding, theme redesign (2026-09-11): colors.primary (a dark
-  // green) genuinely fails contrast against the new night background/card
-  // when used as bare text/icon/border color (the INSIGHTS pill below,
-  // outlined+text, not a filled shape) - the plan's own "primary/accent/
-  // sage stay unchanged, always painted as filled shapes" assumption
-  // doesn't hold for this one call site. Kept as a scoped override, same
-  // lighter value already proven here, just sourced from useTheme()'s
-  // isNight instead of the now-deleted isNightBackdrop().
-  const onBackdropAccentColor = isNight ? '#9FD9B4' : undefined;
 
   return (
     // Theme redesign: styles.container already carries a theme-reactive
@@ -661,10 +656,7 @@ export default function Budget() {
             <Text style={budgetLocalStyles.title}>Budget</Text>
             {showInsightPill && (
               <Pressable
-                style={[
-                  budgetLocalStyles.insightsPill,
-                  onBackdropAccentColor && { borderColor: onBackdropAccentColor },
-                ]}
+                style={budgetLocalStyles.insightsPill}
                 onPress={() => (insight ? setInsightModalVisible(true) : scrollRef.current?.scrollTo({ y: 0, animated: true }))}
                 accessibilityRole="button"
                 // Visible label always stays "INSIGHTS" (found on-device: the
@@ -674,15 +666,8 @@ export default function Budget() {
                 // than needing to fit in a fixed-width pill.
                 accessibilityLabel={insight ? insight.pill_text : 'Jump to Can I afford this?'}
               >
-                <MaterialIcons name="auto-awesome" size={14} color={onBackdropAccentColor || colors.primary} />
-                <Text
-                  style={[
-                    budgetLocalStyles.insightsPillText,
-                    onBackdropAccentColor && { color: onBackdropAccentColor },
-                  ]}
-                >
-                  INSIGHTS
-                </Text>
+                <MaterialIcons name="auto-awesome" size={14} color={colors.primary} />
+                <Text style={budgetLocalStyles.insightsPillText}>INSIGHTS</Text>
               </Pressable>
             )}
           </View>
@@ -929,6 +914,28 @@ export default function Budget() {
                         {budgetProposal.summary && (
                           <Text style={budgetLocalStyles.reasoningText}>{budgetProposal.summary}</Text>
                         )}
+                        {/* Goal-driven budget funding (2026-09-11): a
+                            decrease frees real discretionary room with no
+                            rebalance step to gate it behind - show the
+                            impact as soon as it's known, purely
+                            informational, never a button to redirect the
+                            freed money anywhere. */}
+                        {budgetProposal.delta <= 0 && fundingImpact && (() => {
+                          const freed = fundingImpact.goals.filter((g) => g.delta !== 0).sort((a, b) => b.delta - a.delta);
+                          if (freed.length === 0) return null;
+                          const top = freed[0];
+                          const name = goalDisplayName(
+                            goalsProgress?.find((g) => g.id === top.goal_id)?.goal_type,
+                            goalsProgress?.find((g) => g.id === top.goal_id)?.notes
+                          );
+                          const line = describeFundingImpactLine(top, name, 'freed');
+                          return line ? (
+                            <Text style={budgetLocalStyles.reasoningText}>
+                              {line}
+                              {freed.length > 1 ? ` (and ${freed.length - 1} other goal${freed.length > 2 ? 's' : ''})` : ''}
+                            </Text>
+                          ) : null;
+                        })()}
                         {budgetAdjustments.map((a, i) => (
                           <View key={a.category} style={budgetLocalStyles.adjustmentRow}>
                             <Text style={budgetLocalStyles.categoryName}>{a.category}</Text>
@@ -945,6 +952,29 @@ export default function Budget() {
                             />
                           </View>
                         ))}
+                        {/* Goal-driven budget funding (2026-09-11): the
+                            rebalance-covered path ("Apply with these
+                            changes") leaves the committed discretionary
+                            total unchanged by construction, so nothing to
+                            report there - this warning is specific to
+                            "Apply without rebalancing," the path that
+                            actually uses up real goal-funding room. */}
+                        {budgetProposal.delta > 0 && fundingImpact && (() => {
+                          const worsened = fundingImpact.goals.filter((g) => g.delta < 0).sort((a, b) => a.delta - b.delta);
+                          if (worsened.length === 0) return null;
+                          const top = worsened[0];
+                          const name = goalDisplayName(
+                            goalsProgress?.find((g) => g.id === top.goal_id)?.goal_type,
+                            goalsProgress?.find((g) => g.id === top.goal_id)?.notes
+                          );
+                          const line = describeFundingImpactLine(top, name, 'used');
+                          return line ? (
+                            <Text style={[budgetLocalStyles.reasoningText, budgetLocalStyles.fundingWarningText]}>
+                              {line}
+                              {worsened.length > 1 ? ` (and ${worsened.length - 1} other goal${worsened.length > 2 ? 's' : ''})` : ''}
+                            </Text>
+                          ) : null;
+                        })()}
                         {applyingBudgetEdit ? (
                           <ActivityIndicator />
                         ) : (
@@ -1217,6 +1247,9 @@ function buildBudgetLocalStyles(colors) {
     fontSize: 12,
     color: colors.muted,
     lineHeight: 17,
+  },
+  fundingWarningText: {
+    color: colors.warningText,
   },
   editSection: {
     gap: 8,

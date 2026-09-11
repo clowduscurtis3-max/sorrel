@@ -1,6 +1,7 @@
+import { useMemo } from 'react';
 import { View, Text, Modal, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { styles, colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import { formatWhole } from '../_lib/api';
 
 // Direct user request: Home's "Projected Spend" stat tile should open up
@@ -11,6 +12,8 @@ import { formatWhole } from '../_lib/api';
 // need the real estate or "return to exact scroll position" guarantee
 // budget.js's category detail view needed.
 export default function ProjectedSpendModal({ visible, onClose, pace, spendStats, monthProgress, monthName }) {
+  const { colors, styles } = useTheme();
+  const localStyles = useMemo(() => buildLocalStyles(colors), [colors]);
   function handleClose() {
     onClose();
   }
@@ -85,7 +88,8 @@ export default function ProjectedSpendModal({ visible, onClose, pace, spendStats
   );
 }
 
-const localStyles = StyleSheet.create({
+function buildLocalStyles(colors) {
+  return StyleSheet.create({
   closeButton: {
     width: 36,
     height: 36,
@@ -139,4 +143,5 @@ const localStyles = StyleSheet.create({
     backgroundColor: colors.sage,
     marginVertical: 2,
   },
-});
+  });
+}

@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
-import { colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import { formatDateMDY } from '../_lib/api';
 
 // Net worth trend chart (Home tab redesign, 2026-08-24) - a single-series
@@ -85,6 +85,8 @@ const CHART_PAD_BOTTOM = 4;
 const Y_TICKS = 4;
 
 export default function NetWorthChart({ history }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => buildStyles(colors), [colors]);
   const [rangeKey, setRangeKey] = useState('6M');
   const [chartWidth, setChartWidth] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(null);
@@ -239,6 +241,8 @@ export default function NetWorthChart({ history }) {
 }
 
 function RangeTabs({ rangeKey, onSelect }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => buildStyles(colors), [colors]);
   return (
     <View style={styles.tabsRow}>
       {RANGES.map((r) => (
@@ -256,7 +260,8 @@ function RangeTabs({ rangeKey, onSelect }) {
   );
 }
 
-const styles = StyleSheet.create({
+function buildStyles(colors) {
+  return StyleSheet.create({
   chartRow: {
     flexDirection: 'row',
     marginTop: 12,
@@ -349,4 +354,5 @@ const styles = StyleSheet.create({
     color: colors.muted,
     marginTop: 8,
   },
-});
+  });
+}

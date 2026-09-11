@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -15,7 +15,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { apiFetch, apiErrorMessage, formatDecimal, formatDateMDY, parseDollarAmount, CATEGORIES } from './_lib/api';
-import { styles, colors } from './_lib/styles';
+import { useTheme } from './_lib/theme';
 import SettingsScreenChrome from './_components/SettingsScreenChrome';
 import SettingsFetchGate from './_components/SettingsFetchGate';
 
@@ -42,6 +42,8 @@ function toDateOnly(date) {
 }
 
 export default function RecurringManage() {
+  const { colors, styles } = useTheme();
+  const manageStyles = useMemo(() => buildManageStyles(colors), [colors]);
   const router = useRouter();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -508,7 +510,7 @@ export default function RecurringManage() {
 
           {!showAddForm ? (
             <Pressable style={manageStyles.addButton} onPress={openAddForm} accessibilityRole="button" accessibilityLabel="Add a recurring charge">
-              <MaterialIcons name="add-circle-outline" size={20} color={colors.background} />
+              <MaterialIcons name="add-circle-outline" size={20} color={colors.primary} />
               <Text style={manageStyles.addButtonText}>Add a recurring charge</Text>
             </Pressable>
           ) : (
@@ -650,7 +652,17 @@ export default function RecurringManage() {
   );
 }
 
-const manageStyles = StyleSheet.create({
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo inside the component (keyed on colors). Also fixes a real
+// bug found during this conversion: addButton's border/text/icon were
+// all hardcoded colors.background with no backgroundColor of its own -
+// this was designed to read as a white outline on the old dark AppBackdrop
+// artwork, but with that backdrop removed, the button's own page
+// background is colors.background too, making it invisible (identical
+// color on identical color). Restyled to the same outline-button pattern
+// (sage border, primary text) used everywhere else in Settings.
+function buildManageStyles(colors) {
+  return StyleSheet.create({
   body: {
     flex: 1,
   },
@@ -818,8 +830,9 @@ const manageStyles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    borderWidth: 1.5,
-    borderColor: colors.background,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.sage,
+    backgroundColor: colors.card,
     borderRadius: 22,
     paddingVertical: 14,
     paddingHorizontal: 20,
@@ -828,7 +841,7 @@ const manageStyles = StyleSheet.create({
   addButtonText: {
     fontSize: 13,
     fontWeight: '700',
-    color: colors.background,
+    color: colors.primary,
   },
   hiddenSection: {
     marginTop: 12,
@@ -854,4 +867,5 @@ const manageStyles = StyleSheet.create({
     fontSize: 14,
     color: colors.dark,
   },
-});
+  });
+}

@@ -1,10 +1,10 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { View, Text, Pressable, Share, ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
 import { apiFetch, apiErrorMessage, patchSettings } from '../_lib/api';
-import { styles, colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import SettingsScreenChrome from '../_components/SettingsScreenChrome';
 import SettingsFetchGate from '../_components/SettingsFetchGate';
 import DraggableCardList from '../_components/DraggableCardList';
@@ -41,7 +41,10 @@ const TAB_ICONS = {
   account: 'person',
 };
 
+// Theme redesign (2026-09-11): colors/styles now come from useTheme().
 export default function GeneralSettings() {
+  const { colors, styles } = useTheme();
+  const generalSettingsStyles = useMemo(() => buildGeneralSettingsStyles(colors), [colors]);
   const router = useRouter();
   const [settings, setSettings] = useState(null);
   const [error, setError] = useState(null);
@@ -259,7 +262,10 @@ export default function GeneralSettings() {
   );
 }
 
-const generalSettingsStyles = StyleSheet.create({
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo inside the component (keyed on colors).
+function buildGeneralSettingsStyles(colors) {
+  return StyleSheet.create({
   bodyScroll: {
     flex: 1,
   },
@@ -342,4 +348,5 @@ const generalSettingsStyles = StyleSheet.create({
     color: colors.darkest,
     backgroundColor: colors.background,
   },
-});
+  });
+}

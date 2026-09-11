@@ -1,5 +1,6 @@
+import { useMemo } from 'react';
 import { View, Text } from 'react-native';
-import { styles, colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 
 // Phase 13: extracted out of ScenarioCheck.js (Phase 5 Step 3/4), which is
 // being deleted as part of consolidating the "Can I afford this?" tool onto
@@ -21,12 +22,16 @@ import { styles, colors } from '../_lib/styles';
 // Matches scenario.js's own severity levels - color instead of the old
 // plain-text "!!"/"!" prefix markers, now that this app has a real palette
 // to draw the distinction from.
-const SEVERITY_COLOR = { high: colors.error, medium: colors.warning, low: colors.dark };
+function severityColorMap(colors) {
+  return { high: colors.error, medium: colors.warning, low: colors.dark };
+}
 
 // Reused for both the single-check result and each side of the buy-now-vs-
 // wait comparison, so the two don't drift into two slightly different
 // renderings of the same result shape.
 export function ScenarioResult({ label, result }) {
+  const { colors, styles } = useTheme();
+  const SEVERITY_COLOR = useMemo(() => severityColorMap(colors), [colors]);
   return (
     <View style={styles.reviewRow}>
       {label && <Text style={styles.smallText}>{label}</Text>}

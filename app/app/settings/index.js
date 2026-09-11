@@ -1,7 +1,8 @@
+import { useMemo } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
-import { styles, colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import SettingsScreenChrome from '../_components/SettingsScreenChrome';
 
 // Phase 38 Step 1: the Settings tab shell. A nested menu (this screen) ->
@@ -19,7 +20,14 @@ const SECTIONS = [
   { path: '/settings/transaction-rules', title: 'Transaction Rules', icon: 'rule' },
 ];
 
+// Theme redesign (2026-09-11): real bug found live - this screen was
+// still on the old static colors/styles import, so navigating back to it
+// from an already-converted screen at night flashed a full light-mode
+// page (a stark white list against an otherwise dark session) before the
+// user could tell what they were looking at. Converted to useTheme().
 export default function Settings() {
+  const { colors, styles } = useTheme();
+  const settingsStyles = useMemo(() => buildSettingsStyles(colors), [colors]);
   const router = useRouter();
 
   return (
@@ -47,35 +55,39 @@ export default function Settings() {
   );
 }
 
-const settingsStyles = StyleSheet.create({
-  body: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-  listCard: {
-    padding: 0,
-    overflow: 'hidden',
-  },
-  sectionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  sectionRowDivider: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.sage,
-  },
-  sectionRowMain: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  sectionRowText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-});
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo inside the component (keyed on colors).
+function buildSettingsStyles(colors) {
+  return StyleSheet.create({
+    body: {
+      flex: 1,
+      paddingHorizontal: 16,
+      paddingTop: 8,
+    },
+    listCard: {
+      padding: 0,
+      overflow: 'hidden',
+    },
+    sectionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+    },
+    sectionRowDivider: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.sage,
+    },
+    sectionRowMain: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    sectionRowText: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+  });
+}

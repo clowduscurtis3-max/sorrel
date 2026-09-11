@@ -1,5 +1,5 @@
 import Svg, { Path, Circle, Line, Polygon } from 'react-native-svg';
-import { colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 
 // Flat, thin-stroke line art for the Budget-tab Sorrel restyle, matching
 // the mockup's visual language as closely as hand-authored SVG reasonably
@@ -45,6 +45,7 @@ import { colors } from '../_lib/styles';
 // entirely (every other call site) keeps the original multi-tone look
 // unchanged.
 export function LeafAvatar({ size = 32, color }) {
+  const { colors } = useTheme();
   const stroke = color || colors.dark;
   const accentFill = color || colors.accent;
   const primaryFill = color || colors.primary;
@@ -94,9 +95,13 @@ export function LeafAvatar({ size = 32, color }) {
 // result status to one of three honest treatments; callers pass the tone,
 // not the raw status string, keeping this component free of app-specific
 // status logic.
-const TONE_FILL = { positive: colors.primary, caution: colors.warning, neutral: colors.muted };
+function toneFillMap(colors) {
+  return { positive: colors.primary, caution: colors.warning, neutral: colors.muted };
+}
 
 export function CheckBadge({ size = 48, tone = 'positive' }) {
+  const { colors } = useTheme();
+  const TONE_FILL = toneFillMap(colors);
   const fill = TONE_FILL[tone] || TONE_FILL.positive;
   return (
     <Svg width={size} height={size} viewBox="0 0 48 48">
@@ -134,6 +139,7 @@ export function CheckBadge({ size = 48, tone = 'positive' }) {
 // Simple flat side-view car for the "buy now" side of the comparison
 // screen.
 export function CarIllustration({ size = 96 }) {
+  const { colors } = useTheme();
   return (
     <Svg width={size} height={size * 0.7} viewBox="0 0 96 68">
       <Line x1="8" y1="52" x2="88" y2="52" stroke={colors.sage} strokeWidth="2" strokeLinecap="round" />
@@ -164,6 +170,7 @@ export function CarIllustration({ size = 96 }) {
 // Mountain range with a flagged peak for the "wait" side of the
 // comparison screen.
 export function MountainIllustration({ size = 96 }) {
+  const { colors } = useTheme();
   return (
     <Svg width={size} height={size * 0.7} viewBox="0 0 96 68">
       <Line x1="8" y1="56" x2="88" y2="56" stroke={colors.sage} strokeWidth="2" strokeLinecap="round" />

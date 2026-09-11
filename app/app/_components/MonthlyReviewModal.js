@@ -1,6 +1,7 @@
+import { useMemo } from 'react';
 import { View, Text, Modal, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { styles, colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import { formatDecimal } from '../_lib/api';
 import { iconForCategory } from '../_lib/categoryIcons';
 
@@ -13,6 +14,8 @@ import { iconForCategory } from '../_lib/categoryIcons';
 // Plain <Modal>, matching BudgetInsightModal.js/ProjectedSpendModal.js's
 // own established precedent for this exact shape of overlay.
 export default function MonthlyReviewModal({ visible, onClose, monthlyReview }) {
+  const { colors, styles } = useTheme();
+  const localStyles = useMemo(() => buildLocalStyles(colors), [colors]);
   if (!monthlyReview) return null;
 
   const monthLabel = new Date(`${monthlyReview.period_start}T00:00:00Z`).toLocaleDateString('en-US', {
@@ -118,7 +121,8 @@ export default function MonthlyReviewModal({ visible, onClose, monthlyReview }) 
   );
 }
 
-const localStyles = StyleSheet.create({
+function buildLocalStyles(colors) {
+  return StyleSheet.create({
   closeButton: {
     width: 36,
     height: 36,
@@ -218,4 +222,5 @@ const localStyles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
-});
+  });
+}

@@ -46,6 +46,16 @@ const FRIENDLY_CATEGORIES = [...SPEND_CATEGORIES, ...FLOW_CATEGORIES];
 // ("gas should be treated as a necessity as well").
 const ESSENTIAL_CATEGORIES = ['Groceries', 'Bills & Utilities', 'Transportation', 'Gas', 'Health & Personal Care'];
 
+// The other side of the same split, also promoted from hardcoded prose
+// (budget.js's two AI prompts, proposeRebalance's own comments) to a real
+// constant - goal-funding math (server/goalFunding.js) needs this list as
+// real data, not just prose a human reads. 'Other' is excluded from both
+// sides (see ESSENTIAL_CATEGORIES's own comment above) - it's a catch-all
+// with no reliable essential/discretionary signal.
+const DISCRETIONARY_CATEGORIES = SPEND_CATEGORIES.filter(
+  (c) => !ESSENTIAL_CATEGORIES.includes(c) && c !== 'Other'
+);
+
 // Maps Plaid's `personal_finance_category.primary` onto our smaller list.
 // Deliberately does NOT include GENERAL_SERVICES - leaving it unmapped
 // forces those transactions through the Claude path below, which is the
@@ -330,6 +340,7 @@ module.exports = {
   SPEND_CATEGORIES,
   FLOW_CATEGORIES,
   ESSENTIAL_CATEGORIES,
+  DISCRETIONARY_CATEGORIES,
   normalizeMerchantKey,
   debtTypeFromPlaid,
   DEBT_TYPE_LABELS,

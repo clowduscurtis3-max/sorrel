@@ -1,8 +1,8 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { View, Text, Switch, ActivityIndicator, TextInput, ScrollView, StyleSheet } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { apiFetch, apiErrorMessage, formatDecimal, patchSettings } from '../_lib/api';
-import { styles, colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import SettingsScreenChrome from '../_components/SettingsScreenChrome';
 import SettingsFetchGate from '../_components/SettingsFetchGate';
 
@@ -12,7 +12,11 @@ const SECTION = 'notification_settings';
 // (tabs) route group, so AppDataProvider never wraps it (same real bug
 // already found and fixed once this session, see settings/goal.js's own
 // comment) - accounts are fetched locally instead.
+//
+// Theme redesign (2026-09-11): colors/styles now come from useTheme().
 export default function NotificationSettings() {
+  const { colors, styles } = useTheme();
+  const notificationSettingsStyles = useMemo(() => buildNotificationSettingsStyles(colors), [colors]);
   const router = useRouter();
   const [settings, setSettings] = useState(null);
   const [accounts, setAccounts] = useState(null);
@@ -229,7 +233,10 @@ export default function NotificationSettings() {
   );
 }
 
-const notificationSettingsStyles = StyleSheet.create({
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo inside the component (keyed on colors).
+function buildNotificationSettingsStyles(colors) {
+  return StyleSheet.create({
   bodyScroll: {
     flex: 1,
   },
@@ -298,4 +305,5 @@ const notificationSettingsStyles = StyleSheet.create({
     backgroundColor: colors.background,
     textAlign: 'right',
   },
-});
+  });
+}
