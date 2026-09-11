@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { colors } from '../_lib/styles';
+import { readableTextColor } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import SorrelWordmark from './SorrelWordmark';
 import { listVerifiedTotpFactors, challengeAndVerifyTotp } from '../_lib/mfa';
 
@@ -22,7 +23,14 @@ import { listVerifiedTotpFactors, challengeAndVerifyTotp } from '../_lib/mfa';
 // staring at this screen with literally no way out short of force-quitting
 // the app - it abandons this sign-in attempt, it doesn't remove the
 // factor.
+//
+// Theme redesign (2026-09-11): previously left flat on purpose (fast,
+// transactional security gate, no illustrated backdrop motion) - now
+// brought into the day/night switch too, since there's no more motion to
+// avoid once the backdrop is gone app-wide, just a flat color choice.
 export default function MfaChallenge({ onVerified, onSignOut }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => buildStyles(colors), [colors]);
   const [factorId, setFactorId] = useState(null);
   const [loadingFactor, setLoadingFactor] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -78,7 +86,11 @@ export default function MfaChallenge({ onVerified, onSignOut }) {
       <SorrelWordmark leafSize={72} />
 
       <View style={styles.badge}>
-        <MaterialIcons name="verified-user" size={44} color={colors.primary} />
+        {/* Same real contrast bug already found/fixed on BiometricLock.js's
+            equivalent badge - colors.primary is a fixed dark green that
+            doesn't track the badge's own theme-reactive colors.card fill.
+            readableTextColor computes the correct color for either mode. */}
+        <MaterialIcons name="verified-user" size={44} color={readableTextColor(colors.card, colors)} />
       </View>
 
       <Text style={styles.welcome}>Verify it's you.</Text>
@@ -128,84 +140,88 @@ export default function MfaChallenge({ onVerified, onSignOut }) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.background,
-    padding: 24,
-  },
-  badge: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: colors.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 36,
-  },
-  welcome: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: colors.darkest,
-    marginTop: 22,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: colors.dark,
-    textAlign: 'center',
-    marginTop: 8,
-    maxWidth: 280,
-  },
-  spacing: {
-    marginTop: 24,
-  },
-  codeInput: {
-    marginTop: 28,
-    width: '100%',
-    maxWidth: 240,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.sage,
-    borderRadius: 12,
-    paddingVertical: 14,
-    fontSize: 24,
-    fontWeight: '700',
-    letterSpacing: 8,
-    textAlign: 'center',
-    color: colors.darkest,
-    backgroundColor: colors.card,
-  },
-  errorText: {
-    color: colors.error,
-    fontSize: 13,
-    textAlign: 'center',
-    marginTop: 12,
-    maxWidth: 280,
-  },
-  ctaButton: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.darkest,
-    borderRadius: 28,
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-    marginTop: 20,
-    width: '100%',
-    maxWidth: 320,
-  },
-  ctaButtonDisabled: {
-    opacity: 0.4,
-  },
-  ctaText: {
-    color: colors.background,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  signOutLink: {
-    fontSize: 13,
-    color: colors.dark,
-    marginTop: 28,
-    textDecorationLine: 'underline',
-  },
-});
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo inside the component (keyed on colors).
+function buildStyles(colors) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.background,
+      padding: 24,
+    },
+    badge: {
+      width: 96,
+      height: 96,
+      borderRadius: 48,
+      backgroundColor: colors.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 36,
+    },
+    welcome: {
+      fontSize: 22,
+      fontWeight: '700',
+      color: colors.darkest,
+      marginTop: 22,
+    },
+    subtitle: {
+      fontSize: 14,
+      color: colors.dark,
+      textAlign: 'center',
+      marginTop: 8,
+      maxWidth: 280,
+    },
+    spacing: {
+      marginTop: 24,
+    },
+    codeInput: {
+      marginTop: 28,
+      width: '100%',
+      maxWidth: 240,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.sage,
+      borderRadius: 12,
+      paddingVertical: 14,
+      fontSize: 24,
+      fontWeight: '700',
+      letterSpacing: 8,
+      textAlign: 'center',
+      color: colors.darkest,
+      backgroundColor: colors.card,
+    },
+    errorText: {
+      color: colors.error,
+      fontSize: 13,
+      textAlign: 'center',
+      marginTop: 12,
+      maxWidth: 280,
+    },
+    ctaButton: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.darkest,
+      borderRadius: 28,
+      paddingVertical: 16,
+      paddingHorizontal: 32,
+      marginTop: 20,
+      width: '100%',
+      maxWidth: 320,
+    },
+    ctaButtonDisabled: {
+      opacity: 0.4,
+    },
+    ctaText: {
+      color: colors.background,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    signOutLink: {
+      fontSize: 13,
+      color: colors.dark,
+      marginTop: 28,
+      textDecorationLine: 'underline',
+    },
+  });
+}

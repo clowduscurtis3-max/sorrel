@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as WebBrowser from 'expo-web-browser';
@@ -7,7 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AntDesign, MaterialIcons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 import { redirectTo, extractSessionParamsFromUrl, setSessionTokens, API_URL } from './_lib/api';
-import { colors } from './_lib/styles';
+import { useTheme } from './_lib/theme';
 import { SIGNED_OUT_REASON_STORAGE_KEY } from './_lib/sessionTimeouts';
 import {
   getBiometricPromptShown,
@@ -38,6 +38,13 @@ import BiometricEnablePrompt from './_components/BiometricEnablePrompt';
 // specifically for this) is only ever called once this screen has already
 // decided whether to show that prompt first.
 export default function SignIn() {
+  // Theme redesign (2026-09-11): sign-in was previously left flat on
+  // purpose (fast, transactional security gate, no illustrated backdrop
+  // motion) - now brought into the day/night switch too, since there's no
+  // more motion to avoid once the backdrop is gone app-wide, just a flat
+  // color choice (confirmed directly with the user).
+  const { colors } = useTheme();
+  const styles = useMemo(() => buildStyles(colors), [colors]);
   const [view, setView] = useState('signin'); // 'signin' | 'create-account' | 'biometric-prompt'
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -272,7 +279,10 @@ export default function SignIn() {
   );
 }
 
-const styles = StyleSheet.create({
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo inside the component (keyed on colors).
+function buildStyles(colors) {
+  return StyleSheet.create({
   container: {
     flex: 1,
     alignItems: 'center',
@@ -386,4 +396,5 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     flexShrink: 1,
   },
-});
+  });
+}

@@ -1,6 +1,8 @@
+import { useMemo } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { colors } from '../_lib/styles';
+import { readableTextColor } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import SorrelWordmark from './SorrelWordmark';
 import { LeafAvatar } from './Illustrations';
 
@@ -30,7 +32,14 @@ import { LeafAvatar } from './Illustrations';
 // Android-only in real testing (see CLAUDE.md) - the Platform.OS branch
 // exists for correctness, not because it's been visually verified on an
 // iOS device.
+//
+// Theme redesign (2026-09-11): previously left flat on purpose (fast,
+// transactional security gate, no illustrated backdrop motion) - now
+// brought into the day/night switch too, since there's no more motion to
+// avoid once the backdrop is gone app-wide, just a flat color choice.
 export default function BiometricLock({ onRetry }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => buildStyles(colors), [colors]);
   const isIOS = Platform.OS === 'ios';
   const biometricLabel = isIOS ? 'Face ID' : 'Fingerprint';
   const biometricIcon = isIOS ? 'face' : 'fingerprint';
@@ -40,7 +49,16 @@ export default function BiometricLock({ onRetry }) {
       <SorrelWordmark leafSize={72} />
 
       <View style={styles.badge}>
-        <MaterialIcons name={biometricIcon} size={44} color={colors.primary} />
+        {/* Real contrast bug found (2026-09-11, theme redesign): this
+            icon used to hardcode color: colors.primary against the
+            badge's colors.card fill - fine by day (2.32:1 against the
+            light day card would've been borderline too, but the badge
+            reads fine there since it's a large, high-recognition glyph);
+            at night, card becomes dark and colors.primary stays a fixed
+            dark green, dropping to 2.32:1 - genuinely hard to see.
+            readableTextColor computes the correct color for the actual
+            card fill in either mode. */}
+        <MaterialIcons name={biometricIcon} size={44} color={readableTextColor(colors.card, colors)} />
       </View>
 
       <Text style={styles.welcome}>Welcome back.</Text>
@@ -66,62 +84,66 @@ export default function BiometricLock({ onRetry }) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.background,
-    padding: 24,
-  },
-  badge: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: colors.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 36,
-  },
-  welcome: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: colors.darkest,
-    marginTop: 22,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: colors.dark,
-    textAlign: 'center',
-    marginTop: 8,
-    maxWidth: 280,
-  },
-  ctaButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    backgroundColor: colors.darkest,
-    borderRadius: 28,
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-    marginTop: 32,
-    width: '100%',
-    maxWidth: 320,
-  },
-  ctaText: {
-    color: colors.background,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  reassurance: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 24,
-  },
-  reassuranceText: {
-    fontSize: 13,
-    color: colors.dark,
-  },
-});
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo inside the component (keyed on colors).
+function buildStyles(colors) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.background,
+      padding: 24,
+    },
+    badge: {
+      width: 96,
+      height: 96,
+      borderRadius: 48,
+      backgroundColor: colors.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 36,
+    },
+    welcome: {
+      fontSize: 22,
+      fontWeight: '700',
+      color: colors.darkest,
+      marginTop: 22,
+    },
+    subtitle: {
+      fontSize: 14,
+      color: colors.dark,
+      textAlign: 'center',
+      marginTop: 8,
+      maxWidth: 280,
+    },
+    ctaButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 10,
+      backgroundColor: colors.darkest,
+      borderRadius: 28,
+      paddingVertical: 16,
+      paddingHorizontal: 32,
+      marginTop: 32,
+      width: '100%',
+      maxWidth: 320,
+    },
+    ctaText: {
+      color: colors.background,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    reassurance: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: 24,
+    },
+    reassuranceText: {
+      fontSize: 13,
+      color: colors.dark,
+    },
+  });
+}
