@@ -2193,14 +2193,38 @@ export default function Goal() {
                     editable={!calculatingHomeAffordability}
                   />
                   <View style={[styles.picker, goalStyles.estimateSpacing]}>
+                    {/* Found 2026-09-11 (real on-device report, tap-testing
+                        Phase 42): the exact bug already fixed for
+                        settings/goal.js's Round-Ups/Auto-Save pickers -
+                        that fix's own comment predicted this one would
+                        eventually surface here too. The wrapping View's
+                        color (styles.picker) never reaches Android's
+                        native Picker/Spinner widget; it needs color/
+                        background set directly on the Picker and each
+                        Picker.Item, or the box renders with invisible
+                        text. Same fix, mirrored exactly. */}
                     <Picker
                       selectedValue={homeState}
                       onValueChange={setHomeState}
                       enabled={!calculatingHomeAffordability}
+                      style={goalStyles.homeStatePickerControl}
+                      dropdownIconColor={colors.darkest}
+                      mode="dropdown"
                     >
-                      <Picker.Item label="Choose a state..." value="" />
+                      <Picker.Item
+                        label="Choose a state..."
+                        value=""
+                        color={colors.darkest}
+                        style={goalStyles.homeStatePickerItem}
+                      />
                       {US_STATES.map(([code, name]) => (
-                        <Picker.Item key={code} label={name} value={code} />
+                        <Picker.Item
+                          key={code}
+                          label={name}
+                          value={code}
+                          color={colors.darkest}
+                          style={goalStyles.homeStatePickerItem}
+                        />
                       ))}
                     </Picker>
                   </View>
@@ -2308,6 +2332,17 @@ export default function Goal() {
 }
 
 const goalStyles = StyleSheet.create({
+  // Home Affordability's state Picker (2026-09-11) - see that Picker's own
+  // JSX comment for the full "why." Same values settings/goal.js's already-
+  // fixed pickerControl/pickerItem use.
+  homeStatePickerControl: {
+    color: colors.darkest,
+    backgroundColor: colors.background,
+  },
+  homeStatePickerItem: {
+    color: colors.darkest,
+    backgroundColor: colors.background,
+  },
   backgroundLayer: {
     position: 'absolute',
     top: 0,
