@@ -1,10 +1,11 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { View, Text, ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { apiFetch, apiErrorMessage, patchSettings } from '../_lib/api';
-import { styles, colors, isValidHexColor, readableTextColor } from '../_lib/styles';
-import { HOME_CARD_GROUP_BEFORE_STATS, HOME_CARD_GROUP_AFTER_STATS, HOME_CARD_TITLES, orderCardGroup } from '../_lib/homeCards';
+import { isValidHexColor, readableTextColor } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
+import { HOME_CARD_GROUP_BEFORE_STATS, HOME_CARD_GROUP_AFTER_STATS, HOME_CARD_KEYS, HOME_CARD_TITLES, orderCardGroup } from '../_lib/homeCards';
 import SettingsScreenChrome from '../_components/SettingsScreenChrome';
 import SettingsFetchGate from '../_components/SettingsFetchGate';
 import DraggableCardList from '../_components/DraggableCardList';
@@ -13,12 +14,23 @@ import HomeCardColorPicker from '../_components/HomeCardColorPicker';
 const SECTION = 'home_settings';
 
 export default function HomeSettings() {
+  // Theme redesign (2026-09-11): colors/styles now come from useTheme().
+  const { colors, styles } = useTheme();
+  const homeSettingsStyles = useMemo(() => buildHomeSettingsStyles(colors), [colors]);
   const router = useRouter();
   const [settings, setSettings] = useState(null);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
   const [expandedKey, setExpandedKey] = useState(null);
+  // Direct user request: an easy way to match one card's color onto
+  // others, instead of re-picking hue/shade by hand each time - both "all
+  // at once" and "select specific cards" in one control. Reset whenever
+  // the color panel opens/closes on a different (or no) card, via
+  // openColorPanel/closeColorPanel below rather than a raw setExpandedKey
+  // call, so a stale selection from the last card edited can never leak
+  // into the next one.
+  const [matchTargets, setMatchTargets] = useState([]);
 
   const fetchSettings = useCallback(async () => {
     setError(null);
@@ -60,13 +72,23 @@ export default function HomeSettings() {
   const orderedBefore = orderCardGroup(HOME_CARD_GROUP_BEFORE_STATS, cardOrder);
   const orderedAfter = orderCardGroup(HOME_CARD_GROUP_AFTER_STATS, cardOrder);
 
+  function closeColorPanel() {
+    setExpandedKey(null);
+    setMatchTargets([]);
+  }
+
+  function openColorPanel(key) {
+    setExpandedKey(key);
+    setMatchTargets([]);
+  }
+
   function enterEditMode(next) {
-    if (next) setExpandedKey(null);
+    if (next) closeColorPanel();
     setEditing(next);
   }
 
   function hideCard(key) {
-    setExpandedKey(null);
+    closeColorPanel();
     patchHomeSettings({ ...homeSettings, hidden_cards: [...hiddenCards, key] });
   }
 
@@ -101,6 +123,33 @@ export default function HomeSettings() {
     patchHomeSettings({ ...homeSettings, card_colors: nextColors });
   }
 
+  // Direct user request: match this card's color onto one or more other
+  // cards, instead of re-picking hue/shade by hand for each one. Every
+  // other card key (HOME_CARD_KEYS is the full flat list, both groups) is
+  // a selectable match target; "Select all" and "Apply" are separate
+  // steps (matching this screen's own established "pick, then confirm"
+  // pattern - the OK button below) so a stray tap can't silently overwrite
+  // several cards' colors at once.
+  const matchableKeys = HOME_CARD_KEYS.filter((k) => k !== expandedKey);
+  const allMatchTargetsSelected = matchableKeys.length > 0 && matchTargets.length === matchableKeys.length;
+
+  function toggleMatchTarget(key) {
+    setMatchTargets((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  }
+
+  function toggleSelectAllMatchTargets() {
+    setMatchTargets(allMatchTargetsSelected ? [] : matchableKeys);
+  }
+
+  function applyMatch() {
+    const sourceColor = cardColors[expandedKey];
+    if (!isValidHexColor(sourceColor) || matchTargets.length === 0) return;
+    const nextColors = { ...cardColors };
+    for (const key of matchTargets) nextColors[key] = sourceColor;
+    patchHomeSettings({ ...homeSettings, card_colors: nextColors });
+    setMatchTargets([]);
+  }
+
   // The color picker deliberately does NOT expand inline inside a card's
   // own row: every row inside DraggableCardList is fixed-height and
   // absolutely positioned (needed for the drag math), so anything taller
@@ -118,7 +167,7 @@ export default function HomeSettings() {
     return (
       <Pressable
         style={[styles.card, homeSettingsStyles.cardRow, isSelected && homeSettingsStyles.cardRowSelected]}
-        onPress={() => !editing && setExpandedKey(isSelected ? null : key)}
+        onPress={() => !editing && (isSelected ? closeColorPanel() : openColorPanel(key))}
         accessibilityRole="button"
         accessibilityLabel={`Edit ${HOME_CARD_TITLES[key]} color`}
       >
@@ -143,15 +192,16 @@ export default function HomeSettings() {
   const expandedInAfter = expandedKey && HOME_CARD_GROUP_AFTER_STATS.includes(expandedKey);
 
   function colorPanel() {
+    const hasSourceColor = isValidHexColor(cardColors[expandedKey]);
     return (
       <View style={[styles.card, homeSettingsStyles.colorPanel]}>
         <Text style={styles.cardTitle}>{HOME_CARD_TITLES[expandedKey]} color</Text>
         <HomeCardColorPicker
-          value={isValidHexColor(cardColors[expandedKey]) ? cardColors[expandedKey] : null}
+          value={hasSourceColor ? cardColors[expandedKey] : null}
           onChange={(hex) => setCardColor(expandedKey, hex)}
         />
         <View style={homeSettingsStyles.colorPanelFooter}>
-          {isValidHexColor(cardColors[expandedKey]) ? (
+          {hasSourceColor ? (
             <Pressable onPress={() => resetCardColor(expandedKey)} accessibilityRole="button" accessibilityLabel="Reset to default color">
               <Text style={homeSettingsStyles.resetLink}>Reset to default</Text>
             </Pressable>
@@ -165,13 +215,65 @@ export default function HomeSettings() {
               just confirms you're done and collapses the panel. */}
           <Pressable
             style={homeSettingsStyles.okButton}
-            onPress={() => setExpandedKey(null)}
+            onPress={closeColorPanel}
             accessibilityRole="button"
             accessibilityLabel="Lock in color"
           >
             <Text style={homeSettingsStyles.okButtonText}>OK</Text>
           </Pressable>
         </View>
+
+        {/* Match to other cards - direct user request: an easy way to
+            reuse this card's exact color on others, instead of re-picking
+            hue/shade by hand each time. Only meaningful once this card
+            actually has a real custom color set - matching "no color" onto
+            other cards isn't a real action. Pick specific cards, or
+            "Select all," then a separate "Apply" confirms - same two-step
+            discipline as the picker's own OK button, so a stray tap can't
+            silently overwrite several cards' colors at once. */}
+        {hasSourceColor && matchableKeys.length > 0 && (
+          <View style={homeSettingsStyles.matchSection}>
+            <View style={homeSettingsStyles.matchHeaderRow}>
+              <Text style={homeSettingsStyles.matchTitle}>Match this color to other cards</Text>
+              <Pressable onPress={toggleSelectAllMatchTargets} accessibilityRole="button">
+                <Text style={homeSettingsStyles.matchSelectAllLink}>
+                  {allMatchTargetsSelected ? 'Deselect all' : 'Select all'}
+                </Text>
+              </Pressable>
+            </View>
+            {matchableKeys.map((key) => {
+              const checked = matchTargets.includes(key);
+              return (
+                <Pressable
+                  key={key}
+                  style={homeSettingsStyles.matchRow}
+                  onPress={() => toggleMatchTarget(key)}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked }}
+                  accessibilityLabel={`Match ${HOME_CARD_TITLES[key]} to this color`}
+                >
+                  <MaterialIcons
+                    name={checked ? 'check-box' : 'check-box-outline-blank'}
+                    size={20}
+                    color={checked ? colors.primary : colors.sage}
+                  />
+                  <Text style={homeSettingsStyles.matchRowText}>{HOME_CARD_TITLES[key]}</Text>
+                </Pressable>
+              );
+            })}
+            <Pressable
+              style={[homeSettingsStyles.matchApplyButton, matchTargets.length === 0 && homeSettingsStyles.matchApplyButtonDisabled]}
+              onPress={applyMatch}
+              disabled={matchTargets.length === 0}
+              accessibilityRole="button"
+              accessibilityLabel="Apply matched color"
+            >
+              <Text style={homeSettingsStyles.matchApplyButtonText}>
+                Apply to {matchTargets.length} card{matchTargets.length === 1 ? '' : 's'}
+              </Text>
+            </Pressable>
+          </View>
+        )}
       </View>
     );
   }
@@ -255,7 +357,16 @@ export default function HomeSettings() {
   );
 }
 
-const homeSettingsStyles = StyleSheet.create({
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo inside the component (keyed on colors).
+function buildHomeSettingsStyles(colors) {
+  // Real contrast bug found (2026-09-11): okButtonText used to hardcode
+  // color: colors.background against okButton's colors.primary fill -
+  // colors.primary is a fixed brand green, so at night (background flips
+  // dark) this dropped to 2.80:1, same bug class already found/fixed
+  // elsewhere this session. readableTextColor computes the correct color.
+  const okButtonTextColor = readableTextColor(colors.primary, colors);
+  return StyleSheet.create({
   body: {
     flex: 1,
   },
@@ -323,7 +434,7 @@ const homeSettingsStyles = StyleSheet.create({
   okButtonText: {
     fontSize: 13,
     fontWeight: '700',
-    color: colors.background,
+    color: okButtonTextColor,
   },
   groupDivider: {
     height: 12,
@@ -352,4 +463,59 @@ const homeSettingsStyles = StyleSheet.create({
     fontSize: 14,
     color: colors.dark,
   },
-});
+  // Match-to-other-cards section (direct user request, 2026-09-11) - a
+  // divider-separated block under the picker, same card, not a second
+  // popup/modal.
+  matchSection: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.sage,
+    marginTop: 4,
+    paddingTop: 10,
+    gap: 2,
+  },
+  matchHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  matchTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.dark,
+    flexShrink: 1,
+    paddingRight: 8,
+  },
+  matchSelectAllLink: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.primary,
+  },
+  matchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 6,
+  },
+  matchRowText: {
+    fontSize: 13,
+    color: colors.darkest,
+  },
+  matchApplyButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.primary,
+    borderRadius: 16,
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    marginTop: 8,
+  },
+  matchApplyButtonDisabled: {
+    opacity: 0.4,
+  },
+  matchApplyButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: okButtonTextColor,
+  },
+  });
+}

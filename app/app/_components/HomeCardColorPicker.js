@@ -3,7 +3,7 @@ import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useSharedValue, useAnimatedStyle, runOnJS, clamp } from 'react-native-reanimated';
-import { colors } from '../_lib/styles';
+import { useTheme } from '../_lib/theme';
 import { hslToHex, hexToHsl } from '../_lib/color';
 
 // Phase 38 Step 3, replacing an earlier hex-text-input version per direct
@@ -29,6 +29,8 @@ const THUMB_SIZE = 24;
 const SLIDER_HEIGHT = 28;
 
 export default function HomeCardColorPicker({ value, onChange }) {
+  const { colors } = useTheme();
+  const pickerStyles = useMemo(() => buildPickerStyles(colors), [colors]);
   // Re-derive a starting hue/lightness from an already-saved color so
   // reopening this picker on a card that already has a color shows the
   // right swatch/slider position, rather than always resetting to red/50%.
@@ -118,7 +120,10 @@ export default function HomeCardColorPicker({ value, onChange }) {
   );
 }
 
-const pickerStyles = StyleSheet.create({
+// Theme redesign (2026-09-11): converted to a builder function, called
+// via useMemo inside the component (keyed on colors).
+function buildPickerStyles(colors) {
+  return StyleSheet.create({
   container: {
     gap: 10,
   },
@@ -159,4 +164,5 @@ const pickerStyles = StyleSheet.create({
     fontSize: 11,
     color: colors.muted,
   },
-});
+  });
+}
