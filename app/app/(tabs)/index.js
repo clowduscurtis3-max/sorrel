@@ -759,10 +759,10 @@ export default function Home() {
           <>
             <View style={homeStyles.divider} />
             <View style={homeStyles.monthLabelsRow}>
-              <Text style={homeStyles.smallLabel}>
+              <Text style={[homeStyles.smallLabel, textColor && { color: textColor }]}>
                 {monthName.slice(0, 3).toUpperCase()} 1
               </Text>
-              <Text style={homeStyles.smallLabel}>
+              <Text style={[homeStyles.smallLabel, textColor && { color: textColor }]}>
                 {monthName.slice(0, 3).toUpperCase()} {monthProgress.daysInMonth}
               </Text>
             </View>
@@ -776,10 +776,17 @@ export default function Home() {
             </View>
             <View style={homeStyles.progressCaptionRow}>
               <View>
-                <Text style={homeStyles.progressCaption}>
+                {/* Found live 2026-09-11 (real screenshot, a custom dark
+                    Home card color): these two lines were the only bare
+                    text in this whole card never given the computed
+                    textColor above - title/reason text two elements up
+                    already had it, these were simply missed, leaving them
+                    stuck on their light-card-oriented default and nearly
+                    invisible against a dark custom card. */}
+                <Text style={[homeStyles.progressCaption, textColor && { color: textColor }]}>
                   {monthProgress.daysElapsed} days into {monthName}
                 </Text>
-                <Text style={homeStyles.progressCaption}>
+                <Text style={[homeStyles.progressCaption, textColor && { color: textColor }]}>
                   {monthProgress.daysRemaining} days remaining
                 </Text>
               </View>
