@@ -38,7 +38,9 @@ function contrastRatio(luminanceA, luminanceB) {
 // given ≈7:1 - directly undermining the "basic contrast check" this
 // function exists for. Computing both real contrast ratios and picking
 // whichever is actually higher is correct by construction and needs no
-// hand-derived threshold at all.
+// hand-derived threshold at all. Takes `colors` as a parameter - already
+// theme-agnostic, works unchanged against either the day or night palette
+// buildColors() below produces.
 export function readableTextColor(hexColor, colors) {
   if (!isValidHexColor(hexColor)) return null;
   const bgLuminance = relativeLuminance(hexColor);
@@ -50,7 +52,7 @@ export function readableTextColor(hexColor, colors) {
 // Sorrel brand palette (CLAUDE.md "Color palette" note, 2026-08-13) -
 // dark-forest-green/sage/cream, light theme. Named by role so future
 // screens import `colors` rather than re-typing hex values.
-export const colors = {
+const DAY_COLORS = {
   darkest: '#0F2B23',
   dark: '#1E4335',
   primary: '#2D6A4F',
@@ -82,330 +84,391 @@ export const colors = {
   placeholder: 'rgba(100, 100, 100, 0.8)',
 };
 
+// Theme redesign (2026-09-11): night-mode overrides for the 8 keys that
+// actually need one. `primary`/`accent`/`sage`/`warning`/`reviewWarning`/
+// `placeholder` are deliberately NOT here - they're always painted as
+// filled shapes (buttons/progress bars/borders) rather than bare text
+// sitting directly on a background, or (warning/reviewWarning) already
+// pass real contrast against the new night background/card as-is, so
+// they carry over unchanged in both modes per the decided scope.
+//
+// Every value below is a night-mode replacement for a key that either (a)
+// IS the background/card itself, or (b) renders as bare text and fails
+// real WCAG contrast against the new night colors using its day value -
+// computed via readableTextColor's own contrast formula, not guessed:
+// warningText (2.86:1), error (2.44:1), positive (2.85:1), muted (3.11:1)
+// - all below the 4.5:1 AA floor for body text against the new night
+// background/card. Where an existing palette color already passes at
+// full contrast, it's reused rather than inventing a new hex (darkest ->
+// background, dark -> sage, warningText -> warning, positive -> accent) -
+// only error and muted needed genuinely new values, chosen from the same
+// hue family as their day counterparts.
+const NIGHT_COLOR_OVERRIDES = {
+  background: '#14181A',
+  card: '#242924',
+  darkest: '#F4F6F2', // reuses DAY_COLORS.background - 16.4:1 vs night bg
+  dark: '#A7CBB3', // reuses DAY_COLORS.sage - 10.1:1 vs night bg
+  warningText: '#b8860b', // reuses DAY_COLORS.warning - 5.49:1 vs night bg
+  error: '#EF9A9A', // lighter red, same hue family as DAY_COLORS.error - 8.3:1 vs night bg
+  positive: '#6DAF8A', // reuses DAY_COLORS.accent - 6.9:1 vs night bg
+  muted: '#9AA39C', // light sage-tinted grey - 6.9:1 vs night bg
+};
+
+// Theme redesign (2026-09-11): the reactive replacement for the old
+// always-day `colors` export below. `colors` keeps its exact 14-key
+// shape in both modes - only values change, so every existing call site
+// (colors.darkest, colors.error, etc.) keeps working unchanged once its
+// `colors` is sourced from useTheme() (_lib/theme.js) instead of this
+// file's static export.
+export function buildColors(isNight) {
+  return isNight ? { ...DAY_COLORS, ...NIGHT_COLOR_OVERRIDES } : { ...DAY_COLORS };
+}
+
+// Static day-mode colors - kept alongside buildColors (not replaced) so
+// every file not yet migrated to useTheme() keeps working exactly as
+// before. Remove once the final sweep (theme redesign plan, Step 6)
+// confirms zero remaining imports of this export.
+export const colors = buildColors(false);
+
 // Shared subset of the old app/App.js styles object, copied verbatim
 // (Phase 7 Step 1 sub-step 1.2). Only the keys needed by sign-in.js/
 // goal-intake.js/the current Home placeholder so far - later sub-steps
 // (Budget/Recurring/Goal tabs) add more keys here as each screen migrates,
 // rather than each route re-declaring its own copy.
-export const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-    paddingTop: 60,
-  },
-  goalScreen: {
-    flex: 1,
-    gap: 12,
-    paddingHorizontal: 24,
-    paddingTop: 40,
-    // Keeps Save goal (pinned to the bottom via a flex:1 spacer) clear of
-    // the phone's gesture/button bar - found by the user on-device,
-    // 2026-08-12. Scoped to goalScreen specifically (goal-intake.js's own
-    // style, not the shared `container` above) after a second on-device
-    // finding: `container` is also used by Home's SectionList, which
-    // inherited this padding without needing it (nothing flush-to-bottom
-    // there, just dead white space above the tab bar) - moved here rather
-    // than left shared. A fixed value rather than
-    // react-native-safe-area-context's insets (already an installed
-    // dependency from Step 1.1) - no SafeAreaProvider is wired up anywhere
-    // yet, and this was a quick on-device fix, not the moment to add one
-    // untested. Revisit with real insets if this proves too much/little on
-    // other devices.
-    paddingBottom: 72,
-  },
-  // Cancel/Skip corner slots - one row, two ends. `justifyContent:
-  // 'space-between'` plus two always-present child Views (one per corner)
-  // means whichever one actually has a Button in it (they're mutually
-  // exclusive - see goal-intake.js) lands on its own side without needing
-  // conditional alignment styles; the empty slot is just a zero-size View.
-  topBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 24,
-    paddingTop: 16,
-  },
-  input: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.sage,
-    borderRadius: 4,
-    padding: 8,
-    fontSize: 15,
-    color: colors.darkest,
-  },
-  // Without an explicit height, @react-native-picker/picker's Android
-  // native view can render with zero measured height inside a flex/scroll
-  // layout (confirmed on-device, ScenarioCheck.js's category dropdown) -
-  // give it the same bordered-box look as `input` above so it's not just
-  // invisible, functionally-zero-sized space. `color`/`backgroundColor`
-  // are also explicit - the native Android Picker's closed-state text has
-  // no color set by default and rendered effectively invisible against
-  // this screen's white background (confirmed on-device).
-  picker: {
-    height: 50,
-    width: '100%',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.sage,
-    borderRadius: 4,
-    color: colors.darkest,
-    backgroundColor: colors.background,
-  },
-  centered: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 16,
-  },
-  text: {
-    fontSize: 16,
-    color: colors.darkest,
-  },
-  smallText: {
-    fontSize: 13,
-    color: colors.dark,
-    textAlign: 'center',
-  },
-  errorText: {
-    fontSize: 14,
-    color: colors.error,
-    textAlign: 'center',
-  },
-  // Added for Home tab (sub-step 1.3) - ported verbatim from the old
-  // app/App.js styles object.
-  header: {
-    alignItems: 'center',
-    gap: 8,
-    paddingBottom: 16,
-  },
-  goalProgressSection: {
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingBottom: 12,
-  },
-  accountsSection: {
-    paddingHorizontal: 24,
-    paddingBottom: 12,
-    gap: 4,
-  },
-  alertsSection: {
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-  },
-  alertRow: {
-    borderLeftWidth: 3,
-    borderLeftColor: colors.warning,
-    paddingLeft: 10,
-    paddingVertical: 2,
-    gap: 2,
-  },
-  alertText: {
-    fontSize: 14,
-    color: colors.warningText,
-  },
-  errorBanner: {
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-  },
-  list: {
-    flex: 1,
-  },
-  sectionHeader: {
-    fontSize: 14,
-    fontWeight: '600',
-    backgroundColor: colors.card,
-    color: colors.darkest,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  row: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.sage,
-  },
-  rowMain: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  rowName: {
-    fontSize: 15,
-    flexShrink: 1,
-    paddingRight: 8,
-    color: colors.darkest,
-  },
-  rowAmount: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: colors.darkest,
-  },
-  recurringTag: {
-    fontSize: 11,
-    color: colors.positive,
-    marginTop: 2,
-  },
-  reviewRow: {
-    gap: 6,
-    marginTop: 6,
-    alignItems: 'flex-start',
-  },
-  reviewText: {
-    fontSize: 12,
-    color: colors.reviewWarning,
-  },
-  categoryPicker: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 4,
-    marginTop: 6,
-  },
-  // Added for Budget tab (sub-step 1.4). `budgetRow` is ported verbatim
-  // from the old app/App.js styles object; `budgetScreen` is new - the old
-  // app used a fixed `maxHeight: 280` scroll box (`budgetList`) because
-  // budget status was one collapsible section sharing a screen with
-  // several others. Now that Budget is its own dedicated tab, the whole
-  // screen can just scroll instead of being capped at a small fixed
-  // height.
-  budgetScreen: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-  budgetRow: {
-    alignItems: 'center',
-    paddingVertical: 6,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.sage,
-  },
-  // Added for Recurring tab (sub-step 1.5) - ported verbatim from the old
-  // app/App.js styles object. Distinguishes the three recurring-spend
-  // groups (Subscriptions/Recurring bills/Other) within the same
-  // scrolling tab.
-  recurringGroupHeader: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.muted,
-    marginTop: 10,
-    marginBottom: 2,
-  },
-  // Added for the account-menu modal (sub-step 1.7) - ported verbatim from
-  // the old app/App.js styles object.
-  gmailSection: {
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 24,
-    paddingBottom: 16,
-  },
-  // A flex:1 wrapper carrying the same 72px gesture-bar clearance as
-  // goalScreen, for any screen that pins a final action to the true
-  // bottom via a flex:1 spacer (account-menu's Sign out) without also
-  // wanting goalScreen's goal-specific horizontal padding/top spacing.
-  pinnedFooterScreen: {
-    flex: 1,
-    paddingBottom: 72,
-  },
-  // Added for the account-menu modal (Phase 8 Step 3) - one block per
-  // linked Plaid Item (institution name/status + its own Re-link/
-  // Disconnect buttons), same plain-stacked-Button convention as every
-  // other list in this app rather than a side-by-side row.
-  plaidItemsSection: {
-    gap: 12,
-    paddingHorizontal: 24,
-    paddingBottom: 16,
-  },
-  plaidItemBlock: {
-    gap: 4,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.sage,
-    paddingBottom: 10,
-  },
-  // Added for the Budget-tab Sorrel restyle (2026-08-20). `card` is the
-  // rounded/filled section pattern the mockup uses throughout but that
-  // didn't exist anywhere in this app before this pass (every prior
-  // section here is a flat hairline row or a left-border accent, never a
-  // filled rounded box) - new, not a reuse of an existing key.
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: 14,
-    padding: 16,
-    gap: 8,
-  },
-  cardTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-  // Pill button replacing native <Button> within the affordability flow
-  // only (see PrimaryButton.js) - this app's other screens keep using
-  // plain <Button> deliberately, not refactored as part of this pass.
-  primaryButton: {
-    backgroundColor: colors.darkest,
-    borderRadius: 28,
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 44,
-  },
-  primaryButtonDisabled: {
-    backgroundColor: colors.sage,
-  },
-  primaryButtonText: {
-    color: colors.background,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  // Chat-bubble pair, originally added for AffordabilityQuery's own single
-  // query/clarification exchange (see pendingContext) - since reused
-  // unchanged by AffordabilityChat.js for a real, growing back-and-forth
-  // (the "AI-narrated responses + conversation memory" follow-up), so this
-  // is no longer "the one turn this flow keeps," just the shared bubble
-  // look both screens draw from.
-  chatBubbleAssistant: {
-    backgroundColor: colors.card,
-    borderRadius: 16,
-    borderTopLeftRadius: 4,
-    padding: 12,
-    maxWidth: '85%',
-    alignSelf: 'flex-start',
-  },
-  chatBubbleAssistantText: {
-    color: colors.darkest,
-    fontSize: 14,
-  },
-  chatBubbleUser: {
-    backgroundColor: colors.darkest,
-    borderRadius: 16,
-    borderTopRightRadius: 4,
-    padding: 12,
-    maxWidth: '85%',
-    alignSelf: 'flex-end',
-  },
-  chatBubbleUserText: {
-    color: colors.background,
-    fontSize: 14,
-  },
-  // Comparison table on the "Add payment vs. wait" screen - deliberately
-  // only 2 rows are ever rendered here (Discretionary spending, Goal
-  // progress), see that screen's own build notes for why the mockup's
-  // other 3 rows were dropped rather than styled.
-  comparisonTableRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.sage,
-  },
-  comparisonTableLabel: {
-    fontSize: 13,
-    color: colors.dark,
-    flexShrink: 1,
-    paddingRight: 8,
-  },
-  comparisonTableValue: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-});
+//
+// Theme redesign (2026-09-11): converted to a builder function so a
+// theme-aware caller (useTheme(), _lib/theme.js) can rebuild this against
+// either the day or night colors object - StyleSheet.create bakes values
+// in once at call time, so this can never itself react to a color
+// changing; the caller re-invokes it (via useMemo, keyed on colors) only
+// when the active theme actually changes instead.
+export function buildStyles(colors) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.background,
+      paddingTop: 60,
+    },
+    goalScreen: {
+      flex: 1,
+      gap: 12,
+      paddingHorizontal: 24,
+      paddingTop: 40,
+      // Keeps Save goal (pinned to the bottom via a flex:1 spacer) clear of
+      // the phone's gesture/button bar - found by the user on-device,
+      // 2026-08-12. Scoped to goalScreen specifically (goal-intake.js's own
+      // style, not the shared `container` above) after a second on-device
+      // finding: `container` is also used by Home's SectionList, which
+      // inherited this padding without needing it (nothing flush-to-bottom
+      // there, just dead white space above the tab bar) - moved here rather
+      // than left shared. A fixed value rather than
+      // react-native-safe-area-context's insets (already an installed
+      // dependency from Step 1.1) - no SafeAreaProvider is wired up anywhere
+      // yet, and this was a quick on-device fix, not the moment to add one
+      // untested. Revisit with real insets if this proves too much/little on
+      // other devices.
+      paddingBottom: 72,
+    },
+    // Cancel/Skip corner slots - one row, two ends. `justifyContent:
+    // 'space-between'` plus two always-present child Views (one per corner)
+    // means whichever one actually has a Button in it (they're mutually
+    // exclusive - see goal-intake.js) lands on its own side without needing
+    // conditional alignment styles; the empty slot is just a zero-size View.
+    topBar: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      paddingHorizontal: 24,
+      paddingTop: 16,
+    },
+    input: {
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.sage,
+      borderRadius: 4,
+      padding: 8,
+      fontSize: 15,
+      color: colors.darkest,
+    },
+    // Without an explicit height, @react-native-picker/picker's Android
+    // native view can render with zero measured height inside a flex/scroll
+    // layout (confirmed on-device, ScenarioCheck.js's category dropdown) -
+    // give it the same bordered-box look as `input` above so it's not just
+    // invisible, functionally-zero-sized space. `color`/`backgroundColor`
+    // are also explicit - the native Android Picker's closed-state text has
+    // no color set by default and rendered effectively invisible against
+    // this screen's white background (confirmed on-device).
+    picker: {
+      height: 50,
+      width: '100%',
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.sage,
+      borderRadius: 4,
+      color: colors.darkest,
+      backgroundColor: colors.background,
+    },
+    centered: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 16,
+    },
+    text: {
+      fontSize: 16,
+      color: colors.darkest,
+    },
+    smallText: {
+      fontSize: 13,
+      color: colors.dark,
+      textAlign: 'center',
+    },
+    errorText: {
+      fontSize: 14,
+      color: colors.error,
+      textAlign: 'center',
+    },
+    // Added for Home tab (sub-step 1.3) - ported verbatim from the old
+    // app/App.js styles object.
+    header: {
+      alignItems: 'center',
+      gap: 8,
+      paddingBottom: 16,
+    },
+    goalProgressSection: {
+      alignItems: 'center',
+      paddingHorizontal: 24,
+      paddingBottom: 12,
+    },
+    accountsSection: {
+      paddingHorizontal: 24,
+      paddingBottom: 12,
+      gap: 4,
+    },
+    alertsSection: {
+      gap: 8,
+      paddingHorizontal: 16,
+      paddingBottom: 16,
+    },
+    alertRow: {
+      borderLeftWidth: 3,
+      borderLeftColor: colors.warning,
+      paddingLeft: 10,
+      paddingVertical: 2,
+      gap: 2,
+    },
+    alertText: {
+      fontSize: 14,
+      color: colors.warningText,
+    },
+    errorBanner: {
+      alignItems: 'center',
+      gap: 8,
+      paddingHorizontal: 16,
+      paddingBottom: 16,
+    },
+    list: {
+      flex: 1,
+    },
+    sectionHeader: {
+      fontSize: 14,
+      fontWeight: '600',
+      backgroundColor: colors.card,
+      color: colors.darkest,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+    },
+    row: {
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.sage,
+    },
+    rowMain: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+    },
+    rowName: {
+      fontSize: 15,
+      flexShrink: 1,
+      paddingRight: 8,
+      color: colors.darkest,
+    },
+    rowAmount: {
+      fontSize: 15,
+      fontWeight: '500',
+      color: colors.darkest,
+    },
+    recurringTag: {
+      fontSize: 11,
+      color: colors.positive,
+      marginTop: 2,
+    },
+    reviewRow: {
+      gap: 6,
+      marginTop: 6,
+      alignItems: 'flex-start',
+    },
+    reviewText: {
+      fontSize: 12,
+      color: colors.reviewWarning,
+    },
+    categoryPicker: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 4,
+      marginTop: 6,
+    },
+    // Added for Budget tab (sub-step 1.4). `budgetRow` is ported verbatim
+    // from the old app/App.js styles object; `budgetScreen` is new - the old
+    // app used a fixed `maxHeight: 280` scroll box (`budgetList`) because
+    // budget status was one collapsible section sharing a screen with
+    // several others. Now that Budget is its own dedicated tab, the whole
+    // screen can just scroll instead of being capped at a small fixed
+    // height.
+    budgetScreen: {
+      flex: 1,
+      paddingHorizontal: 16,
+      paddingTop: 8,
+    },
+    budgetRow: {
+      alignItems: 'center',
+      paddingVertical: 6,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.sage,
+    },
+    // Added for Recurring tab (sub-step 1.5) - ported verbatim from the old
+    // app/App.js styles object. Distinguishes the three recurring-spend
+    // groups (Subscriptions/Recurring bills/Other) within the same
+    // scrolling tab.
+    recurringGroupHeader: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.muted,
+      marginTop: 10,
+      marginBottom: 2,
+    },
+    // Added for the account-menu modal (sub-step 1.7) - ported verbatim from
+    // the old app/App.js styles object.
+    gmailSection: {
+      alignItems: 'center',
+      gap: 8,
+      paddingHorizontal: 24,
+      paddingBottom: 16,
+    },
+    // A flex:1 wrapper carrying the same 72px gesture-bar clearance as
+    // goalScreen, for any screen that pins a final action to the true
+    // bottom via a flex:1 spacer (account-menu's Sign out) without also
+    // wanting goalScreen's goal-specific horizontal padding/top spacing.
+    pinnedFooterScreen: {
+      flex: 1,
+      paddingBottom: 72,
+    },
+    // Added for the account-menu modal (Phase 8 Step 3) - one block per
+    // linked Plaid Item (institution name/status + its own Re-link/
+    // Disconnect buttons), same plain-stacked-Button convention as every
+    // other list in this app rather than a side-by-side row.
+    plaidItemsSection: {
+      gap: 12,
+      paddingHorizontal: 24,
+      paddingBottom: 16,
+    },
+    plaidItemBlock: {
+      gap: 4,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.sage,
+      paddingBottom: 10,
+    },
+    // Added for the Budget-tab Sorrel restyle (2026-08-20). `card` is the
+    // rounded/filled section pattern the mockup uses throughout but that
+    // didn't exist anywhere in this app before this pass (every prior
+    // section here is a flat hairline row or a left-border accent, never a
+    // filled rounded box) - new, not a reuse of an existing key.
+    card: {
+      backgroundColor: colors.card,
+      borderRadius: 14,
+      padding: 16,
+      gap: 8,
+    },
+    cardTitle: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+    // Pill button replacing native <Button> within the affordability flow
+    // only (see PrimaryButton.js) - this app's other screens keep using
+    // plain <Button> deliberately, not refactored as part of this pass.
+    primaryButton: {
+      backgroundColor: colors.darkest,
+      borderRadius: 28,
+      paddingVertical: 14,
+      paddingHorizontal: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 44,
+    },
+    primaryButtonDisabled: {
+      backgroundColor: colors.sage,
+    },
+    primaryButtonText: {
+      color: colors.background,
+      fontSize: 15,
+      fontWeight: '600',
+    },
+    // Chat-bubble pair, originally added for AffordabilityQuery's own single
+    // query/clarification exchange (see pendingContext) - since reused
+    // unchanged by AffordabilityChat.js for a real, growing back-and-forth
+    // (the "AI-narrated responses + conversation memory" follow-up), so this
+    // is no longer "the one turn this flow keeps," just the shared bubble
+    // look both screens draw from.
+    chatBubbleAssistant: {
+      backgroundColor: colors.card,
+      borderRadius: 16,
+      borderTopLeftRadius: 4,
+      padding: 12,
+      maxWidth: '85%',
+      alignSelf: 'flex-start',
+    },
+    chatBubbleAssistantText: {
+      color: colors.darkest,
+      fontSize: 14,
+    },
+    chatBubbleUser: {
+      backgroundColor: colors.darkest,
+      borderRadius: 16,
+      borderTopRightRadius: 4,
+      padding: 12,
+      maxWidth: '85%',
+      alignSelf: 'flex-end',
+    },
+    chatBubbleUserText: {
+      color: colors.background,
+      fontSize: 14,
+    },
+    // Comparison table on the "Add payment vs. wait" screen - deliberately
+    // only 2 rows are ever rendered here (Discretionary spending, Goal
+    // progress), see that screen's own build notes for why the mockup's
+    // other 3 rows were dropped rather than styled.
+    comparisonTableRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      paddingVertical: 8,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.sage,
+    },
+    comparisonTableLabel: {
+      fontSize: 13,
+      color: colors.dark,
+      flexShrink: 1,
+      paddingRight: 8,
+    },
+    comparisonTableValue: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+  });
+}
+
+// Static day-mode styles - kept alongside buildStyles (not replaced) so
+// every file not yet migrated to useTheme() keeps working exactly as
+// before. Remove once the final sweep (theme redesign plan, Step 6)
+// confirms zero remaining imports of this export.
+export const styles = buildStyles(colors);

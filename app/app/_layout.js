@@ -9,6 +9,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import { apiFetch, forceSignOut } from './_lib/api';
 import { SessionContext } from './_lib/session';
+import { ThemeProvider } from './_lib/theme';
 import BiometricLock from './_components/BiometricLock';
 import MfaChallenge from './_components/MfaChallenge';
 import GoalCheckError from './_components/GoalCheckError';
@@ -981,6 +982,13 @@ export default function RootLayout() {
     // actual device, since 20px isn't enough clearance for every device's
     // real gesture-bar height. useSafeAreaInsets() in (tabs)/_layout.js is
     // what actually reads that value now.
+    // ThemeProvider wraps everything (2026-09-11, theme redesign) - same
+    // reasoning as SessionContext: sign-in/BiometricLock/MfaChallenge and
+    // every settings/*.js screen sit outside (tabs)/, so mounting this
+    // inside (tabs)/_layout.js instead (like AppDataContext) would miss
+    // all of them - the exact class of gap that already bit AppDataContext
+    // once (Phase 38 Step 4).
+    <ThemeProvider>
     <SafeAreaProvider>
       <GestureHandlerRootView style={{ flex: 1 }}>
         {goalCheckFailed ? (
@@ -1010,5 +1018,6 @@ export default function RootLayout() {
         )}
       </GestureHandlerRootView>
     </SafeAreaProvider>
+    </ThemeProvider>
   );
 }
