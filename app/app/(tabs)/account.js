@@ -143,11 +143,24 @@ export default function Account() {
     }
   }
 
-  async function addAccount() {
+  // Phase 44 Step 3 (401(k)/retirement account linking): `product` is
+  // optional and only ever `'investments'` when passed - every existing
+  // call site (the plain "ADD ANOTHER ACCOUNT" button) calls this with no
+  // argument, so the request body is completely unchanged for that path
+  // (server/index.js's own `product` handling already treats absent the
+  // same as `undefined`). onSuccess/onExit below are untouched either
+  // way - the server derives which products the new Item actually has
+  // from Plaid's own response, not from anything this client sends.
+  async function addAccount(product) {
     setAddingAccount(true);
     setError(null);
     try {
-      const linkTokenRes = await apiFetch('/link-token', { method: 'POST' });
+      const linkTokenRes = await apiFetch(
+        '/link-token',
+        product
+          ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ product }) }
+          : { method: 'POST' }
+      );
       if (!linkTokenRes.ok) throw new Error('SERVER_ERROR');
       const { link_token } = await linkTokenRes.json();
 
@@ -403,7 +416,23 @@ export default function Account() {
               {addingAccount ? (
                 <ActivityIndicator />
               ) : (
-                <PrimaryButton title="ADD ANOTHER ACCOUNT" onPress={addAccount} />
+                <>
+                  <PrimaryButton title="ADD ANOTHER ACCOUNT" onPress={() => addAccount()} />
+                  {/* Phase 44 Step 3: a secondary, less-prominent action -
+                      most users adding an account mean a regular bank, not
+                      a retirement platform, matching this screen's
+                      existing outline-button precedent for secondary
+                      actions (GET ITEMIZED RECEIPTS, UNLINK EMAIL). */}
+                  <Pressable
+                    style={[accountStyles.outlineButton, accountStyles.outlineButtonFull, accountStyles.retirementButtonSpacing]}
+                    onPress={() => addAccount('investments')}
+                    accessibilityRole="button"
+                    accessibilityLabel="Link a retirement account"
+                  >
+                    <MaterialIcons name="savings" size={16} color={colors.primary} />
+                    <Text style={accountStyles.outlineButtonText}>LINK A RETIREMENT ACCOUNT</Text>
+                  </Pressable>
+                </>
               )}
             </View>
           </View>
@@ -623,6 +652,9 @@ function buildAccountStyles(colors) {
   },
   addAccountSpacing: {
     marginTop: 4,
+  },
+  retirementButtonSpacing: {
+    marginTop: 10,
   },
   iconRow: {
     flexDirection: 'row',

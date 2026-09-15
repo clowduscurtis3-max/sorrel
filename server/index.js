@@ -306,7 +306,7 @@ app.post('/auth/signin-username', async (req, res) => {
 // never trigger Update Mode against another user's Item, no matter what
 // id it sends.
 app.post('/link-token', requireUser, async (req, res) => {
-  const { relink_item_id } = req.body || {};
+  const { relink_item_id, product } = req.body || {};
 
   try {
     if (relink_item_id) {
@@ -364,10 +364,20 @@ app.post('/link-token', requireUser, async (req, res) => {
       return res.json({ link_token: response.data.link_token, mode: 'update' });
     }
 
+    // Phase 44 Step 2 (401(k)/retirement account linking): a second,
+    // explicit ADD flow requesting the Investments product instead of
+    // Transactions - retirement-plan platforms (Vanguard, Fidelity,
+    // Ascensus, etc.) generally don't support Transactions at all, so the
+    // existing transactions-only flow could never have linked one. The
+    // regular flow (`product` absent, the only value that has ever
+    // existed) is completely unchanged. `product` is validated against a
+    // fixed allow-list rather than passed straight through to Plaid - the
+    // request body is client-controlled.
+    const products = product === 'investments' ? ['investments'] : ['transactions'];
     const response = await plaidClient.linkTokenCreate({
       user: { client_user_id: req.userId },
       client_name: 'Sorrel',
-      products: ['transactions'],
+      products,
       country_codes: ['US'],
       language: 'en',
       android_package_name: 'com.curt182.pocketaccountant',
@@ -464,6 +474,16 @@ app.post('/exchange-token', requireUser, async (req, res) => {
       logError('Failed to fetch institution metadata for new Item (non-fatal):', err);
       return null;
     });
+    // Phase 44 Step 2: which Plaid products this Item actually has -
+    // read from Plaid's own Item object (`products`, "a list of products
+    // added to the Item" per Plaid's docs), never trusted from a
+    // client-echoed value, same "re-derive server-side" discipline this
+    // app already applies elsewhere (e.g. accept-realistic-date). Falls
+    // back to the historical default if itemGet itself failed (already
+    // non-fatal above) - matches every Item that existed before this
+    // column did, and a transactions-capable Item is the overwhelmingly
+    // common case regardless.
+    const products = itemMeta?.data?.item?.products?.length ? itemMeta.data.item.products : ['transactions'];
     const institutionId = itemMeta?.data?.item?.institution_id || null;
     let institutionName = null;
     let institutionLogo = null;
@@ -497,6 +517,7 @@ app.post('/exchange-token', requireUser, async (req, res) => {
           access_token: encrypt(access_token),
           cursor: null,
           status: 'active',
+          products,
           institution_id: institutionId,
           institution_name: institutionName,
           institution_logo: institutionLogo,
@@ -1261,7 +1282,7 @@ class NoLinkedAccountError extends Error {}
 async function syncUserData(userId, { skipSync = false } = {}) {
   const { data: items, error } = await supabaseAdmin
     .from('plaid_items')
-    .select('id, access_token, cursor')
+    .select('id, access_token, cursor, products')
     .eq('user_id', userId)
     .eq('status', 'active');
   if (error) throw error;
@@ -1323,9 +1344,19 @@ async function syncUserData(userId, { skipSync = false } = {}) {
       // than sequentially. refreshAccountBalances catches its own failure
       // and never rejects, so it can't affect syncTransactionsLocked via
       // Promise.all.
+      //
+      // Phase 44 Step 2: an Item linked without the Transactions product
+      // (a retirement-plan Item - see `products`, this table's own new
+      // column) has no transactions to sync at all - Plaid's own
+      // `/transactions/sync` would just fail on every call for one,
+      // repeatedly, for something that isn't actually broken.
+      // refreshAccountBalances is product-agnostic (plain `accountsGet`)
+      // and stays unconditional - that's the only sync this kind of Item
+      // actually needs, and it's what feeds its balance into Net Worth.
+      const hasTransactions = (item.products || ['transactions']).includes('transactions');
       try {
         await Promise.all([
-          syncTransactionsLocked(item.id, userId, accessToken, item.cursor),
+          hasTransactions ? syncTransactionsLocked(item.id, userId, accessToken, item.cursor) : Promise.resolve(),
           refreshAccountBalances(userId, item.id, accessToken).catch((err) => {
             logError(`Account balance refresh failed for Item ${item.id} (non-fatal):`, err);
           }),

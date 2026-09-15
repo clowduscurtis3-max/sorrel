@@ -1,0 +1,23 @@
+-- Phase 44 Step 1 (401(k)/retirement account linking). plaid_items has
+-- never tracked which Plaid products an Item was actually linked with -
+-- every Item has always been linked via the one existing flow
+-- (products: ['transactions']), so there's never been a reason to ask.
+-- A retirement-plan Item (Vanguard, Fidelity, Ascensus, etc.) will be
+-- linked via a separate products: ['investments'] flow instead (that
+-- flow doesn't exist yet - Step 2) - the background sync loop
+-- (server/index.js's syncUserData) needs to know which Items actually
+-- have the transactions product before it can stop calling
+-- transactionsSync on ones that don't, which would otherwise fail on
+-- every single sync for a retirement-plan Item.
+--
+-- A plain text[] (not a single-product enum/boolean) matches Plaid's own
+-- `products` concept directly and stays correct even if a future Item is
+-- ever linked with more than one product at once - `products @>
+-- ARRAY['transactions']` is a self-describing check, not a proxy boolean
+-- that could drift from what's actually true.
+--
+-- Every existing row really was linked via the transactions-only flow
+-- (the only one that has ever existed), so backfilling the default onto
+-- them is a real fact being recorded, not a guess.
+alter table plaid_items
+  add column if not exists products text[] not null default array['transactions'];

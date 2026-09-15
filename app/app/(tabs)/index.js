@@ -558,15 +558,42 @@ export default function Home() {
   // and the dedicated institution screen's own header, same
   // depository-only/null-when-nothing convention as computeAccountsSummary
   // itself (server/accounts.js) rather than a second, drifting definition.
+  // Phase 44 follow-up (401(k)/retirement account linking, 2026-09-15,
+  // direct user request): a bank whose only accounts are investment-type
+  // (e.g. a linked Vanguard 401k) previously showed no total at all here
+  // - depository-only was the right scope for "available" (spendable
+  // cash - a 401k balance isn't that, same reasoning the Emergency Fund/
+  // goal account pickers already apply), but the resulting *blank*
+  // total, even though the account's own real balance is right there,
+  // read as a bug rather than a deliberate cash-only figure. Falls back
+  // to an investment-only total under an honest different label ("TOTAL
+  // BALANCE", not "TOTAL AVAILABLE") when there's no depository account
+  // to sum instead - never blends the two together into one ambiguous
+  // number. Returns `{ label, amount }` (was a bare number) - both call
+  // sites below updated.
   function bankTotal(itemId) {
-    const depository = (accounts?.accounts || []).filter(
-      (a) =>
-        a.plaid_item_id === itemId &&
-        a.type === 'depository' &&
-        (a.available_balance != null || a.current_balance != null)
+    const bankAccounts = (accounts?.accounts || []).filter((a) => a.plaid_item_id === itemId);
+    const depository = bankAccounts.filter(
+      (a) => a.type === 'depository' && (a.available_balance != null || a.current_balance != null)
     );
-    if (depository.length === 0) return null;
-    return depository.reduce((sum, a) => sum + (a.available_balance ?? a.current_balance), 0);
+    if (depository.length > 0) {
+      return {
+        label: 'TOTAL AVAILABLE',
+        suffix: 'available',
+        amount: depository.reduce((sum, a) => sum + (a.available_balance ?? a.current_balance), 0),
+      };
+    }
+    const investment = bankAccounts.filter(
+      (a) => a.type === 'investment' && (a.available_balance != null || a.current_balance != null)
+    );
+    if (investment.length > 0) {
+      return {
+        label: 'TOTAL BALANCE',
+        suffix: 'balance',
+        amount: investment.reduce((sum, a) => sum + (a.available_balance ?? a.current_balance), 0),
+      };
+    }
+    return null;
   }
 
   // Found on-device: two real bills from two different banks that happen
@@ -1076,7 +1103,7 @@ export default function Home() {
                   {(i.institution_name || 'Linked bank').toUpperCase()}
                 </Text>
                 <Text style={[homeStyles.accountBalance, textColor && { color: textColor }]}>
-                  {total != null ? `$${formatDecimal(total)}` : '—'}
+                  {total != null ? `$${formatDecimal(total.amount)}` : '—'}
                 </Text>
                 <MaterialIcons name="chevron-right" size={20} color={colors.dark} />
               </Pressable>
@@ -1216,10 +1243,10 @@ export default function Home() {
                   </Text>
                   {total != null && (
                     <>
-                      <Text style={homeStyles.cardEyebrow}>TOTAL AVAILABLE</Text>
+                      <Text style={homeStyles.cardEyebrow}>{total.label}</Text>
                       <Text style={homeStyles.bankTotal}>
-                        ${formatDecimal(total)}
-                        <Text style={homeStyles.bankTotalSuffix}> available</Text>
+                        ${formatDecimal(total.amount)}
+                        <Text style={homeStyles.bankTotalSuffix}> {total.suffix}</Text>
                       </Text>
                     </>
                   )}
