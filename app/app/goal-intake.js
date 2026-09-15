@@ -19,7 +19,7 @@ export default function GoalIntake() {
   // and are themselves theme-reactive - the illustrated backdrop (a
   // "warm, welcome" atmospheric layer this screen used to mount) is gone;
   // styles.container already carries a theme-reactive background.
-  const { colors, styles } = useTheme();
+  const { colors, styles, isNight } = useTheme();
   const intakeStyles = useMemo(() => buildIntakeStyles(colors), [colors]);
   // Phase 42 (multi-goal tracking, 2026-09-08): this screen is only ever
   // reached via the root gate when `goals.length === 0` (see
@@ -70,7 +70,7 @@ export default function GoalIntake() {
           <PrimaryButton title="Save goal" onPress={() => form.save()} />
         )}
       </View>
-      <StatusBar style="auto" />
+      <StatusBar style={isNight ? 'light' : 'dark'} />
     </View>
   );
 }

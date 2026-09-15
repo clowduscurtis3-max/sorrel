@@ -30,6 +30,7 @@ import { describeFundingImpactLine, goalDisplayName } from '../_lib/goalFunding'
 import AffordabilityQuery from '../_components/AffordabilityQuery';
 import PrimaryButton from '../_components/PrimaryButton';
 import BudgetInsightModal from '../_components/BudgetInsightModal';
+import IncomeModal from '../_components/IncomeModal';
 import SorrelWordmark from '../_components/SorrelWordmark';
 
 // Theme redesign (2026-09-11): module-level object literal referencing
@@ -296,6 +297,25 @@ export default function Budget() {
     }
   }
 
+  // Income stat tile (2026-09-14, direct user request) - fetched
+  // independently of budgetStatus (a hiccup here shouldn't block the rest
+  // of the stat row, same reasoning the insight pill's own independent
+  // fetch above already documents). A fetch failure just leaves the tile
+  // showing its own "—" placeholders rather than surfacing a second error
+  // banner for one tile.
+  const [incomeSummary, setIncomeSummary] = useState(null);
+  const [showIncomeDetail, setShowIncomeDetail] = useState(false);
+
+  async function fetchIncomeSummary() {
+    try {
+      const res = await apiFetch('/income/summary');
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      setIncomeSummary(await res.json());
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   // Refetches every time this tab gains focus - the direct route-based
   // equivalent of the old app's "always refetch on toggle-open" comment
   // (budget status is meant to be live, so a stale cached result after new
@@ -307,6 +327,7 @@ export default function Budget() {
       fetchBudgetStatus();
       fetchInsight();
       fetchBudgetSettings();
+      fetchIncomeSummary();
     }, [])
   );
 
@@ -734,6 +755,32 @@ export default function Budget() {
                 )}
               </View>
               <View style={budgetLocalStyles.statDivider} />
+              {/* Income tile (2026-09-14, direct user request) - "expected"
+                  is the same 90-day trailing average already driving budget
+                  generation/goal-funding capacity elsewhere in this app
+                  (server/incomeSummary.js's own header explains why - one
+                  income figure, not a second one that could disagree),
+                  "actual" is real Income-category spend already landed
+                  this period. Mirrors SPENT SO FAR's own "$X / of $Y"
+                  shape rather than inventing a new tile format. */}
+              <Pressable
+                style={budgetLocalStyles.statTile}
+                onPress={() => setShowIncomeDetail(true)}
+                accessibilityRole="button"
+                accessibilityLabel="View what's counted as income"
+              >
+                <MaterialIcons name="payments" size={18} color={colors.dark} />
+                <Text style={budgetLocalStyles.statLabel}>INCOME</Text>
+                <Text style={budgetLocalStyles.statValue}>
+                  {incomeSummary ? `$${formatDecimal(incomeSummary.actual_income_this_period)}` : '—'}
+                </Text>
+                {incomeSummary && (
+                  <Text style={budgetLocalStyles.statSub}>
+                    of ${formatDecimal(incomeSummary.expected_monthly_income)} expected
+                  </Text>
+                )}
+              </Pressable>
+              <View style={budgetLocalStyles.statDivider} />
               <View style={budgetLocalStyles.statTile}>
                 <MaterialIcons name="show-chart" size={18} color={colors.dark} />
                 <Text style={budgetLocalStyles.statLabel}>PROJECTED SPEND</Text>
@@ -1040,7 +1087,12 @@ export default function Budget() {
         insight={insight}
         onBudgetChanged={refreshAfterBudgetChange}
       />
-      <StatusBar style="auto" />
+      <IncomeModal
+        visible={showIncomeDetail}
+        onClose={() => setShowIncomeDetail(false)}
+        incomeSummary={incomeSummary}
+      />
+      <StatusBar style={isNight ? 'light' : 'dark'} />
     </View>
   );
 }

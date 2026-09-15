@@ -1604,6 +1604,42 @@ export default function Goal() {
                       </Text>
                     </View>
                   )}
+                  {/* Real gap found via direct user report, 2026-09-14:
+                      "Sorrel's Take" above states the raw monthly amount
+                      needed to hit the stated date, with zero mention of
+                      whether that's actually achievable given real budget
+                      capacity and other goals - the ONLY place that ever
+                      showed was a note on the main goal-LIST card, which
+                      this detail view (the natural place someone checks
+                      "am I on track?") never duplicated. Same
+                      allocationFor/describeRealisticDateInsight already
+                      used there - reused, not recomputed. */}
+                  {(() => {
+                    const allocation = allocationFor(viewingGoal.id);
+                    const insight = describeRealisticDateInsight(allocation, goalDisplayName(viewingGoal.goal_type, viewingGoal.notes));
+                    if (!insight) return null;
+                    return (
+                      <View style={goalStyles.fundingInsightRow}>
+                        <Text style={goalStyles.fundingInsightText}>{insight}</Text>
+                        {allocation?.realistic_date && (
+                          acceptingRealisticDateFor === viewingGoal.id ? (
+                            <ActivityIndicator style={{ marginTop: 6 }} size="small" />
+                          ) : (
+                            <Pressable
+                              onPress={() => acceptRealisticDate(viewingGoal.id)}
+                              accessibilityRole="button"
+                              accessibilityLabel="Use this realistic date as the new target date"
+                            >
+                              <Text style={goalStyles.fundingInsightLink}>Use this date</Text>
+                            </Pressable>
+                          )
+                        )}
+                        {acceptRealisticDateError && acceptingRealisticDateFor === null && (
+                          <Text style={styles.errorText}>{acceptRealisticDateError}</Text>
+                        )}
+                      </View>
+                    );
+                  })()}
                 </View>
               </View>
             )}
@@ -1856,7 +1892,46 @@ export default function Goal() {
             <View style={goalStyles.titleBlock}>
               <Text style={goalStyles.title}>Your Goals</Text>
               <Text style={goalStyles.subtitle}>Build the future you want.</Text>
+              {/* Priority-order disclaimer, added 2026-09-14 per direct
+                  user request - goal-driven budget funding (Phase 43)
+                  funds deadline-having goals in this exact order when
+                  realistic capacity can't cover all of them, so the order
+                  itself is a real financial decision, not cosmetic - the
+                  user needs to know both that it matters and how to
+                  change it. Only shown with 2+ goals - order has nothing
+                  to decide between with just one. */}
+              {goalsProgress && goalsProgress.length > 1 && (
+                <Text style={[styles.smallText, goalStyles.priorityDisclaimer]}>
+                  {editingGoalOrder
+                    ? 'Drag to reorder, then tap Done to save.'
+                    : 'Goals are funded in this order, top to bottom, when there isn’t enough room for all of them. Tap and hold a goal to reorder.'}
+                </Text>
+              )}
             </View>
+
+            {/* Real bug found via on-device tap-test, 2026-09-14: entering
+                edit mode (long-press) had no reliable way out - each goal
+                card's own Pressable (onPress={openGoal}) sits inside
+                DraggableCardList's GestureDetector, and nothing here
+                gated it on `editingGoalOrder`, so a tap meant to exit
+                edit mode could instead be swallowed by (or navigate via)
+                the card's own tap handler, leaving the cards wiggling
+                indefinitely with no way to commit the new order short of
+                leaving the screen. Fixed two ways: the card's onPress is
+                now disabled while editing (below), and this explicit
+                "Done" link give a way out that doesn't depend on the
+                gesture-vs-Pressable race resolving correctly at all. */}
+            {editingGoalOrder && (
+              <View style={[goalStyles.cardMargin, goalStyles.inlineEditorActions]}>
+                <Pressable
+                  onPress={() => setEditingGoalOrder(false)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Done reordering goals"
+                >
+                  <Text style={goalStyles.inlineEditorLinkDone}>Done</Text>
+                </Pressable>
+              </View>
+            )}
 
             {/* Phase 42 (multi-goal tracking, 2026-09-08): the single
                 "Primary Goal" card is now a list of compact goal cards -
@@ -1899,7 +1974,8 @@ export default function Goal() {
                       node: (
                         <Pressable
                           style={[styles.card, goalStyles.cardMargin]}
-                          onPress={() => openGoal(g.id)}
+                          onPress={() => !editingGoalOrder && openGoal(g.id)}
+                          disabled={editingGoalOrder}
                           accessibilityRole="button"
                           accessibilityLabel={`View ${goalDisplayName(g.goal_type, g.notes)}`}
                         >
@@ -2388,7 +2464,7 @@ export default function Goal() {
           </ScrollView>
         </>
       )}
-      <StatusBar style="auto" />
+      <StatusBar style={isNight ? 'light' : 'dark'} />
     </View>
   );
 }
@@ -2640,6 +2716,9 @@ function buildGoalStyles(colors) {
   subtitle: {
     fontSize: 13,
     color: colors.dark,
+  },
+  priorityDisclaimer: {
+    marginTop: 8,
   },
   cardMargin: {
     marginHorizontal: 16,

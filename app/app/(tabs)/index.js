@@ -39,6 +39,7 @@ import { HOME_CARD_GROUP_BEFORE_STATS, HOME_CARD_GROUP_AFTER_STATS, orderCardGro
 import ProjectedSpendModal from '../_components/ProjectedSpendModal';
 import MonthlyReviewModal from '../_components/MonthlyReviewModal';
 import SpentSoFarModal from '../_components/SpentSoFarModal';
+import IncomeModal from '../_components/IncomeModal';
 
 const STATUS_ICON = { ok: 'check-circle', warning: 'warning', severe: 'error' };
 
@@ -243,6 +244,16 @@ export default function Home() {
   // inside AppDataProvider's tree, sidesteps that entire bug class - there's
   // no new route for the root gate or a cold app-launch to ever resolve to.
   const [viewingItemId, setViewingItemId] = useState(null);
+  // Read inside the 30s poll's interval callback below, which is set up
+  // once per focus (empty-dep useCallback) and would otherwise only ever
+  // see whatever viewingItemId was at the moment the interval started -
+  // a plain closure over the state itself would go stale the instant the
+  // user opens a bank's detail screen without Home itself losing focus
+  // (same screen, just a different internal render branch).
+  const viewingItemIdRef = useRef(viewingItemId);
+  useEffect(() => {
+    viewingItemIdRef.current = viewingItemId;
+  }, [viewingItemId]);
 
   // A plain <Modal>, not a route or a local-state screen swap - this is
   // purely explanatory content with no need for full-screen real estate
@@ -252,6 +263,7 @@ export default function Home() {
   const [showProjectedSpendDetail, setShowProjectedSpendDetail] = useState(false);
   const [showMonthlyReviewDetail, setShowMonthlyReviewDetail] = useState(false);
   const [showSpentSoFarDetail, setShowSpentSoFarDetail] = useState(false);
+  const [showIncomeDetail, setShowIncomeDetail] = useState(false);
 
   // Theme redesign (2026-09-11): the illustrated backdrop (and the
   // scrollY/onScroll/onBackdropTextColor machinery that existed only to
@@ -370,6 +382,21 @@ export default function Home() {
     }
   }
 
+  // Income stat tile (2026-09-14, direct user request) - same tile/data
+  // as the Budget tab's own (server/incomeSummary.js), fetched
+  // independently so a hiccup here can't block the rest of Home.
+  const [incomeSummary, setIncomeSummary] = useState(null);
+
+  async function fetchIncomeSummary() {
+    try {
+      const res = await apiFetch('/income/summary');
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      setIncomeSummary(await res.json());
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   // sub-step 1.7: switched from a mount-only effect to refetch-on-focus
   // (same pattern Budget/Recurring already use) - needed so returning to
   // Home from the account menu after a re-link picks up fresh data.
@@ -380,6 +407,7 @@ export default function Home() {
     useCallback(() => {
       fetchTransactions();
       fetchHomeSettings();
+      fetchIncomeSummary();
     }, [])
   );
 
@@ -432,7 +460,23 @@ export default function Home() {
   useFocusEffect(
     useCallback(() => {
       const interval = setInterval(() => {
-        if (AppState.currentState === 'active') {
+        // Real bug found live 2026-09-15: this poll was silently replacing
+        // the whole `transactions` array (a brand new reference every 30s,
+        // whether or not anything actually changed) even while the user
+        // was scrolled deep into a specific bank's own SectionList
+        // (viewingItemId !== null) - Android's VirtualizedList doesn't
+        // reliably preserve scroll position through a full data-array
+        // swap arriving mid-scroll, especially right at a section
+        // boundary, and the reported symptom (rapid, violent auto-
+        // scrolling) matches that failure mode. The poll's whole purpose
+        // - catching a new transaction while glancing at Home - doesn't
+        // even apply while looking at one specific bank's history anyway,
+        // so it's simplest and safest to just pause it here rather than
+        // try to preserve scroll position through every possible refresh.
+        // Resumes automatically the moment the user backs out to the
+        // Home overview (viewingItemIdRef reflects that immediately, no
+        // separate resume logic needed).
+        if (AppState.currentState === 'active' && viewingItemIdRef.current === null) {
           fetchTransactions({ silent: true, suppressErrorBanner: true });
         }
       }, 30000);
@@ -1296,6 +1340,27 @@ export default function Home() {
               <Text style={homeStyles.statSub}>of ${formatWhole(spendStats.budgeted)}</Text>
             </Pressable>
             <View style={homeStyles.statDivider} />
+            {/* Income tile (2026-09-14, direct user request) - same data/
+                shape as the Budget tab's own equivalent tile
+                (server/incomeSummary.js). */}
+            <Pressable
+              style={homeStyles.statTile}
+              onPress={() => setShowIncomeDetail(true)}
+              accessibilityRole="button"
+              accessibilityLabel="View what's counted as income"
+            >
+              <MaterialIcons name="payments" size={18} color={colors.dark} />
+              <Text style={homeStyles.statLabel}>INCOME</Text>
+              <Text style={homeStyles.statValue}>
+                {incomeSummary ? `$${formatWhole(incomeSummary.actual_income_this_period)}` : '—'}
+              </Text>
+              {incomeSummary && (
+                <Text style={homeStyles.statSub}>
+                  of ${formatWhole(incomeSummary.expected_monthly_income)} expected
+                </Text>
+              )}
+            </Pressable>
+            <View style={homeStyles.statDivider} />
             <Pressable
               style={homeStyles.statTile}
               onPress={() => setShowProjectedSpendDetail(true)}
@@ -1402,7 +1467,13 @@ export default function Home() {
         monthlyReview={monthlyReview}
       />
 
-      <StatusBar style="auto" />
+      <IncomeModal
+        visible={showIncomeDetail}
+        onClose={() => setShowIncomeDetail(false)}
+        incomeSummary={incomeSummary}
+      />
+
+      <StatusBar style={isNight ? 'light' : 'dark'} />
     </View>
   );
 }

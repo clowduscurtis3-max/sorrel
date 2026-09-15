@@ -157,7 +157,7 @@ const INTERVAL_FILTERS = [
 // threading colors/recurringStyles down through props at every one of
 // their several call sites.
 function GlanceTile({ icon, label, value, sub, isLast, onPress, accessibilityLabel }) {
-  const { colors } = useTheme();
+  const { colors, isNight } = useTheme();
   const recurringStyles = useMemo(() => buildRecurringStyles(colors), [colors]);
   return (
     <Pressable
@@ -535,7 +535,7 @@ export default function Recurring() {
         )}
       </ScrollView>
 
-      <StatusBar style="auto" />
+      <StatusBar style={isNight ? 'light' : 'dark'} />
     </View>
   );
 }

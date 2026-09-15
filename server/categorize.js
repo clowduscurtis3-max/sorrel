@@ -269,6 +269,35 @@ async function categorizeAmbiguous(transactions) {
   }
 }
 
+// Pure, directly testable. Real bug found live 2026-09-14: a negative
+// amount (Plaid's own sign convention for money coming INTO the account)
+// can never actually be spend, no matter what category an AI guess lands
+// on - this is knowable from the sign alone, not something that should
+// ever depend on Claude reliably inferring it from a bare person's name
+// with zero merchant/business identity (exactly what Plaid itself returns
+// as `OTHER`/`OTHER_OTHER` at LOW confidence for an unrecognized P2P
+// payment - Zelle, Cash App, Venmo, etc. - with no business entity to
+// identify at all). Confirmed live: several such incoming payments had
+// been guessed into "Other" by the AI, silently showing as spend against
+// a $0-budgeted category. Only called for the AI-guessed branch - a
+// Plaid-confident category is deliberately left untouched by the caller,
+// since a refund is also a negative amount and *should* net back against
+// its own real spend category (e.g. a $50 purchase partially refunded $10
+// correctly nets to $40 actual spend - forcing every credit out of spend
+// categories regardless of source would silently break that).
+// `SPEND_CATEGORIES` (not `FLOW_CATEGORIES`) is the exact "did this land
+// somewhere it shouldn't" check - Income/Transfers were already safe.
+function guardAiCategoryAgainstAmountSign(category, reasoning, confidence, amount) {
+  if (amount >= 0 || !SPEND_CATEGORIES.includes(category)) {
+    return { category, reasoning, confidence };
+  }
+  return {
+    category: 'Transfers',
+    reasoning: 'A negative amount means money coming into your account, not a purchase - counted as a transfer, not spend.',
+    confidence: 'high',
+  };
+}
+
 // Checks the user's own past corrections first (strongest signal - it's
 // literally what they said this merchant is), then Plaid's own category,
 // and only calls the AI for whatever's left ambiguous, uncategorized, or
@@ -320,6 +349,16 @@ async function categorizeTransactions(transactions, userId) {
       confidence = 'low';
     }
 
+    // Deterministic guardrail (see guardAiCategoryAgainstAmountSign's own
+    // header for the full "why" and its real bug this fixes) - scoped to
+    // ONLY the AI-guessed branch above, never `direct` (a Plaid-confident
+    // category, where a refund's negative amount must keep netting
+    // against its own real spend category).
+    if (!direct) {
+      const guarded = guardAiCategoryAgainstAmountSign(category, reasoning, confidence, t.amount);
+      ({ category, reasoning, confidence } = guarded);
+    }
+
     return {
       ...t,
       category,
@@ -345,4 +384,5 @@ module.exports = {
   debtTypeFromPlaid,
   DEBT_TYPE_LABELS,
   plaidCategorization,
+  guardAiCategoryAgainstAmountSign,
 };

@@ -1,13 +1,19 @@
 import { useCallback, useMemo, useState } from 'react';
-import { View, Text, Pressable, Share, ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, Pressable, Switch, Share, ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
 import { apiFetch, apiErrorMessage, patchSettings } from '../_lib/api';
 import { useTheme } from '../_lib/theme';
+import { readableTextColor } from '../_lib/styles';
 import SettingsScreenChrome from '../_components/SettingsScreenChrome';
 import SettingsFetchGate from '../_components/SettingsFetchGate';
 import DraggableCardList from '../_components/DraggableCardList';
+
+const THEME_OPTIONS = [
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
+];
 
 const SECTION = 'general_settings';
 
@@ -43,8 +49,9 @@ const TAB_ICONS = {
 
 // Theme redesign (2026-09-11): colors/styles now come from useTheme().
 export default function GeneralSettings() {
-  const { colors, styles } = useTheme();
+  const { colors, styles, isNight, themeMode, setThemeMode } = useTheme();
   const generalSettingsStyles = useMemo(() => buildGeneralSettingsStyles(colors), [colors]);
+  const selectedFillTextColor = useMemo(() => readableTextColor(colors.primary, colors), [colors]);
   const router = useRouter();
   const [settings, setSettings] = useState(null);
   const [error, setError] = useState(null);
@@ -150,6 +157,60 @@ export default function GeneralSettings() {
       <SettingsFetchGate loaded={settings !== null} error={error} onRetry={fetchSettings}>
         <ScrollView style={generalSettingsStyles.bodyScroll} contentContainerStyle={generalSettingsStyles.body}>
           {error && <Text style={styles.errorText}>{error}</Text>}
+
+          {/* Appearance override (2026-09-13): a plain on-device preference
+              (themePreference.js, AsyncStorage via useTheme()'s ThemeProvider)
+              on top of the default Auto day/night clock switch (8am-8pm
+              light, 8pm-8am dark). Not part of general_settings/GET-PATCH
+              /settings - it has to work before login too (the sign-in
+              screen is themed), so it can't depend on an authenticated
+              fetch the way every other card on this screen does. */}
+          <View style={[styles.card, generalSettingsStyles.card]}>
+            <Text style={styles.cardTitle}>Appearance</Text>
+            <View style={generalSettingsStyles.toggleRow}>
+              <View style={generalSettingsStyles.toggleTextCol}>
+                <Text style={generalSettingsStyles.toggleLabel}>Automatic</Text>
+                <Text style={[styles.smallText, generalSettingsStyles.description]}>
+                  Switches with your device's clock - light 8am-8pm, dark
+                  8pm-8am.
+                </Text>
+              </View>
+              <Switch
+                value={themeMode === 'auto'}
+                onValueChange={(v) => setThemeMode(v ? 'auto' : isNight ? 'dark' : 'light')}
+                trackColor={{ false: colors.sage, true: colors.primary }}
+              />
+            </View>
+            {themeMode !== 'auto' && (
+              <View style={generalSettingsStyles.typeToggleRow}>
+                {THEME_OPTIONS.map((opt) => {
+                  const selected = themeMode === opt.value;
+                  return (
+                    <Pressable
+                      key={opt.value}
+                      style={[
+                        generalSettingsStyles.typeToggleOption,
+                        { borderColor: selected ? selectedFillTextColor : colors.darkest },
+                        selected && { backgroundColor: colors.primary },
+                      ]}
+                      onPress={() => setThemeMode(opt.value)}
+                      accessibilityRole="radio"
+                      accessibilityState={{ checked: selected }}
+                    >
+                      <Text
+                        style={[
+                          generalSettingsStyles.typeToggleText,
+                          { color: selected ? selectedFillTextColor : colors.darkest },
+                        ]}
+                      >
+                        {opt.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+          </View>
 
           <View style={[styles.card, generalSettingsStyles.card]}>
             <Text style={styles.cardTitle}>Tabs</Text>
@@ -280,6 +341,39 @@ function buildGeneralSettingsStyles(colors) {
   },
   description: {
     textAlign: 'left',
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  toggleTextCol: {
+    flex: 1,
+    gap: 2,
+  },
+  toggleLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.darkest,
+  },
+  typeToggleRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
+  },
+  typeToggleOption: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+  },
+  typeToggleText: {
+    fontSize: 14,
+    fontWeight: '700',
   },
   dragArea: {
     marginTop: 4,

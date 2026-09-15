@@ -43,7 +43,7 @@ export default function SignIn() {
   // motion) - now brought into the day/night switch too, since there's no
   // more motion to avoid once the backdrop is gone app-wide, just a flat
   // color choice (confirmed directly with the user).
-  const { colors } = useTheme();
+  const { colors, isNight } = useTheme();
   const styles = useMemo(() => buildStyles(colors), [colors]);
   const [view, setView] = useState('signin'); // 'signin' | 'create-account' | 'biometric-prompt'
   const [username, setUsername] = useState('');
@@ -274,7 +274,7 @@ export default function SignIn() {
         </View>
       )}
 
-      <StatusBar style="auto" />
+      <StatusBar style={isNight ? 'light' : 'dark'} />
     </View>
   );
 }

@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { buildColors, buildStyles } from './styles';
+import { getThemeMode, setThemeMode as persistThemeMode } from './themePreference';
 
 // Theme redesign (2026-09-11): the reactive day/night switch replacing
 // the old illustrated backdrop's own isNightBackdrop()/backdropPeriod()
@@ -21,28 +22,50 @@ export function isNightNow(now = new Date()) {
 const ThemeContext = createContext(null);
 
 export function ThemeProvider({ children }) {
-  const [isNight, setIsNight] = useState(() => isNightNow());
-
-  // Live-update mechanism: a plain useState computed once at mount would
-  // miss a session left open straight through the 8am/8pm boundary (a
-  // real scenario for a finance app someone might leave open while
-  // reviewing a budget) - nothing would ever re-fire while foregrounded.
-  // A 60s interval is negligible cost (one Date() + comparison per
-  // minute) and correctly covers both that case and "resumed after
-  // background" (the interval catches up within 60s either way), matching
-  // this feature's own stated "no need to get precise" precision bar - no
-  // need for a second, redundant AppState listener alongside it.
+  // The clock's own idea of night, always kept up to date regardless of
+  // `themeMode` - cheap (one Date() + comparison per minute) and means
+  // switching back to "Auto" from a manual override never shows a stale
+  // reading while whoever changed it waits for the next tick.
+  const [clockIsNight, setClockIsNight] = useState(() => isNightNow());
   useEffect(() => {
-    const id = setInterval(() => setIsNight(isNightNow()), 60000);
+    const id = setInterval(() => setClockIsNight(isNightNow()), 60000);
     return () => clearInterval(id);
   }, []);
+
+  // Manual override (2026-09-13 follow-up to the theme redesign): 'auto'
+  // (default, defers to the clock above), 'light', or 'dark' - a plain
+  // on-device preference (themePreference.js, AsyncStorage), readable
+  // before any network call resolves since this provider wraps the whole
+  // app including the pre-auth sign-in screen. Starts at 'auto' (matching
+  // getThemeMode's own default) until the real stored value loads, so
+  // there's no flash of the wrong theme while it's read.
+  const [themeMode, setThemeModeState] = useState('auto');
+  useEffect(() => {
+    let cancelled = false;
+    getThemeMode().then((mode) => {
+      if (!cancelled) setThemeModeState(mode);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const setThemeMode = useCallback((mode) => {
+    setThemeModeState(mode); // optimistic - the Settings toggle should feel instant
+    persistThemeMode(mode);
+  }, []);
+
+  const isNight = themeMode === 'dark' ? true : themeMode === 'light' ? false : clockIsNight;
 
   const colors = useMemo(() => buildColors(isNight), [isNight]);
   // The shared _lib/styles.js `styles` object is built once here and
   // handed out via context - consuming screens read it directly rather
   // than each rebuilding their own copy of it.
   const styles = useMemo(() => buildStyles(colors), [colors]);
-  const value = useMemo(() => ({ isNight, colors, styles }), [isNight, colors, styles]);
+  const value = useMemo(
+    () => ({ isNight, colors, styles, themeMode, setThemeMode }),
+    [isNight, colors, styles, themeMode, setThemeMode]
+  );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

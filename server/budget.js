@@ -20,6 +20,19 @@ function round2(n) {
 // target - if flooring pushes the rescaled total back over target, that's
 // the honest, surfaced outcome (goal funding legitimately comes up
 // short), never silently forced to match anyway.
+//
+// Also enforced as a HARD CEILING (a category's own real average, never
+// negative - matching goalFunding.js's own clamp for the identical
+// net-refund case): real bug caught by code review 2026-09-13 - a plain
+// uniform scale-up with no ceiling could inflate one badly-under-proposed
+// category to several multiples of its real spending pattern (e.g. Claude
+// proposes $10 for a category averaging $100, a 4.5x scale-up pushes it to
+// $405 with nothing to stop it). `discretionaryTarget` is always <= the
+// sum of every category's own average (generateBudget's own construction),
+// so the sum of ceilings can never be lower than target - the ceiling
+// doesn't create a new "can't reach target" case, it just decides which
+// category absorbs the shortfall when this uniform-scale approach can't
+// hit target exactly, same honest-shortfall spirit as the floor above.
 function rescaleDiscretionaryRows({ rows, discretionaryCategories, target, averages, floorRatio = DISCRETIONARY_FLOOR_RATIO }) {
   const discretionaryRows = rows.filter((r) => discretionaryCategories.includes(r.category));
   if (discretionaryRows.length === 0) return;
@@ -27,21 +40,33 @@ function rescaleDiscretionaryRows({ rows, discretionaryCategories, target, avera
   const actualTotal = round2(discretionaryRows.reduce((sum, r) => sum + r.budgeted_amount, 0));
   if (Math.abs(actualTotal - target) <= 0.01) return;
 
+  const clampAndNote = (r, rawAmount) => {
+    const avg = Math.max(0, averages[r.category] || 0);
+    const floor = round2(avg * floorRatio);
+    const clamped = Math.min(avg, Math.max(floor, round2(rawAmount)));
+    if (Math.abs(clamped - r.budgeted_amount) > 0.01) {
+      r.budgeted_amount = clamped;
+      // Keep the persisted reasoning honest about the persisted number -
+      // real bug caught by code review 2026-09-13: without this, Claude's
+      // own reasoning text (e.g. "keeping this near $0 frees up room for
+      // your goal") could directly contradict a since-rescaled amount like
+      // $157.50, since the rescale only ever touched budgeted_amount.
+      const note = `Adjusted to $${clamped.toFixed(2)} to hit this month's real goal-funding target.`;
+      r.reasoning = r.reasoning ? `${r.reasoning} ${note}` : note;
+    } else {
+      r.budgeted_amount = clamped;
+    }
+  };
+
   if (actualTotal > 0) {
     const scale = target / actualTotal;
-    for (const r of discretionaryRows) {
-      const floor = round2((averages[r.category] || 0) * floorRatio);
-      r.budgeted_amount = Math.max(floor, round2(r.budgeted_amount * scale));
-    }
+    for (const r of discretionaryRows) clampAndNote(r, r.budgeted_amount * scale);
   } else {
     // Claude proposed $0 across every discretionary category - no
     // proportion to scale from, so split the target evenly instead
-    // (still respecting each category's own floor).
-    const evenShare = round2(target / discretionaryRows.length);
-    for (const r of discretionaryRows) {
-      const floor = round2((averages[r.category] || 0) * floorRatio);
-      r.budgeted_amount = Math.max(floor, evenShare);
-    }
+    // (still respecting each category's own floor/ceiling).
+    const evenShare = target / discretionaryRows.length;
+    for (const r of discretionaryRows) clampAndNote(r, evenShare);
   }
 }
 
@@ -195,16 +220,29 @@ async function generateBudget(userId, target = {}) {
   // fetch (needs account balances/priority order this function's own
   // `goals` query above doesn't have) - a second, small set of queries,
   // not a duplicated implementation.
+  //
+  // Deliberately SKIPPED on the historical backfill path (`target.period_start`
+  // set - see backfillBudgetHistory below) - real bug caught by code review
+  // 2026-09-13: getGoalFundingPlan has no anchor concept at all, so it always
+  // reads TODAY's account balances, goals, and settings regardless of which
+  // past month is being generated. Every backfilled month would have silently
+  // shared one identical, present-day-derived funding target - including a
+  // goal that didn't even exist yet shaping a "budget" for a month before it
+  // was created. There's no real historical account-balance data to compute
+  // a genuine past funding plan from anyway (no snapshot history is read
+  // anywhere yet), so a backfilled month falls back to the original
+  // target/timeframe heuristic below instead of fabricating one.
+  const isBackfill = Boolean(target.period_start);
   const discretionaryCategoriesToGenerate = DISCRETIONARY_CATEGORIES.filter((c) => categoriesToGenerate.includes(c));
   const discretionaryAverageTotal = discretionaryCategoriesToGenerate.reduce(
     (sum, c) => sum + Math.max(0, averages[c] || 0),
     0
   );
   const discretionaryFloorTotal = round2(discretionaryAverageTotal * DISCRETIONARY_FLOOR_RATIO);
-  const fundingPlan = await getGoalFundingPlan(userId);
-  const totalGoalFundingNeeded = round2(
-    fundingPlan.allocations.reduce((sum, a) => sum + a.funded_monthly_amount, 0)
-  );
+  const fundingPlan = isBackfill ? null : await getGoalFundingPlan(userId);
+  const totalGoalFundingNeeded = fundingPlan
+    ? round2(fundingPlan.allocations.reduce((sum, a) => sum + a.funded_monthly_amount, 0))
+    : 0;
   // Clamped defensively - by construction this should already never dip
   // below the floor (getGoalFundingPlan's own capacity computation
   // already respects it), but a hard target handed to an AI prompt
@@ -213,7 +251,7 @@ async function generateBudget(userId, target = {}) {
     discretionaryFloorTotal,
     round2(discretionaryAverageTotal - totalGoalFundingNeeded)
   );
-  const hasGoalFunding = discretionaryCategoriesToGenerate.length > 0 && totalGoalFundingNeeded > 0.01;
+  const hasGoalFunding = !isBackfill && discretionaryCategoriesToGenerate.length > 0 && totalGoalFundingNeeded > 0.01;
 
   const goalFundingInstruction = hasGoalFunding
     ? `Across your active goals, the realistic amount to free up in your ` +

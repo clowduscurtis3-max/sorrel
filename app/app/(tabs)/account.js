@@ -59,7 +59,7 @@ export default function Account() {
   // and are themselves theme-reactive - the illustrated backdrop (and the
   // scrollY/onScroll/onBackdropTextColor machinery that existed only to
   // feed it) is gone from this screen entirely.
-  const { colors, styles } = useTheme();
+  const { colors, styles, isNight } = useTheme();
   const accountStyles = useMemo(() => buildAccountStyles(colors), [colors]);
   const router = useRouter();
   const { session } = useSessionContext();
@@ -478,7 +478,7 @@ export default function Account() {
         </View>
       </ScrollView>
 
-      <StatusBar style="auto" />
+      <StatusBar style={isNight ? 'light' : 'dark'} />
     </View>
   );
 }

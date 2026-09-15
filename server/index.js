@@ -45,6 +45,7 @@ const { recomputeOverspendAlerts } = require('./alerts');
 const { getGoalsProgress, getGoalBalanceProgressById, monthsBetween } = require('./goalProgress');
 const { getGoalFundingPlan, computeBudgetEditFundingImpact } = require('./goalFunding');
 const { validateOwnedAccountIds } = require('./accountOwnership');
+const { getIncomeSummary } = require('./incomeSummary');
 const { getSubscriptionAudit } = require('./subscriptionAudit');
 const { refreshAccountBalances, getAccountsSummary } = require('./accounts');
 const {
@@ -1906,6 +1907,23 @@ app.get('/budget/status', requireUser, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load budget status' });
+  }
+});
+
+// New Budget-tab stat tile (2026-09-14, direct user request): expected
+// vs. actual income for the current month, next to the existing Total
+// Budget/Spent So Far/Projected Spend/Days Left tiles. See
+// server/incomeSummary.js's own header for why "expected" deliberately
+// reuses the same income figure already driving budget generation and
+// goal-funding capacity, rather than a second, independently-computed
+// estimate.
+app.get('/income/summary', requireUser, async (req, res) => {
+  try {
+    const summary = await getIncomeSummary(req.userId);
+    res.json(summary);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load income summary' });
   }
 });
 

@@ -3,7 +3,12 @@ require('./setupEnv');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { plaidCategorization, SPEND_CATEGORIES, ESSENTIAL_CATEGORIES } = require('../categorize');
+const {
+  plaidCategorization,
+  SPEND_CATEGORIES,
+  ESSENTIAL_CATEGORIES,
+  guardAiCategoryAgainstAmountSign,
+} = require('../categorize');
 
 test('plaidCategorization splits gas out from the rest of Transportation', () => {
   const gas = plaidCategorization({
@@ -83,4 +88,33 @@ test('plaidCategorization still treats every other loan payment as a real bill',
 test('Gas is a real spend category and is treated as a necessity', () => {
   assert.ok(SPEND_CATEGORIES.includes('Gas'));
   assert.ok(ESSENTIAL_CATEGORIES.includes('Gas'));
+});
+
+test('guardAiCategoryAgainstAmountSign reroutes a negative-amount AI guess out of any spend category', () => {
+  // The exact real scenario found live 2026-09-14: an unrecognized
+  // incoming P2P payment (a person's name, no merchant identity - Plaid
+  // itself returns OTHER/OTHER_OTHER at LOW confidence for these) had
+  // been AI-guessed into "Other", silently counting as spend.
+  const result = guardAiCategoryAgainstAmountSign('Other', 'Person name, unclear transaction purpose', 'low', -50);
+  assert.equal(result.category, 'Transfers');
+  assert.equal(result.confidence, 'high');
+});
+
+test('guardAiCategoryAgainstAmountSign leaves a positive-amount (real spend) category untouched', () => {
+  const result = guardAiCategoryAgainstAmountSign('Shopping', 'Looks like a retail purchase', 'medium', 42.5);
+  assert.deepEqual(result, { category: 'Shopping', reasoning: 'Looks like a retail purchase', confidence: 'medium' });
+});
+
+test('guardAiCategoryAgainstAmountSign leaves Income/Transfers untouched regardless of sign', () => {
+  // Already safe either way - SPEND_CATEGORIES is the only thing being
+  // guarded against, not FLOW_CATEGORIES.
+  const income = guardAiCategoryAgainstAmountSign('Income', 'A paycheck', 'high', -1200);
+  assert.equal(income.category, 'Income');
+  const transfers = guardAiCategoryAgainstAmountSign('Transfers', 'Moved between accounts', 'high', 500);
+  assert.equal(transfers.category, 'Transfers');
+});
+
+test('guardAiCategoryAgainstAmountSign never touches a category outside SPEND_CATEGORIES at all', () => {
+  const result = guardAiCategoryAgainstAmountSign('Uncategorized', 'left for review', 'low', -12);
+  assert.equal(result.category, 'Uncategorized');
 });

@@ -371,6 +371,61 @@ async function detectRecurringTransactions(userId) {
     taggedCount += transactionIds.length;
   }
 
+  // Retroactive category/debt_type correction (real bug found via live
+  // tap-testing, 2026-09-14): an override's `override_category`/
+  // `override_debt_type` only ever corrected the DISPLAY row above
+  // (applyOverrides -> recurring_series) - the real underlying
+  // transactions backing this series kept whatever category/debt_type
+  // they were auto-assigned at sync time, so manually correcting a
+  // recurring bill here (e.g. a mortgage Plaid/Claude had mis-labeled
+  // "Transfers") silently never counted toward that category's budget
+  // averages/actuals, even though the Recurring tab itself looked fixed.
+  // Mirrors applyMerchantCategoryRetroactively's own spirit (a manual
+  // correction propagates to real spend data) but scoped to THIS
+  // series' own backing transaction ids, not by merchant name broadly -
+  // two different series for the same merchant (different account/
+  // amount cluster) must never share one correction. Runs every sync
+  // (not just the moment the override is set), so a newly-synced future
+  // occurrence of the same bill inherits the correction automatically.
+  const overridesByKey = new Map(
+    (overrides || []).filter((o) => o.merchant_key).map((o) => [o.merchant_key, o])
+  );
+  for (const row of mergedSeriesRows) {
+    const override = overridesByKey.get(row.merchant_key);
+    if (!override || (override.override_category == null && override.override_debt_type == null)) continue;
+    const transactionIds = transactionIdsBySeriesKey.get(row.merchant_key) || [];
+    if (transactionIds.length === 0) continue;
+
+    // Never overwrite a transaction the user separately, individually
+    // corrected via the Home tab's own "tap to clarify" flow - that's a
+    // more specific, deliberate decision than this broader series-level
+    // override and must win, same precedent
+    // applyMerchantCategoryRetroactively itself already follows.
+    const { data: candidates, error: candidatesError } = await supabaseAdmin
+      .from('transactions')
+      .select('transaction_id, category_reasoning')
+      .in('transaction_id', transactionIds);
+    if (candidatesError) throw candidatesError;
+    const idsToUpdate = (candidates || [])
+      .filter((t) => t.category_reasoning !== 'Manually categorized by user.')
+      .map((t) => t.transaction_id);
+    if (idsToUpdate.length === 0) continue;
+
+    const patch = {};
+    if (override.override_category != null) {
+      patch.category = override.override_category;
+      patch.category_confidence = 'high';
+      patch.category_reasoning = 'Matches your manually corrected recurring bill.';
+    }
+    if (override.override_debt_type != null) patch.debt_type = override.override_debt_type;
+
+    const { error: retroError } = await supabaseAdmin
+      .from('transactions')
+      .update(patch)
+      .in('transaction_id', idsToUpdate);
+    if (retroError) throw retroError;
+  }
+
   return { seriesCount: upsertedSeries.length, taggedCount };
 }
 
