@@ -39,7 +39,7 @@ const { getBudgetHistory } = require('./budgetHistory');
 const { getHomeChanges } = require('./homeChanges');
 const { SETTINGS_SECTIONS, getSettings, patchSettings } = require('./settings');
 const { getTransactionsCsv, getBudgetHistoryCsv, getNetWorthCsv } = require('./csvExport');
-const { getMonthlyReview } = require('./monthlyReview');
+const { getMonthlyReview, getPeriodReview } = require('./monthlyReview');
 const { detectRecurringTransactions, INTERVALS } = require('./recurring');
 const { recomputeOverspendAlerts } = require('./alerts');
 const { getGoalsProgress, getGoalBalanceProgressById, monthsBetween } = require('./goalProgress');
@@ -2015,6 +2015,36 @@ app.get('/monthly-review', requireUser, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load monthly review' });
+  }
+});
+
+// Month-drilldown on Budget's own "View spending history" (direct user
+// request, 2026-09-15): reuses getPeriodReview exactly as-is - it already
+// accepts an arbitrary period, not just "N months ago from today" the way
+// getMonthlyReview/months_ago above does, and already returns a full
+// per-category budgeted/actual/remaining breakdown (`status`, the same
+// shape computeBudgetStatus produces everywhere else in this app) plus
+// real period income - no new compute, just a new way to reach an
+// existing function. `period_start`/`period_end` come from the client's
+// own already-fetched GET /budget/history response (each period's real
+// boundaries, not free-typed) - format-validated here defensively, but
+// there's nothing sensitive being decided by this route: `requireUser`
+// already scopes every query inside getPeriodReview to the caller's own
+// data, and an out-of-range/fabricated period simply returns
+// `review: null` (getPeriodReview's own existing "no real data for this
+// period" case), never a fabricated result.
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+app.get('/budget/period-review', requireUser, async (req, res) => {
+  try {
+    const { period_start, period_end } = req.query;
+    if (!DATE_ONLY_RE.test(period_start) || !DATE_ONLY_RE.test(period_end)) {
+      return res.status(400).json({ error: 'period_start and period_end must be YYYY-MM-DD' });
+    }
+    const review = await getPeriodReview(req.userId, period_start, period_end);
+    res.json({ review });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load period review' });
   }
 });
 

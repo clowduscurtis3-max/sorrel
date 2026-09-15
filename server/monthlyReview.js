@@ -145,4 +145,5 @@ async function getMonthlyReview(userId, monthsAgo = 1) {
 module.exports = {
   computeMonthlyReview,
   getMonthlyReview,
+  getPeriodReview,
 };

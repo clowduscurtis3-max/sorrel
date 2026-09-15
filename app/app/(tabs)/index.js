@@ -1410,15 +1410,10 @@ export default function Home() {
                   : 'not enough data'}
               </Text>
             </Pressable>
-            <View style={homeStyles.statDivider} />
-            <View style={homeStyles.statTile}>
-              <MaterialIcons name="event" size={18} color={colors.dark} />
-              <Text style={homeStyles.statLabel}>DAYS LEFT</Text>
-              <Text style={homeStyles.statValue}>
-                {monthProgress ? monthProgress.daysRemaining : '—'}
-              </Text>
-              <Text style={homeStyles.statSub}>in {monthName}</Text>
-            </View>
+            {/* Days Left tile removed 2026-09-15, direct user request
+                ("a bit redundant, not necessary") - also brings this
+                row back down to 4 tiles instead of 5, avoiding the
+                crowding that prompted this same request. */}
             <View style={homeStyles.statDivider} />
             {/* Same destination as the "Goal progress" card further down
                 (already interactive) - consistent behavior for the same

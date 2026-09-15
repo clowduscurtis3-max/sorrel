@@ -266,6 +266,44 @@ export default function Budget() {
     if (next) fetchBudgetHistory();
   }
 
+  // Month drilldown (direct user request, 2026-09-15): each past month's
+  // own card expands in place - not a separate modal/screen, matching
+  // the user's explicit "open each month independently" ask and this
+  // app's own established toggle-in-place convention (same as
+  // showHistory itself, above). `periodReviews` caches by period_start
+  // so reopening an already-fetched month is instant and doesn't refetch
+  // - a closed historical period's data never changes once loaded this
+  // session. `expandedPeriod` is a single value, not a set - only one
+  // month open at a time keeps this section from growing unbounded tall.
+  const [expandedPeriod, setExpandedPeriod] = useState(null);
+  const [periodReviews, setPeriodReviews] = useState({});
+  const [loadingPeriod, setLoadingPeriod] = useState(null);
+  const [periodError, setPeriodError] = useState(null);
+
+  async function togglePeriod(period) {
+    if (expandedPeriod === period.period_start) {
+      setExpandedPeriod(null);
+      return;
+    }
+    setExpandedPeriod(period.period_start);
+    if (periodReviews[period.period_start]) return;
+    setLoadingPeriod(period.period_start);
+    setPeriodError(null);
+    try {
+      const res = await apiFetch(
+        `/budget/period-review?period_start=${period.period_start}&period_end=${period.period_end}`
+      );
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const { review } = await res.json();
+      setPeriodReviews((prev) => ({ ...prev, [period.period_start]: review }));
+    } catch (err) {
+      console.error(err);
+      setPeriodError(apiErrorMessage(err));
+    } finally {
+      setLoadingPeriod(null);
+    }
+  }
+
   // Refreshes both budgetStatus (the category list) and the insight pill
   // itself - passed into BudgetInsightModal so applying cuts or
   // regenerating updates the whole screen immediately, not just the modal.
@@ -800,15 +838,13 @@ export default function Budget() {
                     : 'not enough data'}
                 </Text>
               </View>
-              <View style={budgetLocalStyles.statDivider} />
-              <View style={budgetLocalStyles.statTile}>
-                <MaterialIcons name="event" size={18} color={colors.dark} />
-                <Text style={budgetLocalStyles.statLabel}>DAYS LEFT</Text>
-                <Text style={budgetLocalStyles.statValue}>
-                  {monthProgress ? monthProgress.daysRemaining : '—'}
-                </Text>
-                {monthProgress && <Text style={budgetLocalStyles.statSub}>in {monthName()}</Text>}
-              </View>
+              {/* Days Left tile removed 2026-09-15, direct user request
+                  ("a bit redundant, not necessary") - Days Left/month
+                  name is already visible elsewhere on this screen
+                  (the period label on each history card, etc.), and
+                  removing it also brought this row back down to 4
+                  tiles instead of 5, avoiding the crowding that
+                  prompted this same request. */}
             </View>
           )}
 
@@ -861,11 +897,26 @@ export default function Budget() {
 
                   {[...budgetHistory.periods].reverse().map((period) => {
                     const stats = computeSpendStats(period);
+                    const isExpanded = expandedPeriod === period.period_start;
+                    const review = periodReviews[period.period_start];
                     return (
-                      <View key={period.period_start} style={[styles.card, budgetLocalStyles.historyPeriodCard]}>
-                        <Text style={budgetLocalStyles.historyPeriodLabel}>
-                          {periodLabel(period.period_start)}
-                        </Text>
+                      <Pressable
+                        key={period.period_start}
+                        style={[styles.card, budgetLocalStyles.historyPeriodCard]}
+                        onPress={() => togglePeriod(period)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${isExpanded ? 'Hide' : 'View'} ${periodLabel(period.period_start)} breakdown`}
+                      >
+                        <View style={budgetLocalStyles.historyPeriodTopRow}>
+                          <Text style={budgetLocalStyles.historyPeriodLabel}>
+                            {periodLabel(period.period_start)}
+                          </Text>
+                          <MaterialIcons
+                            name={isExpanded ? 'expand-less' : 'expand-more'}
+                            size={18}
+                            color={colors.muted}
+                          />
+                        </View>
                         <View style={budgetLocalStyles.historyPeriodRow}>
                           <Text style={budgetLocalStyles.historyPeriodStat}>
                             Budgeted ${formatDecimal(stats.budgeted)}
@@ -874,7 +925,60 @@ export default function Budget() {
                             Spent ${formatDecimal(stats.spent)}
                           </Text>
                         </View>
-                      </View>
+
+                        {/* Month drilldown (2026-09-15, direct user
+                            request): a miniature version of this same
+                            screen's own live per-category budgeted/
+                            actual/remaining list, for this one closed
+                            period - reuses GET /budget/period-review
+                            (server/monthlyReview.js's existing
+                            getPeriodReview, no new compute), read-only
+                            (no edit/reset actions - a closed month's
+                            budget isn't something to change). */}
+                        {isExpanded && (
+                          <View style={budgetLocalStyles.periodDetail}>
+                            {loadingPeriod === period.period_start ? (
+                              <ActivityIndicator />
+                            ) : periodError ? (
+                              <Text style={styles.errorText}>{periodError}</Text>
+                            ) : !review ? (
+                              <Text style={styles.smallText}>No detail available for this month.</Text>
+                            ) : (
+                              <>
+                                <Text style={budgetLocalStyles.periodDetailIncome}>
+                                  Income ${formatDecimal(review.income)}
+                                </Text>
+                                {review.status.map((s) => (
+                                  <View key={s.category} style={budgetLocalStyles.periodDetailRow}>
+                                    <Text style={budgetLocalStyles.periodDetailCategory} numberOfLines={1}>
+                                      {s.category}
+                                    </Text>
+                                    <Text style={budgetLocalStyles.periodDetailAmount}>
+                                      ${formatDecimal(s.actual)}
+                                      {s.budgeted != null && (
+                                        <Text style={budgetLocalStyles.periodDetailAmountMuted}>
+                                          {' '}
+                                          / ${formatDecimal(s.budgeted)}
+                                        </Text>
+                                      )}
+                                    </Text>
+                                    {s.remaining != null && (
+                                      <Text
+                                        style={[
+                                          budgetLocalStyles.periodDetailRemaining,
+                                          { color: s.remaining < 0 ? colors.error : colors.positive },
+                                        ]}
+                                      >
+                                        {s.remaining < 0 ? '-' : ''}${formatDecimal(Math.abs(s.remaining))}
+                                      </Text>
+                                    )}
+                                  </View>
+                                ))}
+                              </>
+                            )}
+                          </View>
+                        )}
+                      </Pressable>
                     );
                   })}
                 </>
@@ -1095,10 +1199,6 @@ export default function Budget() {
       <StatusBar style={isNight ? 'light' : 'dark'} />
     </View>
   );
-}
-
-function monthName() {
-  return new Date().toLocaleDateString('en-US', { month: 'long' });
 }
 
 // 'YYYY-MM-01' -> "May 2026". Parsed as UTC (matches monthRange's own
@@ -1360,6 +1460,11 @@ function buildBudgetLocalStyles(colors) {
   historyPeriodCard: {
     gap: 6,
   },
+  historyPeriodTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   historyPeriodLabel: {
     fontSize: 14,
     fontWeight: '700',
@@ -1372,6 +1477,48 @@ function buildBudgetLocalStyles(colors) {
   historyPeriodStat: {
     fontSize: 13,
     color: colors.dark,
+  },
+  // Month drilldown detail (2026-09-15) - a compact, read-only per-
+  // category list, deliberately smaller/plainer than the live category
+  // cards further down this screen (no icon circle, no edit/reset
+  // actions - a closed month's budget isn't something to change here).
+  periodDetail: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.sage,
+    gap: 6,
+  },
+  periodDetailIncome: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.positive,
+    marginBottom: 2,
+  },
+  periodDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  periodDetailCategory: {
+    flex: 1,
+    fontSize: 12,
+    color: colors.darkest,
+  },
+  periodDetailAmount: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.darkest,
+  },
+  periodDetailAmountMuted: {
+    fontWeight: '400',
+    color: colors.muted,
+  },
+  periodDetailRemaining: {
+    fontSize: 12,
+    fontWeight: '600',
+    minWidth: 60,
+    textAlign: 'right',
   },
   // Category detail view (local state swap, not a route - see
   // viewingCategory's own comment for why). Same header shape as
