@@ -55,7 +55,11 @@ function reconcileTrackedItems({ existingEvents, activeItems, buildDedupKey, bui
       // Was cleared, now active again under the same identity (e.g. a
       // lapsed subscription resumed, then lapsed again later) - reopen
       // rather than insert, since dedup_key is unique per user.
-      toUpdate.push({ id: existing.id, patch: { ...event, status: 'pending', resolved_at: null } });
+      // dismissed_at cleared too - same fix and reasoning as
+      // notificationEvents.js's own reopen branches (real bug found by
+      // /code-review 2026-09-16): a dismiss is "stop telling me about this
+      // specific occurrence," not "never tell me about this series again."
+      toUpdate.push({ id: existing.id, patch: { ...event, status: 'pending', resolved_at: null, dismissed_at: null } });
     } else if (existing.status === 'pending') {
       // Still queued, not sent yet - keep its snapshot current (delivery
       // re-checks the condition again right before actually sending; this

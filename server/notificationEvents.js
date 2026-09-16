@@ -97,7 +97,16 @@ function reconcileOverspendEvents({ existingEvents, activeAlerts, periodStart })
       // Was cleared, now trending over again within the same period - reopen
       // rather than insert, since dedup_key is unique per user and would
       // otherwise conflict.
-      toUpdate.push({ id: existing.id, patch: { status: 'pending', title, body, data, resolved_at: null } });
+      // dismissed_at cleared too - real bug found by /code-review 2026-09-16:
+      // a user who swiped this condition away once would otherwise never
+      // see or be pushed it again, even after it genuinely resolves and
+      // later recurs (same dedup_key row, reopened rather than reinserted).
+      // A dismiss is "stop telling me about this specific occurrence," not
+      // "never tell me about this category/account again."
+      toUpdate.push({
+        id: existing.id,
+        patch: { status: 'pending', title, body, data, resolved_at: null, dismissed_at: null },
+      });
     } else if (existing.status === 'pending') {
       // Still queued, not sent yet - keep its snapshot current since the
       // pace projection moves every sync. (Step C/D re-check the condition
@@ -168,7 +177,16 @@ function reconcileLowBalanceEvents({ existingEvents, accounts, thresholds }) {
         data,
       });
     } else if (existing.status === 'resolved') {
-      toUpdate.push({ id: existing.id, patch: { status: 'pending', title, body, data, resolved_at: null } });
+      // dismissed_at cleared too - real bug found by /code-review 2026-09-16:
+      // a user who swiped this condition away once would otherwise never
+      // see or be pushed it again, even after it genuinely resolves and
+      // later recurs (same dedup_key row, reopened rather than reinserted).
+      // A dismiss is "stop telling me about this specific occurrence," not
+      // "never tell me about this category/account again."
+      toUpdate.push({
+        id: existing.id,
+        patch: { status: 'pending', title, body, data, resolved_at: null, dismissed_at: null },
+      });
     } else if (existing.status === 'pending') {
       toUpdate.push({ id: existing.id, patch: { title, body, data } });
     }

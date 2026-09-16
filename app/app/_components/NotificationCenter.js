@@ -103,6 +103,16 @@ export default function NotificationCenter({ visible, onClose, onSelectEvent }) 
   }, [visible]);
 
   const groups = useMemo(() => buildMonthGroups(events), [events]);
+  // Real bug found by /code-review (2026-09-16): "current month" was
+  // derived positionally (the first group in the sorted list), which
+  // silently mislabels the true current month as collapsible - or forces
+  // open the wrong, most-recent-past month - whenever there are zero
+  // events in the actual current month. Computed once per open instead
+  // of trusting array position.
+  const currentMonthKey = useMemo(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  }, []);
 
   // Optimistic - removed from the visible list immediately so the swipe
   // itself feels instant, matching every other swipe-to-dismiss pattern
@@ -167,8 +177,8 @@ export default function NotificationCenter({ visible, onClose, onSelectEvent }) 
 
             {!loading &&
               !error &&
-              groups.map((group, index) => {
-                const isCurrent = index === 0;
+              groups.map((group) => {
+                const isCurrent = group.key === currentMonthKey;
                 const isExpanded = isCurrent || expandedMonths.has(group.key);
                 return (
                   <View key={group.key} style={localStyles.monthGroup}>
