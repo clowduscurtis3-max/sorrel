@@ -3,6 +3,7 @@ const { SPEND_CATEGORIES, ESSENTIAL_CATEGORIES } = require('./categorize');
 const { summarizeSpending, currentMonthRange } = require('./spendingAverages');
 const { projectFinishDate, getGoalsProgress } = require('./goalProgress');
 const { getSettings } = require('./settings');
+const { getKnownRecurringBillsTotal } = require('./subscriptionAudit');
 
 function round2(n) {
   return Math.round(n * 100) / 100;
@@ -24,7 +25,25 @@ const DISCRETIONARY_FLOOR_RATIO = 0.7;
 // `userSetByCategory`: { [category]: budgeted_amount } for whichever
 // categories are currently fixed (real is_user_set rows, or - for the
 // category-edit-impact feature below - a single simulated override).
-function computeDiscretionaryCapacity({ averages, averageMonthlyIncome, userSetByCategory = {}, floorRatio = DISCRETIONARY_FLOOR_RATIO }) {
+//
+// `knownRecurringBillsTotal` (2026-09-15, direct user report): the real,
+// currently-active monthly total of known Bills & Utilities charges
+// (mortgage, electric, phone, insurance, etc. - see
+// subscriptionAudit.js's computeKnownRecurringBillsTotal). A 90-day
+// average can legitimately sit below what someone is actually committed
+// to paying right now, which would otherwise let this capacity
+// calculation assume more "room" for goals than genuinely exists. Only
+// ever raises Bills & Utilities' own minimum - never applied when the
+// user has manually set that category (the userSetByCategory branch
+// above always wins, same as everywhere else in this app that respects
+// a deliberate user override).
+function computeDiscretionaryCapacity({
+  averages,
+  averageMonthlyIncome,
+  userSetByCategory = {},
+  floorRatio = DISCRETIONARY_FLOOR_RATIO,
+  knownRecurringBillsTotal = 0,
+}) {
   const minSpendByCategory = {};
   for (const c of SPEND_CATEGORIES) {
     if (Object.prototype.hasOwnProperty.call(userSetByCategory, c)) {
@@ -36,7 +55,8 @@ function computeDiscretionaryCapacity({ averages, averageMonthlyIncome, userSetB
       // silently inflates capacity beyond what income minus real spend
       // actually supports.
       const avg = Math.max(0, averages[c] || 0);
-      minSpendByCategory[c] = ESSENTIAL_CATEGORIES.includes(c) || c === 'Other' ? avg : avg * floorRatio;
+      const essentialAmount = c === 'Bills & Utilities' ? Math.max(avg, knownRecurringBillsTotal) : avg;
+      minSpendByCategory[c] = ESSENTIAL_CATEGORIES.includes(c) || c === 'Other' ? essentialAmount : avg * floorRatio;
     }
   }
   const totalMinSpend = Object.values(minSpendByCategory).reduce((sum, v) => sum + v, 0);
@@ -78,7 +98,9 @@ async function getDiscretionaryCapacity(userId, { simulateEdit } = {}) {
     userSetByCategory[simulateEdit.category] = simulateEdit.budgeted_amount;
   }
 
-  return computeDiscretionaryCapacity({ averages, averageMonthlyIncome, userSetByCategory });
+  const knownRecurringBillsTotal = await getKnownRecurringBillsTotal(userId);
+
+  return computeDiscretionaryCapacity({ averages, averageMonthlyIncome, userSetByCategory, knownRecurringBillsTotal });
 }
 
 // Pure. `goals` pre-filtered by the caller to has_target &&

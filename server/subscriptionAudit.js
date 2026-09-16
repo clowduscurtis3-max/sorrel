@@ -489,10 +489,46 @@ async function getSubscriptionAudit(userId, { now } = {}) {
   return audit;
 }
 
+// Pure - the real, currently-known monthly total of a user's active
+// recurring bills (mortgage, utilities, phone, insurance, etc.), reusing
+// computeSubscriptionAudit's own active/lapsed classification and
+// monthly-equivalent math rather than a second copy of either. Built for
+// generateBudget/goalFunding.js (2026-09-15, direct user report): a
+// 90-day category average can legitimately sit below what someone is
+// actually, currently committed to paying - these are known, fixed,
+// non-negotiable obligations, not something an average should be allowed
+// to understate. `series` is the caller's own already-fetched
+// `recurring_series` rows, kept pure/no-I/O so budget.js/goalFunding.js
+// can call this without a second recurring_series query when they
+// already have one in hand.
+function computeKnownRecurringBillsTotal(series, now = new Date()) {
+  const { recurring_bills } = computeSubscriptionAudit({ series: series || [], now });
+  return round2(recurring_bills.reduce((sum, s) => sum + s.monthly_equivalent_amount, 0));
+}
+
+// DB-touching wrapper, for a caller with no `recurring_series` rows of
+// its own already in hand.
+async function getKnownRecurringBillsTotal(userId, { now } = {}) {
+  // merchant_key is required (not just id/account_id/etc.) - computeSubscriptionAudit's
+  // internal price-jump detection (detectForkedPriceJumps) reads it off
+  // every series unconditionally and throws if it's missing. Matches
+  // getSubscriptionAudit's own query above exactly, for the same reason.
+  const { data: series, error } = await supabaseAdmin
+    .from('recurring_series')
+    .select(
+      'id, merchant_key, account_id, display_name, category, interval, typical_amount, last_seen_date, next_expected_date, occurrence_count'
+    )
+    .eq('user_id', userId);
+  if (error) throw error;
+  return computeKnownRecurringBillsTotal(series, now);
+}
+
 module.exports = {
   computeSubscriptionAudit,
   getSubscriptionAudit,
   computeRecurringGlance,
+  computeKnownRecurringBillsTotal,
+  getKnownRecurringBillsTotal,
   PRICE_CREEP_MIN_RATIO,
   PRICE_CREEP_SENSITIVITY_RATIOS,
   priceCreepRatioForSensitivity,

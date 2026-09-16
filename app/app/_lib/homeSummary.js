@@ -233,19 +233,56 @@ export function computeSpendStats(budgetStatus) {
   return { spent: Math.round(spent * 100) / 100, budgeted: Math.round(budgeted * 100) / 100 };
 }
 
-// Same pace-projection formula alerts.js already uses per-category
-// (projected = actual * daysInPeriod/daysElapsed), applied once to the
-// month's total instead. `projected` (the actual month-end estimate) is
-// what the Home/Budget stat tile now shows directly, per direct user
-// request (2026-09-03) to relabel this tile "Projected Spend" instead of
-// "Pace" - `aheadBy`/`isAhead` (the delta vs. budget) are kept too, still
-// used for the tile's under/over-budget caption.
-export function computePace({ spent, budgeted }, { daysElapsed, daysInMonth }) {
-  if (daysElapsed <= 0 || budgeted <= 0) return null;
-  const projected = spent * (daysInMonth / daysElapsed);
-  const diff = Math.round((budgeted - projected) * 100) / 100;
+// Same pace-projection formula alerts.js uses per-category (projected =
+// actual * daysInPeriod/daysElapsed), summed across categories for the
+// month's total. `projected` (the actual month-end estimate) is what the
+// Home/Budget stat tile shows directly, per direct user request
+// (2026-09-03) to relabel this tile "Projected Spend" instead of "Pace" -
+// `aheadBy`/`isAhead` (the delta vs. budget) are kept too, still used for
+// the tile's under/over-budget caption.
+//
+// Bills & Utilities is excluded from the pace-scaling, same fix and same
+// reasoning as alerts.js's computeOverspendAlerts (real bug found live
+// 2026-09-15): it's a rollup of things that post once a month and never
+// repeat (mortgage/rent, loan payments, utility bills, bank fees), so
+// scaling it by days-elapsed the same way as spend that trickles in over
+// the month (groceries, dining) badly overstates the whole-month total
+// early in the period - a $2,000 mortgage posting on day 3 isn't "on pace
+// to hit $20,000," it already posted in full. Its contribution is instead
+// the higher of what's already spent or what's budgeted (never scaled),
+// so it can only push the projection up on a genuine overspend, never on
+// an early-month posting artifact. Every other category (Groceries, Gas,
+// Dining, Transportation, Shopping, Entertainment, Health & Personal
+// Care, Travel, Subscriptions, Other) keeps the existing pace-scaling
+// unchanged - those genuinely do accumulate multiple times across a
+// month, so scaling by days-elapsed is the right model for them.
+export function computePace(budgetStatus, { daysElapsed, daysInMonth }) {
+  const rows = budgetStatus?.status || [];
+  if (daysElapsed <= 0 || rows.length === 0) return null;
+
+  let totalBudgeted = 0;
+  let restSpent = 0;
+  let billsActual = 0;
+  let billsBudgeted = 0;
+  for (const r of rows) {
+    const budgeted = r.budgeted || 0;
+    const actual = r.actual || 0;
+    totalBudgeted += budgeted;
+    if (r.category === 'Bills & Utilities') {
+      billsActual = actual;
+      billsBudgeted = budgeted;
+    } else {
+      restSpent += actual;
+    }
+  }
+  if (totalBudgeted <= 0) return null;
+
+  const projectedRest = restSpent * (daysInMonth / daysElapsed);
+  const billsContribution = Math.max(billsActual, billsBudgeted);
+  const projected = Math.round((projectedRest + billsContribution) * 100) / 100;
+  const diff = Math.round((totalBudgeted - projected) * 100) / 100;
   return {
-    projected: Math.round(projected * 100) / 100,
+    projected,
     aheadBy: Math.abs(diff),
     isAhead: diff >= 0,
   };

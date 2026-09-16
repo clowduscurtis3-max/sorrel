@@ -39,8 +39,11 @@ export default function ProjectedSpendModal({ visible, onClose, pace, spendStats
           <Text style={localStyles.explainerText}>
             An estimate of what you'll spend by the end of {monthName || 'this month'}, based on
             your pace so far - not a fixed number, just today's spending rate carried forward
-            across the rest of the month. Early in the month, one larger-than-usual purchase can
-            swing this by a lot; it settles down as more of the month's real spending comes in.
+            across the rest of the month. Bills & Utilities is the one exception: since those are
+            known, mostly-fixed charges that post once rather than repeating, they're counted at
+            their real amount instead of being carried forward the same way. Everywhere else,
+            early in the month one larger-than-usual purchase can still swing this by a lot; it
+            settles down as more of the month's real spending comes in.
           </Text>
 
           {pace ? (

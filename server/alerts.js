@@ -43,7 +43,18 @@ function computeOverspendAlerts({ budgets, actuals, periodStart, periodEnd, now 
     if (typeof budgeted !== 'number' || budgeted <= 0) continue;
 
     const actual = round2(actualByCategory[category] || 0);
-    const projected = round2(actual * (daysInPeriod / elapsedDays));
+    // Bills & Utilities is a rollup of things that post once a month and
+    // never repeat (mortgage/rent, loan payments, utility bills, bank
+    // fees - see PRIMARY_LABELS in categorize.js) - real bug found live
+    // 2026-09-15: pace-scaling it the same way as spend that trickles in
+    // over the month (groceries, dining) badly overstates it early in the
+    // period. A $2,000 mortgage posting on day 3 isn't "on pace to hit
+    // $20,000" (2000 * 30/3) - it already posted, in full, for the month.
+    // Using the higher of what's already spent or what's budgeted (rather
+    // than scaling either one) means this can only ever flag a genuine
+    // overspend, never an early-month posting artifact.
+    const projected =
+      category === 'Bills & Utilities' ? Math.max(actual, budgeted) : round2(actual * (daysInPeriod / elapsedDays));
     if (projected <= budgeted * OVERSPEND_THRESHOLD_RATIO) continue;
 
     const overBy = round2(projected - budgeted);

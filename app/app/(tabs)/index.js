@@ -319,7 +319,7 @@ export default function Home() {
     ? computeMonthProgress(budgetStatus.period_start, budgetStatus.period_end)
     : null;
   const spendStats = computeSpendStats(budgetStatus);
-  const pace = monthProgress ? computePace(spendStats, monthProgress) : null;
+  const pace = monthProgress ? computePace(budgetStatus, monthProgress) : null;
   const insight = computeInsight(alerts);
   const monthName = new Date().toLocaleDateString('en-US', { month: 'long' });
 

@@ -3,6 +3,7 @@ const supabaseAdmin = require('./supabaseAdmin');
 const { SPEND_CATEGORIES, ESSENTIAL_CATEGORIES, DISCRETIONARY_CATEGORIES } = require('./categorize');
 const { HISTORY_DAYS, summarizeSpending, monthRange, currentMonthRange } = require('./spendingAverages');
 const { DISCRETIONARY_FLOOR_RATIO, getGoalFundingPlan } = require('./goalFunding');
+const { getKnownRecurringBillsTotal } = require('./subscriptionAudit');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -68,6 +69,35 @@ function rescaleDiscretionaryRows({ rows, discretionaryCategories, target, avera
     const evenShare = target / discretionaryRows.length;
     for (const r of discretionaryRows) clampAndNote(r, evenShare);
   }
+}
+
+// Pure, mutates `rows` in place - real gap found 2026-09-15, direct user
+// report: Claude is told in its prompt to keep necessities close to
+// their real average, but that's prompt wording, not a guarantee, and
+// even a correctly-behaving average is backward-looking - it can
+// legitimately sit below what someone is actually, currently committed
+// to paying for fixed bills (mortgage, utilities, phone, insurance) if a
+// bill increased or the historical window included a lighter month. A
+// category made of non-negotiable, individually-known bills should never
+// be trusted to an AI estimate or an average alone, matching this app's
+// own "AI/averages don't get to fabricate or understate a financial
+// fact" discipline. `knownBillsFloor` is the real, currently-active
+// monthly total of a user's Bills & Utilities recurring series (see
+// subscriptionAudit.js's computeKnownRecurringBillsTotal) - only ever
+// raises the row, never lowers it, and is a no-op when there's no
+// Bills & Utilities row to raise (e.g. it's user-set and excluded from
+// `rows` entirely, which correctly leaves a deliberate user override
+// untouched).
+function applyKnownBillsFloor(rows, knownBillsFloor) {
+  if (!(knownBillsFloor > 0)) return;
+  const billsRow = rows.find((r) => r.category === 'Bills & Utilities');
+  if (!billsRow || billsRow.budgeted_amount >= knownBillsFloor) return;
+
+  billsRow.budgeted_amount = round2(knownBillsFloor);
+  const note =
+    `Raised to $${knownBillsFloor.toFixed(2)} to fully cover your currently active recurring ` +
+    `bills - these are fixed obligations, not something an average should be allowed to understate.`;
+  billsRow.reasoning = billsRow.reasoning ? `${billsRow.reasoning} ${note}` : note;
 }
 
 // Thrown for a client-state precondition (no data to budget from yet),
@@ -239,6 +269,21 @@ async function generateBudget(userId, target = {}) {
     0
   );
   const discretionaryFloorTotal = round2(discretionaryAverageTotal * DISCRETIONARY_FLOOR_RATIO);
+  // Real known-bills floor (2026-09-15, direct user report): a 90-day
+  // average of Bills & Utilities can legitimately sit below what someone
+  // is actually, currently committed to paying - it's a rollup of fixed,
+  // individually-known recurring bills (mortgage, electric, phone,
+  // insurance, etc.), not something an average should ever be allowed to
+  // understate. Reuses the exact same active-recurring-bill computation
+  // the Recurring tab already shows (subscriptionAudit.js) - never a
+  // second "is this bill still active" judgment. Skipped on the
+  // historical backfill path for the same reason goal-funding is, just
+  // below - recurring_series reflects TODAY's detected bills, not
+  // history as of a past month.
+  const knownBillsFloor =
+    isBackfill || !categoriesToGenerate.includes('Bills & Utilities')
+      ? 0
+      : await getKnownRecurringBillsTotal(userId);
   const fundingPlan = isBackfill ? null : await getGoalFundingPlan(userId);
   const totalGoalFundingNeeded = fundingPlan
     ? round2(fundingPlan.allocations.reduce((sum, a) => sum + a.funded_monthly_amount, 0))
@@ -368,6 +413,8 @@ async function generateBudget(userId, target = {}) {
   if (rows.length === 0) {
     throw new Error('AI budget generation returned no usable categories.');
   }
+
+  applyKnownBillsFloor(rows, knownBillsFloor);
 
   // Goal-driven funding (2026-09-11): verify Claude's discretionary total
   // actually hit the hard target computed above, and deterministically
@@ -898,6 +945,7 @@ async function applyBudgetEdit(userId, category, newAmount, adjustments = []) {
 module.exports = {
   generateBudget,
   rescaleDiscretionaryRows,
+  applyKnownBillsFloor,
   resetCategoryToAI,
   computeBudgetStatus,
   recomputeBudgetActuals,

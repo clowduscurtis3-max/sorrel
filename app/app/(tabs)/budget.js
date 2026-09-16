@@ -562,7 +562,7 @@ export default function Budget() {
   const monthProgress = budgetStatus
     ? computeMonthProgress(budgetStatus.period_start, budgetStatus.period_end)
     : null;
-  const pace = monthProgress ? computePace(spendStats, monthProgress) : null;
+  const pace = monthProgress ? computePace(budgetStatus, monthProgress) : null;
   const spentPercent = spendStats.budgeted > 0 ? Math.round((spendStats.spent / spendStats.budgeted) * 100) : null;
   const hasAnyBudget = rows.some((s) => s.budgeted != null);
   const showCategoryReasoning = budgetSettings.show_category_reasoning !== false;
