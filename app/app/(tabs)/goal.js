@@ -12,6 +12,7 @@ import {
   Switch,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
@@ -43,6 +44,7 @@ import { orderGoalsByPriority, describeRealisticDateInsight, goalDisplayName } f
 import SorrelWordmark from '../_components/SorrelWordmark';
 import PrimaryButton from '../_components/PrimaryButton';
 import DraggableCardList from '../_components/DraggableCardList';
+import NotificationCenter, { resolveNotificationTarget } from '../_components/NotificationCenter';
 
 // Edit Goal redesign (2026-08-27) - per-goal-type icon (reusing the same
 // icon-circle visual language already established by targetIconCircle/
@@ -272,8 +274,10 @@ export default function Goal() {
   // feed it) is gone from this screen entirely.
   const { colors, styles, isNight } = useTheme();
   const goalStyles = useMemo(() => buildGoalStyles(colors), [colors]);
+  const router = useRouter();
   const { refetchGoal } = useSessionContext();
   const { goalsProgress, refetchGoalsProgress, subscriptionAudit, budgetStatus, accounts } = useAppData();
+  const [showNotificationCenter, setShowNotificationCenter] = useState(false);
 
   // Phase 42 (multi-goal tracking, 2026-09-08): the single "Primary Goal"
   // card is now a list of goal cards; tapping one swaps to a local-state
@@ -1882,7 +1886,14 @@ export default function Goal() {
         <>
           <View style={goalStyles.wordmarkStrip}>
             <SorrelWordmark layout="row" leafSize={30} showTagline={false} />
-            <MaterialIcons name="notifications-none" size={26} color={colors.darkest} />
+            <Pressable
+              onPress={() => setShowNotificationCenter(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Notifications"
+              hitSlop={8}
+            >
+              <MaterialIcons name="notifications-none" size={26} color={colors.darkest} />
+            </Pressable>
           </View>
 
           <ScrollView
@@ -2464,6 +2475,15 @@ export default function Goal() {
           </ScrollView>
         </>
       )}
+      <NotificationCenter
+        visible={showNotificationCenter}
+        onClose={() => setShowNotificationCenter(false)}
+        onSelectEvent={(event) => {
+          setShowNotificationCenter(false);
+          const target = resolveNotificationTarget(event);
+          if (target) router.push(target);
+        }}
+      />
       <StatusBar style={isNight ? 'light' : 'dark'} />
     </View>
   );

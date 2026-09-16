@@ -18,7 +18,7 @@ import { View, Text, Button, Pressable, ActivityIndicator, TextInput, ScrollView
 // meaningfully contend with this ScrollView's own gesture recognition in
 // the first place.
 import { StatusBar } from 'expo-status-bar';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { apiFetch, apiErrorMessage, formatDecimal, formatAmount, logRecommendationEvent } from '../_lib/api';
@@ -32,6 +32,7 @@ import PrimaryButton from '../_components/PrimaryButton';
 import BudgetInsightModal from '../_components/BudgetInsightModal';
 import IncomeModal from '../_components/IncomeModal';
 import SorrelWordmark from '../_components/SorrelWordmark';
+import NotificationCenter, { resolveNotificationTarget } from '../_components/NotificationCenter';
 
 // Theme redesign (2026-09-11): module-level object literal referencing
 // colors - moved to a function taking colors as a parameter, same as
@@ -115,6 +116,7 @@ export default function Budget() {
   // churn) can no longer re-trigger it - only a genuinely new categoryParam
   // value (e.g. tapping a different Financial Health tile) can.
   const { category: categoryParam } = useLocalSearchParams();
+  const router = useRouter();
   const lastAutoOpenedCategoryRef = useRef(null);
   useEffect(() => {
     if (!categoryParam || !budgetStatus) return;
@@ -343,6 +345,7 @@ export default function Budget() {
   // banner for one tile.
   const [incomeSummary, setIncomeSummary] = useState(null);
   const [showIncomeDetail, setShowIncomeDetail] = useState(false);
+  const [showNotificationCenter, setShowNotificationCenter] = useState(false);
 
   async function fetchIncomeSummary() {
     try {
@@ -586,7 +589,14 @@ export default function Budget() {
       {viewingCategory === null && (
         <View style={budgetLocalStyles.wordmarkStrip}>
           <SorrelWordmark layout="row" leafSize={30} showTagline={false} />
-          <MaterialIcons name="notifications-none" size={26} color={colors.darkest} />
+          <Pressable
+            onPress={() => setShowNotificationCenter(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Notifications"
+            hitSlop={8}
+          >
+            <MaterialIcons name="notifications-none" size={26} color={colors.darkest} />
+          </Pressable>
         </View>
       )}
 
@@ -1195,6 +1205,15 @@ export default function Budget() {
         visible={showIncomeDetail}
         onClose={() => setShowIncomeDetail(false)}
         incomeSummary={incomeSummary}
+      />
+      <NotificationCenter
+        visible={showNotificationCenter}
+        onClose={() => setShowNotificationCenter(false)}
+        onSelectEvent={(event) => {
+          setShowNotificationCenter(false);
+          const target = resolveNotificationTarget(event);
+          if (target) router.push(target);
+        }}
       />
       <StatusBar style={isNight ? 'light' : 'dark'} />
     </View>

@@ -10,6 +10,7 @@ import { useTheme } from '../_lib/theme';
 import { useAppData } from '../_lib/appData';
 import { iconForCategory } from '../_lib/categoryIcons';
 import SorrelWordmark from '../_components/SorrelWordmark';
+import NotificationCenter, { resolveNotificationTarget } from '../_components/NotificationCenter';
 
 // Recurring tab restyle (2026-08-25, design-references/recurring-tab-mockup-
 // 2026-08-24.png). Investigated before building, per this app's own "no
@@ -274,6 +275,7 @@ export default function Recurring() {
   const [intervalFilter, setIntervalFilter] = useState('all');
   const [expandedGroups, setExpandedGroups] = useState({});
   const [showSavings, setShowSavings] = useState(false);
+  const [showNotificationCenter, setShowNotificationCenter] = useState(false);
 
   function toggleGroup(key) {
     setExpandedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -330,7 +332,14 @@ export default function Recurring() {
     <View style={styles.container}>
       <View style={recurringStyles.wordmarkStrip}>
         <SorrelWordmark layout="row" leafSize={30} showTagline={false} />
-        <MaterialIcons name="notifications-none" size={26} color={colors.darkest} />
+        <Pressable
+          onPress={() => setShowNotificationCenter(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Notifications"
+          hitSlop={8}
+        >
+          <MaterialIcons name="notifications-none" size={26} color={colors.darkest} />
+        </Pressable>
       </View>
 
       <ScrollView
@@ -535,6 +544,15 @@ export default function Recurring() {
         )}
       </ScrollView>
 
+      <NotificationCenter
+        visible={showNotificationCenter}
+        onClose={() => setShowNotificationCenter(false)}
+        onSelectEvent={(event) => {
+          setShowNotificationCenter(false);
+          const target = resolveNotificationTarget(event);
+          if (target) router.push(target);
+        }}
+      />
       <StatusBar style={isNight ? 'light' : 'dark'} />
     </View>
   );

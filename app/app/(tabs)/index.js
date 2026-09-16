@@ -40,6 +40,7 @@ import ProjectedSpendModal from '../_components/ProjectedSpendModal';
 import MonthlyReviewModal from '../_components/MonthlyReviewModal';
 import SpentSoFarModal from '../_components/SpentSoFarModal';
 import IncomeModal from '../_components/IncomeModal';
+import NotificationCenter, { resolveNotificationTarget } from '../_components/NotificationCenter';
 
 const STATUS_ICON = { ok: 'check-circle', warning: 'warning', severe: 'error' };
 
@@ -264,6 +265,7 @@ export default function Home() {
   const [showMonthlyReviewDetail, setShowMonthlyReviewDetail] = useState(false);
   const [showSpentSoFarDetail, setShowSpentSoFarDetail] = useState(false);
   const [showIncomeDetail, setShowIncomeDetail] = useState(false);
+  const [showNotificationCenter, setShowNotificationCenter] = useState(false);
 
   // Theme redesign (2026-09-11): the illustrated backdrop (and the
   // scrollY/onScroll/onBackdropTextColor machinery that existed only to
@@ -1178,11 +1180,14 @@ export default function Home() {
       {viewingItemId === null && (
         <View style={homeStyles.wordmarkStrip}>
           <SorrelWordmark layout="row" leafSize={30} showTagline={false} />
-          {/* Plain icon, not a Pressable - there's no notification
-              center built yet (Phase 16, "what changed"), so this is
-              visual-only for now rather than implying functionality
-              that doesn't exist. */}
-          <MaterialIcons name="notifications-none" size={26} color={colors.darkest} />
+          <Pressable
+            onPress={() => setShowNotificationCenter(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Notifications"
+            hitSlop={8}
+          >
+            <MaterialIcons name="notifications-none" size={26} color={colors.darkest} />
+          </Pressable>
         </View>
       )}
 
@@ -1493,6 +1498,16 @@ export default function Home() {
         visible={showIncomeDetail}
         onClose={() => setShowIncomeDetail(false)}
         incomeSummary={incomeSummary}
+      />
+
+      <NotificationCenter
+        visible={showNotificationCenter}
+        onClose={() => setShowNotificationCenter(false)}
+        onSelectEvent={(event) => {
+          setShowNotificationCenter(false);
+          const target = resolveNotificationTarget(event);
+          if (target) router.push(target);
+        }}
       />
 
       <StatusBar style={isNight ? 'light' : 'dark'} />

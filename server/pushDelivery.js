@@ -124,11 +124,16 @@ async function deliverPendingEventsForUserUnlocked(userId, now = new Date()) {
     })(),
   ]);
 
+  // Notification bell/center swipe-to-dismiss (2026-09-15): a pending
+  // event the user already swiped away in-app should never still show up
+  // as a real OS push a few minutes later - dismissed_at excludes it here
+  // the same way it excludes it from GET /notifications/events.
   const { data: pendingEvents, error: eventsError } = await supabaseAdmin
     .from('notification_events')
     .select('id, event_type, title, body, data')
     .eq('user_id', userId)
-    .eq('status', 'pending');
+    .eq('status', 'pending')
+    .is('dismissed_at', null);
   if (eventsError) throw eventsError;
   if (!pendingEvents || pendingEvents.length === 0) return { sent: 0 };
 

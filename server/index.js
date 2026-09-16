@@ -1207,21 +1207,49 @@ app.post('/notifications/unregister-device', requireUser, async (req, res) => {
 
 // Phase 4 Step B: plain read of this user's notification events (pending,
 // sent, and resolved) - kept current by recomputeNotificationEvents at the
-// call sites below. Nothing is actually pushed to a device yet (Step D/E) -
-// this exists so the event/state model can be verified directly without
-// reaching into Supabase by hand.
+// call sites below. Originally built purely as a debug tool ("verify the
+// event/state model without reaching into Supabase by hand") - now also
+// the real data source for the in-app notification bell/center
+// (2026-09-15). Dismissed events are excluded - a user who swiped one away
+// shouldn't see it come back on the next open, matching the same
+// discipline `resolved` already follows (kept in the DB for the record,
+// filtered out of what's actively shown).
 app.get('/notifications/events', requireUser, async (req, res) => {
   try {
     const { data: events, error } = await supabaseAdmin
       .from('notification_events')
       .select('id, event_type, category, period_start, status, title, body, data, created_at, sent_at, resolved_at')
       .eq('user_id', req.userId)
+      .is('dismissed_at', null)
       .order('created_at', { ascending: false });
     if (error) throw error;
     res.json({ events: events || [] });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load notification events' });
+  }
+});
+
+// Notification bell/center swipe-to-dismiss (2026-09-15). Never deletes
+// the row - matches this table's own existing "keep it for the record"
+// convention (resolved_at/sent_at both work the same way) - just marks it
+// dismissed so GET /notifications/events (above) and push delivery (see
+// pushDelivery.js's own dismissed_at filter) both stop surfacing it.
+// Idempotent/ownership-scoped the same way DELETE /merchant-preferences/:id
+// already is - no separate 404 case, a dismiss of an id that isn't this
+// user's own (or doesn't exist) just affects zero rows.
+app.patch('/notifications/events/:id/dismiss', requireUser, async (req, res) => {
+  try {
+    const { error } = await supabaseAdmin
+      .from('notification_events')
+      .update({ dismissed_at: new Date().toISOString() })
+      .eq('user_id', req.userId)
+      .eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to dismiss notification' });
   }
 });
 

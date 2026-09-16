@@ -21,6 +21,7 @@ import { useSessionContext } from '../_lib/session';
 import { useAppData } from '../_lib/appData';
 import PrimaryButton from '../_components/PrimaryButton';
 import SorrelWordmark from '../_components/SorrelWordmark';
+import NotificationCenter, { resolveNotificationTarget } from '../_components/NotificationCenter';
 
 // Phase 14 (5-tab conversion, 2026-08-24): account-level actions - Gmail
 // link/unlink, per-bank re-link/delete, biometric-lock preference, sign
@@ -68,6 +69,7 @@ export default function Account() {
   const [gmailEmail, setGmailEmail] = useState(null);
   const [gmailLinking, setGmailLinking] = useState(false);
   const [showGmailExplainer, setShowGmailExplainer] = useState(false);
+  const [showNotificationCenter, setShowNotificationCenter] = useState(false);
   const [addingAccount, setAddingAccount] = useState(false);
   const [error, setError] = useState(null);
   const [signingOut, setSigningOut] = useState(false);
@@ -296,7 +298,14 @@ export default function Account() {
           scroll content at all. */}
       <View style={accountStyles.wordmarkStrip}>
         <SorrelWordmark layout="row" leafSize={30} showTagline={false} />
-        <MaterialIcons name="notifications-none" size={26} color={colors.darkest} />
+        <Pressable
+          onPress={() => setShowNotificationCenter(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Notifications"
+          hitSlop={8}
+        >
+          <MaterialIcons name="notifications-none" size={26} color={colors.darkest} />
+        </Pressable>
       </View>
 
       <ScrollView
@@ -507,6 +516,15 @@ export default function Account() {
         </View>
       </ScrollView>
 
+      <NotificationCenter
+        visible={showNotificationCenter}
+        onClose={() => setShowNotificationCenter(false)}
+        onSelectEvent={(event) => {
+          setShowNotificationCenter(false);
+          const target = resolveNotificationTarget(event);
+          if (target) router.push(target);
+        }}
+      />
       <StatusBar style={isNight ? 'light' : 'dark'} />
     </View>
   );
