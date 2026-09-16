@@ -28,6 +28,28 @@ const FREQUENCY_COPY = {
   monthly: 'this period',
 };
 
+// Advisor agent (2026-09-16): "active" here is narrower than the
+// notification bell/center's own GET /notifications/events query (which
+// also returns `resolved` rows, since that screen is a real history, not
+// just current state). A `resolved` condition already cleared - nothing
+// for an advisor to investigate or explain about it - so this excludes
+// both `dismissed_at` (the user already said "don't tell me about this")
+// and `status = 'resolved'` (the condition itself is no longer true).
+// Mechanically extracted from what GET /notifications/events already
+// queries inline (index.js) rather than a second, independently-written
+// filter - one implementation of "what counts as active."
+async function getActiveNotificationEvents(userId) {
+  const { data, error } = await supabaseAdmin
+    .from('notification_events')
+    .select('id, event_type, category, period_start, status, title, body, data, created_at')
+    .eq('user_id', userId)
+    .in('status', ['pending', 'sent'])
+    .is('dismissed_at', null)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
 function startOfIsoWeek(date) {
   const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   const day = d.getUTCDay();
@@ -536,4 +558,5 @@ module.exports = {
   reconcileLowBalanceEvents,
   recomputeNotificationEvents,
   reminderPeriodStart,
+  getActiveNotificationEvents,
 };

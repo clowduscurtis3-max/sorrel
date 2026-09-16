@@ -133,22 +133,30 @@ function netWorthTrend(netWorthHistory) {
 // One plain-language sentence explaining the bucket above - mirrors the
 // same signal priority the bucket decision itself uses, so the reason
 // never cites a signal that wasn't actually why this bucket was chosen.
-function healthReason(bucket, { severeCount, warnCount, trend }) {
-  if (bucket === 'under_pressure') {
-    if (severeCount >= 1) {
-      return severeCount === 1
-        ? 'One category is significantly over its budgeted pace this month.'
-        : `${severeCount} categories are significantly over their budgeted pace this month.`;
+//
+// Real voice-audit fix (2026-09-16): this used to report only a bare
+// count ("2 categories are trending over budget") - a real fact with no
+// specifics, exactly the "dry data-dump" this app's own product-voice
+// standard forbids (see CLAUDE.md's own worked example: name the
+// category and the real dollar figure, not a count). `worstAlert` is
+// already-computed (alerts.js), never invented here - just the one
+// category actually driving the bucket, named directly, with its own
+// real overage amount.
+function healthReason(bucket, { warnCount, trend, worstAlert }) {
+  // `warnCount` is the total alert count (both severities combined - see
+  // its own definition in computeFinancialHealth) - "others" is everyone
+  // besides the one category actually being named here.
+  const othersCount = Math.max(0, warnCount - 1);
+  const others = othersCount > 0 ? ` (and ${othersCount} other${othersCount === 1 ? '' : 's'})` : '';
+
+  if (bucket === 'under_pressure' || bucket === 'needs_attention') {
+    if (worstAlert) {
+      const overBy = Math.round((worstAlert.projected_amount - worstAlert.budgeted_amount) * 100) / 100;
+      return `${worstAlert.category}${others} is on pace to run $${overBy.toFixed(2)} over budget this month.`;
     }
-    return `${warnCount} categories are trending over budget this month.`;
-  }
-  if (bucket === 'needs_attention') {
-    if (warnCount >= 1) {
-      return warnCount === 1
-        ? 'One category is trending over its budget this month.'
-        : `${warnCount} categories are trending over budget this month.`;
+    if (bucket === 'needs_attention' && trend === 'declining') {
+      return 'Your net worth has dipped over the past month.';
     }
-    if (trend === 'declining') return 'Your net worth has dipped over the past month.';
   }
   return 'Spending and net worth are both in good shape this month.';
 }
@@ -168,37 +176,43 @@ export function computeFinancialHealth(alerts, netWorthHistory) {
   else if (warnCount >= 1 || decliningNetWorth) bucket = 'needs_attention';
   else bucket = 'on_track';
 
-  const reason = healthReason(bucket, { severeCount, warnCount, trend });
+  // The single worst-overage alert (by real dollar amount, not just
+  // severity tier) - healthReason names this one directly instead of
+  // reporting a bare count.
+  const worstAlert = (alerts || []).reduce((worst, a) => {
+    const overBy = a.projected_amount - a.budgeted_amount;
+    const worstOverBy = worst ? worst.projected_amount - worst.budgeted_amount : -Infinity;
+    return overBy > worstOverBy ? a : worst;
+  }, null);
+
+  const reason = healthReason(bucket, { warnCount, trend, worstAlert });
   return { bucket, ...HEALTH_BUCKETS[bucket], reason };
 }
 
-// The 1-2 things worth surfacing right now, per Phase 14's own selector
-// requirement - ranked by materiality, capped at one for the single
-// "Insight" card the mockup shows. Every string reused verbatim from
-// where it was already computed.
+// The single most-material thing worth surfacing right now, per Phase
+// 14's own selector requirement, capped at one for the "Insight" card.
+//
+// Real voice-audit fix (2026-09-16): this used to synthesize its own
+// generic "mainly driven by X and Y" sentence with no real numbers -
+// exactly the kind of fact-with-nothing-concrete this app's product-
+// voice standard forbids. alerts.js already computes a real, specific,
+// dollar-grounded `message` per alert ("Dining is on pace to hit $420
+// this month — about $120 over your $300 budget, based on $310 spent so
+// far.") - reused verbatim here (still zero new Claude call, still pure
+// composition over an existing computed string, same discipline as
+// every other string on this screen) instead of a second, vaguer
+// synthesized sentence.
 export function computeInsight(alerts) {
-  const sorted = [...(alerts || [])].sort((a, b) => {
-    const rank = { severe: 1, warning: 0 };
-    return rank[alertSeverity(b)] - rank[alertSeverity(a)];
-  });
-  if (sorted.length > 0) {
-    // A synthesized advisory sentence, not any single alert's raw
-    // per-category message verbatim - every active alert is already a
-    // pace-based overspend condition (alerts.js only ever emits one once
-    // projected spend clears budget by >10%), so "spending faster than
-    // your budget" is an accurate general description regardless of which
-    // categories triggered it. Still zero new Claude call: this is
-    // composition over category names alerts.js already computed, same
-    // template-over-AI-call discipline as every other string on this
-    // screen.
-    const topCategories = sorted.slice(0, 2).map((a) => a.category);
-    const categoryText =
-      topCategories.length === 1 ? topCategories[0] : `${topCategories[0]} and ${topCategories[1]}`;
-    return {
-      text: `You're spending faster than your budget this month, mainly driven by ${categoryText}.`,
-      detail: null,
-      hasDetail: true,
-    };
+  const worst = (alerts || []).reduce((w, a) => {
+    const overBy = a.projected_amount - a.budgeted_amount;
+    const worstOverBy = w ? w.projected_amount - w.budgeted_amount : -Infinity;
+    return overBy > worstOverBy ? a : w;
+  }, null);
+
+  if (worst) {
+    const othersCount = Math.max(0, (alerts || []).length - 1);
+    const others = othersCount > 0 ? ` ${othersCount} other categor${othersCount === 1 ? 'y is' : 'ies are'} also trending over.` : '';
+    return { text: `${worst.message}${others}`, detail: null, hasDetail: true };
   }
   return { text: 'Nothing needs your attention right now.', detail: null, hasDetail: false };
 }

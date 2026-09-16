@@ -41,6 +41,7 @@ import MonthlyReviewModal from '../_components/MonthlyReviewModal';
 import SpentSoFarModal from '../_components/SpentSoFarModal';
 import IncomeModal from '../_components/IncomeModal';
 import NotificationCenter, { resolveNotificationTarget } from '../_components/NotificationCenter';
+import AdvisorBriefingModal from '../_components/AdvisorBriefingModal';
 
 const STATUS_ICON = { ok: 'check-circle', warning: 'warning', severe: 'error' };
 
@@ -230,6 +231,7 @@ export default function Home() {
     budgetStatus,
     homeChanges,
     monthlyReview,
+    advisorBriefing,
     bankRelinkSignal,
   } = useAppData();
   const { session } = useSessionContext();
@@ -266,6 +268,7 @@ export default function Home() {
   const [showSpentSoFarDetail, setShowSpentSoFarDetail] = useState(false);
   const [showIncomeDetail, setShowIncomeDetail] = useState(false);
   const [showNotificationCenter, setShowNotificationCenter] = useState(false);
+  const [showAdvisorBriefingDetail, setShowAdvisorBriefingDetail] = useState(false);
 
   // Theme redesign (2026-09-11): the illustrated backdrop (and the
   // scrollY/onScroll/onBackdropTextColor machinery that existed only to
@@ -764,8 +767,56 @@ export default function Home() {
   );
   const hiddenCards = new Set(homeSettings.hidden_cards || []);
   const cardOrder = homeSettings.card_order || [];
-  const orderedCardsBeforeStats = orderCardGroup(HOME_CARD_GROUP_BEFORE_STATS, cardOrder);
+  // Direct user request (2026-09-16): "Sorrel's take" should default to
+  // being card #1 on Home - including for a user whose saved card_order
+  // predates this card's existence - but stay a normal, user-movable
+  // member of this same list once they actually reorder it themselves.
+  // orderCardGroup's own general rule (a new card appended at the END of
+  // an existing saved order, so it doesn't just vanish) is exactly right
+  // for cards added later in general, but wrong for this specific one -
+  // handled here at the call site, not by changing that shared function,
+  // so every other card's own migration behavior is unaffected.
+  const cardOrderBeforeStats = cardOrder.includes('advisor_briefing')
+    ? cardOrder
+    : ['advisor_briefing', ...cardOrder];
+  const orderedCardsBeforeStats = orderCardGroup(HOME_CARD_GROUP_BEFORE_STATS, cardOrderBeforeStats);
   const orderedCardsAfterStats = orderCardGroup(HOME_CARD_GROUP_AFTER_STATS, cardOrder);
+
+  // Financial Advisor Agent (2026-09-16) - now a real, user-movable/
+  // hideable member of the Home card system (see HOME_CARD_GROUP_BEFORE_STATS'
+  // own comment for why it still defaults to first). Absent entirely
+  // (not a placeholder) until the first real fetch resolves, same
+  // "no data yet, render nothing" convention every other card here uses.
+  function renderAdvisorBriefingCard() {
+    if (!advisorBriefing) return null;
+    const textColor = readableTextColor(cardColors.advisor_briefing, colors);
+    return (
+      <Pressable
+        style={[
+          styles.card,
+          homeStyles.cardMargin,
+          homeStyles.advisorCard,
+          cardColors.advisor_briefing && { backgroundColor: cardColors.advisor_briefing },
+        ]}
+        onPress={() => setShowAdvisorBriefingDetail(true)}
+        accessibilityRole="button"
+        accessibilityLabel="Sorrel's take - more info"
+      >
+        <Text style={[homeStyles.cardEyebrow, textColor && { color: textColor }]}>SORREL'S TAKE</Text>
+        {/* numberOfLines is a hard backstop, not just a prompt request -
+            real bug found live 2026-09-16: a verbose model response made
+            this card grow to fill the entire screen. The prompt now asks
+            for one short sentence, but this caps it regardless of what
+            the model actually returns. The full explanation and
+            recommended actions live one tap away, in AdvisorBriefingModal -
+            this card is glance-only by design. */}
+        <Text style={[homeStyles.advisorHeadline, textColor && { color: textColor }]} numberOfLines={2}>
+          {advisorBriefing.headline}
+        </Text>
+        <Text style={homeStyles.advisorMoreInfo}>More info</Text>
+      </Pressable>
+    );
+  }
 
   function renderFinancialHealthCard() {
     const textColor = readableTextColor(cardColors.financial_health, colors);
@@ -1154,6 +1205,7 @@ export default function Home() {
   }
 
   const HOME_CARD_RENDERERS = {
+    advisor_briefing: renderAdvisorBriefingCard,
     financial_health: renderFinancialHealthCard,
     insight: renderInsightCard,
     what_changed: renderWhatChangedCard,
@@ -1510,6 +1562,12 @@ export default function Home() {
         }}
       />
 
+      <AdvisorBriefingModal
+        visible={showAdvisorBriefingDetail}
+        onClose={() => setShowAdvisorBriefingDetail(false)}
+        briefing={advisorBriefing}
+      />
+
       <StatusBar style={isNight ? 'light' : 'dark'} />
     </View>
   );
@@ -1685,6 +1743,19 @@ function buildHomeStyles(colors) {
     fontSize: 13,
     color: colors.darkest,
     fontWeight: '600',
+  },
+  advisorCard: {
+    gap: 6,
+  },
+  advisorHeadline: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.darkest,
+  },
+  advisorMoreInfo: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.primary,
   },
   insightCard: {
     flexDirection: 'row',

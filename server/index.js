@@ -37,6 +37,7 @@ const {
 } = require('./budget');
 const { getBudgetHistory } = require('./budgetHistory');
 const { getHomeChanges } = require('./homeChanges');
+const { getAdvisorBriefing } = require('./advisorAgent');
 const { SETTINGS_SECTIONS, getSettings, patchSettings } = require('./settings');
 const { getTransactionsCsv, getBudgetHistoryCsv, getNetWorthCsv } = require('./csvExport');
 const { getMonthlyReview, getPeriodReview } = require('./monthlyReview');
@@ -2089,6 +2090,23 @@ app.get('/home/changes', requireUser, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to load home changes' });
+  }
+});
+
+// Financial Advisor Agent (2026-09-16): the single most-material thing
+// Sorrel currently has to say, investigated via a bounded tool-use loop
+// over real, existing deterministic functions - never a new calculation.
+// getAdvisorBriefing itself never throws (see advisorAgent.js's own
+// try/catch) - it falls back to the last cached briefing on any failure,
+// so this route practically never 500s, but the catch here is kept as a
+// last-resort safety net rather than assumed unreachable.
+app.get('/home/advisor-briefing', requireUser, async (req, res) => {
+  try {
+    const briefing = await getAdvisorBriefing(req.userId);
+    res.json({ briefing });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load advisor briefing' });
   }
 });
 

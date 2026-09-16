@@ -102,6 +102,12 @@ export function AppDataProvider({ children }) {
   // data exists for last month specifically (see monthlyReview.js's own
   // comment) - never fabricated as a $0 review in the meantime.
   const [monthlyReview, setMonthlyReview] = useState(null);
+  // Financial Advisor Agent (2026-09-16) - GET /home/advisor-briefing's own
+  // shape verbatim ({ briefing }). `briefing` is null only on a genuine
+  // first-ever failure with nothing cached yet (server/advisorAgent.js
+  // otherwise always falls back to the last cached result, so this is rare
+  // in practice) - never fabricated as a placeholder in the meantime.
+  const [advisorBriefing, setAdvisorBriefing] = useState(null);
 
   // Real bug found by adversarial review, 2026-08-13: re-linking a bank
   // account via AccountMenu (a plain sibling <Modal>, not a router route -
@@ -226,6 +232,17 @@ export function AppDataProvider({ children }) {
     }
   }
 
+  async function fetchAdvisorBriefing() {
+    try {
+      const res = await apiFetch('/home/advisor-briefing');
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const data = await res.json();
+      setAdvisorBriefing(data.briefing);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   useEffect(() => {
     if (!session) return;
     fetchAlerts();
@@ -237,6 +254,7 @@ export function AppDataProvider({ children }) {
     fetchBudgetStatus();
     fetchHomeChanges();
     fetchMonthlyReview();
+    fetchAdvisorBriefing();
     registerDeviceForPushNotifications().then((token) => {
       pushTokenRef.current = token;
     });
@@ -260,6 +278,7 @@ export function AppDataProvider({ children }) {
           fetchNetWorth();
           fetchBudgetStatus();
           fetchHomeChanges();
+          fetchAdvisorBriefing();
         }, 1500);
       }
       appState.current = nextState;
@@ -315,6 +334,7 @@ export function AppDataProvider({ children }) {
         budgetStatus,
         homeChanges,
         monthlyReview,
+        advisorBriefing,
         refetchAlerts: fetchAlerts,
         refetchGoalsProgress: fetchGoalsProgress,
         refetchSubscriptionAudit: fetchSubscriptionAudit,

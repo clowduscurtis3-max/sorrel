@@ -12,11 +12,27 @@
 // (treating the whole screen as one list) would mean a never-customized
 // user's default order is only reproducible by also making stat tiles a
 // manageable "card," which the brief doesn't ask for.
-export const HOME_CARD_GROUP_BEFORE_STATS = ['financial_health', 'insight', 'what_changed', 'monthly_review'];
+// 'advisor_briefing' (Financial Advisor Agent, 2026-09-16) is listed
+// first deliberately - direct user request: it should default to being
+// the first card on Home, but stay a genuine, movable/hideable member of
+// this same customizable list, not a special fixed section above it.
+// See (tabs)/index.js's own comment where it builds `orderedCardsBeforeStats`
+// for how a user's *existing* saved order (from before this card existed)
+// still gets it inserted at the front by default, rather than silently
+// appended at the end the way orderCardGroup's general forward-compat
+// rule would otherwise place any other newly-added card.
+export const HOME_CARD_GROUP_BEFORE_STATS = [
+  'advisor_briefing',
+  'financial_health',
+  'insight',
+  'what_changed',
+  'monthly_review',
+];
 export const HOME_CARD_GROUP_AFTER_STATS = ['up_next', 'goal_progress', 'upcoming_bills', 'accounts', 'net_worth'];
 export const HOME_CARD_KEYS = [...HOME_CARD_GROUP_BEFORE_STATS, ...HOME_CARD_GROUP_AFTER_STATS];
 
 export const HOME_CARD_TITLES = {
+  advisor_briefing: "Sorrel's take",
   financial_health: 'Financial Health',
   insight: 'Insight',
   what_changed: 'What changed',
