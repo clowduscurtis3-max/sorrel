@@ -1,5 +1,24 @@
 const { SPEND_CATEGORIES } = require('./categorize');
 
+// Moved here from incomeSummary.js, 2026-09-17 (direct user report: the
+// budget total was coming out higher than real income, traced to this
+// exact gap) - summarizeSpending's own averageMonthlyIncome, the figure
+// that actually drives generateBudget/goalFunding's capacity math, used
+// to only sum `category === 'Income'` transactions. A real paycheck
+// lands there, but a P2P payment (Zelle/Cash App/Venmo) that
+// guardAiCategoryAgainstAmountSign (categorize.js) correctly reroutes to
+// 'Transfers' - specifically so it stops being miscounted as spend -
+// was invisible to this function entirely: 'Transfers' isn't a
+// SPEND_CATEGORIES member either, so it never landed in `totals`, and it
+// isn't 'Income', so it never landed in `totalIncome` - a real income
+// source simply vanished from the budget math. incomeSummary.js's own
+// "actual income this period" tile already solved this correctly (any
+// real credit, minus the one concretely-verified self-transfer
+// exclusion) but only for its own presentational figure, never fed back
+// into what actually shapes the budget. Shared here so both use the
+// exact same definition instead of two that could disagree.
+const SELF_TRANSFER_PRIMARY_CATEGORIES = new Set(['LOAN_DISBURSEMENTS']);
+
 // Extracted out of budget.js (2026-09-11, goal-funding work) so
 // goalFunding.js can reuse it without creating a circular require -
 // budget.js needs to import pure functions from goalFunding.js
@@ -61,11 +80,34 @@ function summarizeSpending(transactions, anchorDate = new Date()) {
   const totals = Object.fromEntries(SPEND_CATEGORIES.map((c) => [c, 0]));
   let totalIncome = 0;
 
+  // A transaction in a real spend category (Dining, Groceries, etc.) -
+  // purchase or refund - only ever affects that category's own total,
+  // checked first, so a refund keeps netting against its own spend
+  // figure exactly as before rather than also being double-counted as
+  // separate income. Only 'Income' or 'Transfers' is evaluated for
+  // income - a real credit (negative amount, Plaid's sign convention)
+  // that isn't the one proven self-transfer pattern (a credit-card
+  // payment's own credit-side leg, see SELF_TRANSFER_PRIMARY_CATEGORIES
+  // above).
+  //
+  // This must be an explicit allowlist (=== 'Income' || === 'Transfers'),
+  // not "isn't in totals" - real bug caught by code review, 2026-09-17:
+  // 'Uncategorized' also isn't a SPEND_CATEGORIES member, so the old
+  // implicit check let an unresolved credit (something neither Plaid nor
+  // Claude could confidently place at all) count as confirmed income -
+  // exactly the "fabricated financial fact" this app's own discipline
+  // exists to prevent. An Uncategorized transaction means "not yet
+  // reviewed," not "verified income," and must never inflate the figure
+  // that directly drives generateBudget/goalFunding's capacity math.
   for (const t of recent) {
-    if (t.category === 'Income') {
-      totalIncome += Math.abs(t.amount);
-    } else if (Object.prototype.hasOwnProperty.call(totals, t.category)) {
+    if (Object.prototype.hasOwnProperty.call(totals, t.category)) {
       totals[t.category] += t.amount;
+    } else if (
+      (t.category === 'Income' || t.category === 'Transfers') &&
+      t.amount < 0 &&
+      !SELF_TRANSFER_PRIMARY_CATEGORIES.has(t.personal_finance_category?.primary)
+    ) {
+      totalIncome += Math.abs(t.amount);
     }
   }
 
@@ -77,4 +119,10 @@ function summarizeSpending(transactions, anchorDate = new Date()) {
   return { averages, averageMonthlyIncome: round2(totalIncome / monthCount), monthCount };
 }
 
-module.exports = { HISTORY_DAYS, summarizeSpending, monthRange, currentMonthRange };
+module.exports = {
+  HISTORY_DAYS,
+  summarizeSpending,
+  monthRange,
+  currentMonthRange,
+  SELF_TRANSFER_PRIMARY_CATEGORIES,
+};

@@ -1,6 +1,24 @@
 const CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID;
 const CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
 
+// Audit fix (2026-09-17): a revoked/expired Google refresh token used to
+// throw the exact same plain Error as a transient network blip, so every
+// caller's generic catch treated them identically - receipts went
+// silently stale forever with no way for the user to discover why.
+// Google's token endpoint returns a real, distinguishing error body on
+// an invalid grant (RFC 6749 section 5.2): {"error":"invalid_grant",...}
+// - confirmed against Google's own OAuth2 error documentation, not
+// guessed. GoogleTokenRevokedError is thrown only for that specific,
+// unambiguous case; every other failure (network error, 5xx, malformed
+// body) still throws a plain Error, exactly as before - this only adds a
+// new, narrower failure mode, it doesn't change the existing one.
+class GoogleTokenRevokedError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'GoogleTokenRevokedError';
+  }
+}
+
 async function refreshAccessToken(refresh_token) {
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
@@ -12,7 +30,21 @@ async function refreshAccessToken(refresh_token) {
       grant_type: 'refresh_token',
     }),
   });
-  if (!res.ok) throw new Error(`Failed to refresh Google token: ${await res.text()}`);
+  if (!res.ok) {
+    const bodyText = await res.text();
+    let parsed;
+    try {
+      parsed = JSON.parse(bodyText);
+    } catch {
+      parsed = null;
+    }
+    if (parsed?.error === 'invalid_grant') {
+      throw new GoogleTokenRevokedError(
+        `Google refresh token is no longer valid (revoked or expired): ${bodyText}`
+      );
+    }
+    throw new Error(`Failed to refresh Google token: ${bodyText}`);
+  }
   return res.json();
 }
 
@@ -96,4 +128,4 @@ async function getMessage(access_token, messageId) {
   return { id: messageId, subject, from, date, body };
 }
 
-module.exports = { refreshAccessToken, listCandidateMessages, getMessage };
+module.exports = { refreshAccessToken, listCandidateMessages, getMessage, GoogleTokenRevokedError };

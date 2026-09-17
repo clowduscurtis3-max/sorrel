@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const {
   DISCRETIONARY_FLOOR_RATIO,
   computeDiscretionaryCapacity,
+  computeDiscretionaryTarget,
   allocateGoalFunding,
   orderGoalsByPriority,
 } = require('../goalFunding');
@@ -183,4 +184,62 @@ test('orderGoalsByPriority: no saved order at all falls back to the given array 
   const goals = [goal({ id: 'a' }), goal({ id: 'b' })];
   assert.deepEqual(orderGoalsByPriority(goals, undefined).map((g) => g.id), ['a', 'b']);
   assert.deepEqual(orderGoalsByPriority(goals, null).map((g) => g.id), ['a', 'b']);
+});
+
+// -- computeDiscretionaryTarget -------------------------------------------
+// The real 2026-09-17 fix: this cap used to only engage when a
+// deadline-having goal needed the room (totalGoalFundingNeeded > 0). The
+// first test below is the exact bug - no goal at all, but income still
+// can't support the full discretionary average - which the old
+// generateBudget code let straight through uncapped.
+
+test('computeDiscretionaryTarget: caps below the full average when capacity is tight, even with zero goal funding need', () => {
+  const target = computeDiscretionaryTarget({
+    discretionaryAverageTotal: 1000,
+    discretionaryFloorTotal: 700,
+    capacity: 200,
+    totalGoalFundingNeeded: 0,
+  });
+  assert.equal(target, 900); // floor (700) + whatever capacity actually supports (200), not the full 1000 average
+});
+
+test('computeDiscretionaryTarget: real capacity to spare allows the full average - unchanged soft behavior', () => {
+  const target = computeDiscretionaryTarget({
+    discretionaryAverageTotal: 1000,
+    discretionaryFloorTotal: 700,
+    capacity: 5000,
+    totalGoalFundingNeeded: 0,
+  });
+  assert.equal(target, 1000);
+});
+
+test('computeDiscretionaryTarget: goal funding competing for the same capacity reduces the target further', () => {
+  const target = computeDiscretionaryTarget({
+    discretionaryAverageTotal: 1000,
+    discretionaryFloorTotal: 700,
+    capacity: 500,
+    totalGoalFundingNeeded: 300,
+  });
+  assert.equal(target, 900); // 500 capacity, 300 already spent on goals, 200 left for discretionary above its floor
+});
+
+test('computeDiscretionaryTarget: zero or negative capacity clamps to the floor, never below it', () => {
+  assert.equal(
+    computeDiscretionaryTarget({
+      discretionaryAverageTotal: 1000,
+      discretionaryFloorTotal: 700,
+      capacity: 0,
+      totalGoalFundingNeeded: 0,
+    }),
+    700
+  );
+  assert.equal(
+    computeDiscretionaryTarget({
+      discretionaryAverageTotal: 1000,
+      discretionaryFloorTotal: 700,
+      capacity: -50,
+      totalGoalFundingNeeded: 0,
+    }),
+    700
+  );
 });

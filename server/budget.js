@@ -2,7 +2,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 const supabaseAdmin = require('./supabaseAdmin');
 const { SPEND_CATEGORIES, ESSENTIAL_CATEGORIES, DISCRETIONARY_CATEGORIES } = require('./categorize');
 const { HISTORY_DAYS, summarizeSpending, monthRange, currentMonthRange } = require('./spendingAverages');
-const { DISCRETIONARY_FLOOR_RATIO, getGoalFundingPlan } = require('./goalFunding');
+const { DISCRETIONARY_FLOOR_RATIO, getGoalFundingPlan, computeDiscretionaryTarget } = require('./goalFunding');
 const { getKnownRecurringBillsTotal } = require('./subscriptionAudit');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -100,6 +100,87 @@ function applyKnownBillsFloor(rows, knownBillsFloor) {
   billsRow.reasoning = billsRow.reasoning ? `${billsRow.reasoning} ${note}` : note;
 }
 
+// Pure - the entire post-Claude-response pipeline: validates the raw
+// proposed amounts, applies the known-bills floor, and (only when income
+// genuinely can't support the full discretionary average) rescales
+// discretionary categories to hit the computed target. Extracted from
+// generateBudget (audit fix, 2026-09-17) specifically because this exact
+// sequence - order matters: filter/validate -> known-bills floor ->
+// discretionary rescale - is the part that has now produced two real,
+// live-discovered budget-math bugs (the goal-funding-only cap gate, then
+// the income-overrun bug), and previously had zero automated coverage of
+// its own; every piece it calls (rescaleDiscretionaryRows,
+// applyKnownBillsFloor) was already unit-tested in isolation, but not
+// this composition. Takes Claude's already-parsed response plus every
+// pre-fetched input, so it's directly testable against a fixed response
+// shape without a live Anthropic or Supabase call.
+function buildBudgetRows({
+  proposed,
+  categoriesToGenerate,
+  userId,
+  period_start,
+  period_end,
+  knownBillsFloor,
+  needsDiscretionaryCap,
+  discretionaryCategoriesToGenerate,
+  discretionaryTarget,
+  averages,
+}) {
+  // A category is only usable if Claude gave it a finite, non-negative
+  // number - previously only `typeof === 'number'` was checked, so a
+  // negative, NaN, or Infinity budgeted_amount (malformed response, or a
+  // model slip) would have been written straight to the DB and shown to
+  // the user as a real budget figure. Also tolerates a bare number instead
+  // of the requested {budgeted_amount, reasoning} object - caught live in
+  // testing that Claude doesn't always stick to the exact requested shape
+  // even when told to - so a schema drift degrades to a missing reasoning
+  // string instead of failing the whole generation.
+  const rows = categoriesToGenerate
+    .filter((c) => {
+      const entry = proposed[c];
+      const amount = typeof entry === 'number' ? entry : entry?.budgeted_amount;
+      return typeof amount === 'number' && Number.isFinite(amount) && amount >= 0;
+    })
+    .map((category) => {
+      const entry = proposed[category];
+      const amount = typeof entry === 'number' ? entry : entry.budgeted_amount;
+      return {
+        user_id: userId,
+        category,
+        period_start,
+        period_end,
+        budgeted_amount: Math.round(amount * 100) / 100,
+        reasoning: (typeof entry === 'object' && entry.reasoning) || null,
+        is_user_set: false,
+        updated_at: new Date().toISOString(),
+      };
+    });
+
+  if (rows.length === 0) {
+    throw new Error('AI budget generation returned no usable categories.');
+  }
+
+  applyKnownBillsFloor(rows, knownBillsFloor);
+
+  // Verify Claude's discretionary total actually hit the hard target
+  // computed above, and deterministically correct it if not - a real
+  // income constraint (and/or a real financial commitment to a goal) is
+  // being implied to the user, so this can't be left as a hopeful AI
+  // estimate the way the old prompt-only guidance was. Runs whenever
+  // income genuinely can't support the full average (needsDiscretionaryCap)
+  // - not just when a goal happens to be the reason, per the 2026-09-17 fix.
+  if (needsDiscretionaryCap) {
+    rescaleDiscretionaryRows({
+      rows,
+      discretionaryCategories: discretionaryCategoriesToGenerate,
+      target: discretionaryTarget,
+      averages,
+    });
+  }
+
+  return rows;
+}
+
 // Thrown for a client-state precondition (no data to budget from yet),
 // not a server fault - lets index.js return 400 instead of 500 and the
 // app show this exact, actionable message instead of a generic error.
@@ -188,7 +269,7 @@ async function generateBudget(userId, target = {}) {
 
   const { data: transactions, error: txError } = await supabaseAdmin
     .from('transactions')
-    .select('date, amount, category')
+    .select('date, amount, category, personal_finance_category')
     .eq('user_id', userId);
   if (txError) throw txError;
   if (!transactions || transactions.length === 0) {
@@ -288,21 +369,51 @@ async function generateBudget(userId, target = {}) {
   const totalGoalFundingNeeded = fundingPlan
     ? round2(fundingPlan.allocations.reduce((sum, a) => sum + a.funded_monthly_amount, 0))
     : 0;
-  // Clamped defensively - by construction this should already never dip
-  // below the floor (getGoalFundingPlan's own capacity computation
-  // already respects it), but a hard target handed to an AI prompt
-  // should never rely on that alone.
-  const discretionaryTarget = Math.max(
-    discretionaryFloorTotal,
-    round2(discretionaryAverageTotal - totalGoalFundingNeeded)
-  );
-  const hasGoalFunding = !isBackfill && discretionaryCategoriesToGenerate.length > 0 && totalGoalFundingNeeded > 0.01;
 
-  const goalFundingInstruction = hasGoalFunding
-    ? `Across your active goals, the realistic amount to free up in your ` +
-      `discretionary budget this month is $${totalGoalFundingNeeded.toFixed(2)} - ` +
-      `already computed from your real income, essential spending, and goal ` +
-      `priorities, accounting for what's actually achievable. The combined ` +
+  // Real bug found live 2026-09-17, direct user report ("the total
+  // budgeted amount is higher than my income"): this cap used to only
+  // engage when a deadline-having goal actually needed the room
+  // (gated on hasGoalFunding, which required totalGoalFundingNeeded >
+  // 0) - with no such goal (or one with no capacity left to fund at
+  // all), discretionary categories were left at whatever Claude's own
+  // prompt-only "trim obvious waste 5-15%" guidance produced, with
+  // nothing deterministically verifying the total stayed within real
+  // income. "You can't budget more than you have" has to hold
+  // regardless of whether a goal happens to be competing for the same
+  // room. `fundingPlan.capacity` (getDiscretionaryCapacity) is already
+  // income minus every category's own committed floor (discretionary
+  // included, at its 70% floor) - the room that exists ABOVE every
+  // floor, up to income. Goal funding spends some of that first
+  // (totalGoalFundingNeeded); whatever's left is what discretionary
+  // spend is actually allowed to grow toward its own full average with.
+  const capacity = fundingPlan ? fundingPlan.capacity : Infinity;
+  const discretionaryTarget =
+    discretionaryCategoriesToGenerate.length === 0
+      ? 0
+      : computeDiscretionaryTarget({
+          discretionaryAverageTotal,
+          discretionaryFloorTotal,
+          capacity,
+          totalGoalFundingNeeded,
+        });
+  // Only engage the hard prompt instruction + deterministic rescale
+  // below when income genuinely can't support the full average - if
+  // there's real room, this stays a soft prompt suggestion exactly like
+  // before, matching the original "no goal, no pressure" behavior.
+  const needsDiscretionaryCap =
+    !isBackfill &&
+    discretionaryCategoriesToGenerate.length > 0 &&
+    discretionaryTarget < discretionaryAverageTotal - 0.01;
+
+  const goalFundingInstruction = needsDiscretionaryCap
+    ? (totalGoalFundingNeeded > 0.01
+        ? `Across your active goals, the realistic amount to free up in your ` +
+          `discretionary budget this month is $${totalGoalFundingNeeded.toFixed(2)} - ` +
+          `already computed from your real income, essential spending, and goal ` +
+          `priorities, accounting for what's actually achievable. `
+        : ``) +
+      `Your real income can only support $${discretionaryTarget.toFixed(2)} total across your ` +
+      `discretionary categories once your necessities are covered - the combined ` +
       `budgeted_amount across only these discretionary categories - ` +
       `${discretionaryCategoriesToGenerate.join(', ')} - must sum to exactly ` +
       `$${discretionaryTarget.toFixed(2)} (a firm total, not a suggestion), ` +
@@ -382,53 +493,18 @@ async function generateBudget(userId, target = {}) {
     throw new Error('AI budget generation failed - could not parse a valid response.');
   }
 
-  // A category is only usable if Claude gave it a finite, non-negative
-  // number - previously only `typeof === 'number'` was checked, so a
-  // negative, NaN, or Infinity budgeted_amount (malformed response, or a
-  // model slip) would have been written straight to the DB and shown to
-  // the user as a real budget figure. Also tolerates a bare number instead
-  // of the requested {budgeted_amount, reasoning} object - caught live in
-  // testing that Claude doesn't always stick to the exact requested shape
-  // even when told to - so a schema drift degrades to a missing reasoning
-  // string instead of failing the whole generation.
-  const rows = categoriesToGenerate.filter((c) => {
-    const entry = proposed[c];
-    const amount = typeof entry === 'number' ? entry : entry?.budgeted_amount;
-    return typeof amount === 'number' && Number.isFinite(amount) && amount >= 0;
-  }).map((category) => {
-    const entry = proposed[category];
-    const amount = typeof entry === 'number' ? entry : entry.budgeted_amount;
-    return {
-      user_id: userId,
-      category,
-      period_start,
-      period_end,
-      budgeted_amount: Math.round(amount * 100) / 100,
-      reasoning: (typeof entry === 'object' && entry.reasoning) || null,
-      is_user_set: false,
-      updated_at: new Date().toISOString(),
-    };
+  const rows = buildBudgetRows({
+    proposed,
+    categoriesToGenerate,
+    userId,
+    period_start,
+    period_end,
+    knownBillsFloor,
+    needsDiscretionaryCap,
+    discretionaryCategoriesToGenerate,
+    discretionaryTarget,
+    averages,
   });
-
-  if (rows.length === 0) {
-    throw new Error('AI budget generation returned no usable categories.');
-  }
-
-  applyKnownBillsFloor(rows, knownBillsFloor);
-
-  // Goal-driven funding (2026-09-11): verify Claude's discretionary total
-  // actually hit the hard target computed above, and deterministically
-  // correct it if not - a real financial commitment is being implied to
-  // the user ("this budget frees up $X for your goals"), so this can't be
-  // left as a hopeful AI estimate the way the old prompt-only guidance was.
-  if (hasGoalFunding && discretionaryCategoriesToGenerate.length > 0) {
-    rescaleDiscretionaryRows({
-      rows,
-      discretionaryCategories: discretionaryCategoriesToGenerate,
-      target: discretionaryTarget,
-      averages,
-    });
-  }
 
   // Sanity check, not a hard failure - a total wildly above income points
   // to a bad Claude response, but per this module's own philosophy (see
@@ -944,6 +1020,7 @@ async function applyBudgetEdit(userId, category, newAmount, adjustments = []) {
 
 module.exports = {
   generateBudget,
+  buildBudgetRows,
   rescaleDiscretionaryRows,
   applyKnownBillsFloor,
   resetCategoryToAI,

@@ -187,7 +187,7 @@ async function getBudgetInsight(userId) {
   const cutoff = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - HISTORY_DAYS));
   const { data: transactions, error: txError } = await supabaseAdmin
     .from('transactions')
-    .select('date, amount, category')
+    .select('date, amount, category, personal_finance_category')
     .eq('user_id', userId)
     .gte('date', cutoff.toISOString().slice(0, 10));
   if (txError) throw txError;

@@ -3,7 +3,15 @@ require('./setupEnv');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { parseBriefing, executeTool, stripJargon, runAdvisorInvestigation, MAX_TOOL_ROUNDS } = require('../advisorAgent');
+const {
+  parseBriefing,
+  executeTool,
+  stripJargon,
+  runAdvisorInvestigation,
+  MAX_TOOL_ROUNDS,
+  activeEventsFingerprint,
+  isCacheValid,
+} = require('../advisorAgent');
 
 const VALID = {
   headline: 'Groceries is trending over budget this month.',
@@ -165,4 +173,74 @@ test('parseBriefing: applies the jargon backstop to every string field, not just
   assert.equal(result.headline, 'You have no room left.');
   assert.equal(result.summary, 'Your room is zero this month.');
   assert.equal(result.key_findings[0], 'Extra spending used up your room.');
+});
+
+// -- activeEventsFingerprint / isCacheValid ------------------------------
+// Real bug fixed 2026-09-17, found by audit: the cache used to
+// fingerprint only activeEvents[0] (getActiveNotificationEvents orders by
+// created_at DESC, i.e. most recently CREATED, not most important - an
+// in-place-updated ongoing event never changes created_at). If a
+// lower-priority event happened to sit at index 0, a real worsening of a
+// different, older, more important event went completely undetected by
+// the old single-event fingerprint, silently serving a stale briefing.
+// These tests reproduce that exact scenario against the fix.
+
+function makeEvent(overrides) {
+  return { id: 'evt-1', event_type: 'low_balance', data: { balance: 100 }, ...overrides };
+}
+
+test('activeEventsFingerprint: identical event sets produce the same fingerprint', () => {
+  const events = [makeEvent({ id: 'b', event_type: 'savings_reminder', data: {} }), makeEvent({ id: 'a' })];
+  assert.equal(activeEventsFingerprint(events), activeEventsFingerprint(events.map((e) => ({ ...e }))));
+});
+
+test('activeEventsFingerprint: a change to a NON-top event still changes the fingerprint - the real bug this fixes', () => {
+  // B (savings_reminder) is newer/index-0, matching the exact scenario
+  // from the audit: A (low_balance) is older but the one that actually
+  // worsens.
+  const eventB = { id: 'b', event_type: 'savings_reminder', data: { amount: 50 } };
+  const eventA = { id: 'a', event_type: 'low_balance', data: { balance: 100 } };
+  const before = activeEventsFingerprint([eventB, eventA]);
+
+  // A worsens in place - same id, same event_type, different data - the
+  // way a reopened/updated ongoing condition actually behaves.
+  const eventAWorse = { id: 'a', event_type: 'low_balance', data: { balance: 12 } };
+  const after = activeEventsFingerprint([eventB, eventAWorse]);
+
+  assert.notEqual(before, after, 'a change to any active event must invalidate the cache, not just the top-ranked one');
+});
+
+test('activeEventsFingerprint: an unrelated field change on the top event still changes the fingerprint', () => {
+  const events1 = [makeEvent({ data: { balance: 100 } })];
+  const events2 = [makeEvent({ data: { balance: 40 } })];
+  assert.notEqual(activeEventsFingerprint(events1), activeEventsFingerprint(events2));
+});
+
+test('isCacheValid: a matching fingerprint is a cache hit', () => {
+  const fp = activeEventsFingerprint([makeEvent()]);
+  assert.equal(isCacheValid({ top_event_fingerprint: fp }, fp), true);
+});
+
+test('isCacheValid: a stale fingerprint is correctly reported as a cache miss', () => {
+  const oldFp = activeEventsFingerprint([makeEvent({ data: { balance: 100 } })]);
+  const newFp = activeEventsFingerprint([makeEvent({ data: { balance: 12 } })]);
+  assert.equal(isCacheValid({ top_event_fingerprint: oldFp }, newFp), false);
+});
+
+test('isCacheValid: no cached row at all is honestly a cache miss, never a crash', () => {
+  assert.equal(isCacheValid(null, activeEventsFingerprint([makeEvent()])), false);
+  assert.equal(isCacheValid(undefined, activeEventsFingerprint([makeEvent()])), false);
+});
+
+// Real bug caught by code review on the fix above: getActiveNotificationEvents
+// orders only by created_at DESC with no tiebreaker, and events are
+// routinely batch-inserted with an identical created_at - without a
+// stable sort inside the fingerprint itself, Postgres's unspecified tie
+// order could flip between two fetches of the exact same underlying set,
+// spuriously invalidating the cache and forcing a real, billed Claude
+// call for no actual change.
+test('activeEventsFingerprint: is order-independent - a tie-order flip from the DB never changes the fingerprint', () => {
+  const eventA = { id: 'aaaa', event_type: 'low_balance', data: { balance: 40 } };
+  const eventB = { id: 'bbbb', event_type: 'overspend_pace', data: { amount: 12 } };
+  assert.equal(activeEventsFingerprint([eventA, eventB]), activeEventsFingerprint([eventB, eventA]));
 });

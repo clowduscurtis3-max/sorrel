@@ -340,9 +340,49 @@ async function runAdvisorInvestigation({ userId, activeEvents, client = anthropi
   return null;
 }
 
-function fingerprint(event) {
-  if (!event) return null;
-  return crypto.createHash('sha256').update(JSON.stringify(event.data || {})).digest('hex');
+// 2026-09-17 fix (real bug, found by audit): this used to fingerprint
+// only `activeEvents[0]` - but getActiveNotificationEvents orders by
+// created_at DESC (most recently CREATED), not by severity/priority, and
+// an ongoing condition is updated in place without its created_at ever
+// changing. So if a lower-priority event happened to be the most
+// recently created row, a real worsening of a different, older, more
+// important event (its `data` changing, its `created_at` untouched)
+// never showed up in the old single-event fingerprint - the cache kept
+// reporting a hit and serving a stale briefing even though the actual
+// top-priority condition had materially changed underneath it.
+//
+// Fixed by fingerprinting the *entire* active-events set (every id +
+// event_type + data), not just index 0 - simpler than trying to have the
+// model report back which event(s) it actually grounded its answer in,
+// and correct: any real change to any active event now invalidates the
+// cache, at the cost of somewhat more frequent recomputation than the
+// old (buggy) narrower key.
+//
+// Sorted by id before hashing - real bug caught by code review on this
+// same fix: getActiveNotificationEvents orders only by created_at DESC
+// with no tiebreaker, and notificationEvents.js batch-inserts events in
+// several places (`.insert(toInsert.map(...))`), so multiple rows
+// routinely share an identical created_at. Without a stable sort here,
+// Postgres's unspecified tie order could flip between two fetches with
+// nothing actually changing, making JSON.stringify's order-sensitivity
+// produce a different fingerprint and spuriously invalidate the cache -
+// a real, repeated, billed Claude call on every request instead of the
+// cache doing its job. Sorting by id (stable, always present, never
+// changes for a given row) makes the fingerprint depend only on the
+// actual *set* of active events and their content, never on fetch order.
+function activeEventsFingerprint(events) {
+  const relevant = (events || [])
+    .map((e) => ({ id: e.id, event_type: e.event_type, data: e.data || {} }))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return crypto.createHash('sha256').update(JSON.stringify(relevant)).digest('hex');
+}
+
+// Pure - the actual cache-hit decision, extracted from getAdvisorBriefing
+// so it's directly unit-testable without touching Supabase at all,
+// matching this codebase's own computeX (pure) / getX (DB wrapper) split
+// used everywhere else rather than mocking the DB layer.
+function isCacheValid(cached, activeFingerprint) {
+  return Boolean(cached && cached.top_event_fingerprint === activeFingerprint);
 }
 
 // Top-level orchestrator: fetch active events, zero-cost short-circuit
@@ -372,7 +412,7 @@ async function getAdvisorBriefing(userId) {
     }
 
     const topEvent = activeEvents[0];
-    const topEventFingerprint = fingerprint(topEvent);
+    const activeFingerprint = activeEventsFingerprint(activeEvents);
 
     const { data: cached } = await supabaseAdmin
       .from('advisor_briefings')
@@ -380,7 +420,7 @@ async function getAdvisorBriefing(userId) {
       .eq('user_id', userId)
       .maybeSingle();
 
-    if (cached && cached.top_event_id === topEvent.id && cached.top_event_fingerprint === topEventFingerprint) {
+    if (isCacheValid(cached, activeFingerprint)) {
       console.log('[advisor-agent]', { userId, roundsUsed: 0, toolsCalled: [], durationMs: Date.now() - startedAt, outcome: 'cache-hit' });
       return cached.structured_output;
     }
@@ -388,10 +428,14 @@ async function getAdvisorBriefing(userId) {
     const briefing = await runAdvisorInvestigation({ userId, activeEvents });
     if (!briefing) throw new Error('advisor agent produced no valid briefing');
 
+    // top_event_id is kept as informational metadata only (which event
+    // was ranked top at compute time) - it is no longer part of the
+    // cache-hit decision itself, see activeEventsFingerprint's own
+    // comment above for why.
     const { error: upsertError } = await supabaseAdmin.from('advisor_briefings').upsert({
       user_id: userId,
       top_event_id: topEvent.id,
-      top_event_fingerprint: topEventFingerprint,
+      top_event_fingerprint: activeFingerprint,
       structured_output: briefing,
       computed_at: new Date().toISOString(),
     });
@@ -424,4 +468,6 @@ module.exports = {
   runAdvisorInvestigation,
   getAdvisorBriefing,
   MAX_TOOL_ROUNDS,
+  activeEventsFingerprint,
+  isCacheValid,
 };

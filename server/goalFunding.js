@@ -64,6 +64,29 @@ function computeDiscretionaryCapacity({
   return { capacity, min_spend_by_category: minSpendByCategory };
 }
 
+// Pure. The actual dollar total discretionary categories are allowed to
+// sum to this month - the floor (each category's own DISCRETIONARY_FLOOR_RATIO
+// of its average) plus whatever real capacity remains above it once goal
+// funding has already drawn from the same pool. Extracted from
+// generateBudget (budget.js), 2026-09-17, direct user report: the total
+// budgeted amount was coming out higher than real income, traced to this
+// cap only ever engaging when a deadline-having goal needed the room -
+// with no such goal, nothing deterministically kept discretionary
+// spend within what `capacity` actually supports. This function is the
+// one place that math lives now, independently testable from
+// generateBudget's own "does this even need to be capped" decision.
+function computeDiscretionaryTarget({
+  discretionaryAverageTotal,
+  discretionaryFloorTotal,
+  capacity,
+  totalGoalFundingNeeded = 0,
+}) {
+  const roomAboveFloor = round2(discretionaryAverageTotal - discretionaryFloorTotal);
+  return round2(
+    discretionaryFloorTotal + Math.max(0, Math.min(capacity - totalGoalFundingNeeded, roomAboveFloor))
+  );
+}
+
 // DB-touching wrapper. `simulateEdit: { category, budgeted_amount }`
 // overrides/inserts one entry into the real user-set map before
 // computing - this is the exact mechanism computeBudgetEditFundingImpact
@@ -72,7 +95,7 @@ function computeDiscretionaryCapacity({
 async function getDiscretionaryCapacity(userId, { simulateEdit } = {}) {
   const { data: transactions, error: txError } = await supabaseAdmin
     .from('transactions')
-    .select('date, amount, category')
+    .select('date, amount, category, personal_finance_category')
     .eq('user_id', userId);
   if (txError) throw txError;
 
@@ -215,6 +238,7 @@ async function computeBudgetEditFundingImpact(userId, category, newAmount) {
 module.exports = {
   DISCRETIONARY_FLOOR_RATIO,
   computeDiscretionaryCapacity,
+  computeDiscretionaryTarget,
   getDiscretionaryCapacity,
   allocateGoalFunding,
   orderGoalsByPriority,

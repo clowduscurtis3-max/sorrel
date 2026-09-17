@@ -1,5 +1,5 @@
 const supabaseAdmin = require('./supabaseAdmin');
-const { summarizeSpending, currentMonthRange } = require('./spendingAverages');
+const { summarizeSpending, currentMonthRange, SELF_TRANSFER_PRIMARY_CATEGORIES } = require('./spendingAverages');
 
 function round2(n) {
   return Math.round(n * 100) / 100;
@@ -9,46 +9,35 @@ function round2(n) {
 // "Expected income" and "Actual income" (this month so far), placed next
 // to the existing Spent So Far/Projected Spend tiles.
 //
-// "Expected" deliberately reuses the SAME income figure already driving
-// budget generation and goal-funding capacity (`summarizeSpending`'s
-// `averageMonthlyIncome`, a 90-day trailing average of `Income`-category
-// transactions only) - a second, independently-computed income estimate
-// could disagree with the number already shaping the budget/goal math
-// elsewhere in this app.
+// "Expected" reuses the SAME income figure driving budget generation and
+// goal-funding capacity (`summarizeSpending`'s `averageMonthlyIncome`) -
+// a second, independently-computed income estimate could disagree with
+// the number already shaping the budget/goal math elsewhere in this app.
 //
-// "Actual" is deliberately a DIFFERENT, broader definition, per explicit
-// direct user instruction: every real credit (negative amount, Plaid's
-// own sign convention for money coming INTO the account) landing in the
-// current period, regardless of category - not just ones the
-// categorizer happened to label "Income". This matters because a lot of
-// real income (Zelle/Cash App/Venmo payments from other people, for
-// instance) lands under "Transfers" in this app's category scheme, not
-// "Income" - see categorize.js's own `guardAiCategoryAgainstAmountSign`
-// for the related fix that sends unrecognized incoming P2P payments
-// there. Deliberately NOT the same definition "expected" uses - flagged
-// here so a future reader doesn't assume the two numbers should always
-// closely track each other; they can legitimately diverge (e.g. a month
-// with a lot of one-off reimbursements/gifts shows real "actual" well
-// above the paycheck-only "expected" average).
-//
-// Real bug found live 2026-09-15, right after this was first built and
-// verified against the real account: a credit-card payment's credit-side
-// leg (landing on the CARD's own transaction feed as "Payment Thank
-// You-Mobile", $1,000/$7,000 in the real account this period) is also a
-// negative amount, and was being counted as "income" - $8,000 of it,
-// against a real ~$2,400 in actual income. This is exactly the internal-
-// transfer risk flagged when this feature was first built. Plaid's own
-// classification for this specific case is reliable and unambiguous
+// Both figures share the same broad definition now (2026-09-17, direct
+// user report that the budget total was coming out higher than real
+// income - traced to "expected" originally only counting `Income`-
+// category transactions, missing real P2P payments (Zelle/Cash App/
+// Venmo) that `guardAiCategoryAgainstAmountSign` (categorize.js)
+// correctly reroutes to 'Transfers' - invisible to the old narrow sum
+// entirely, silently understating real income and the budget math built
+// on it). `SELF_TRANSFER_PRIMARY_CATEGORIES` below (shared with
+// summarizeSpending, spendingAverages.js) is the one concretely-verified
+// exclusion in both: a credit-card payment's own credit-side leg
 // (`LOAN_DISBURSEMENTS`, VERY_HIGH confidence in the real data - money
-// being credited onto a loan/credit account, i.e. a payment *received*
-// on it, not new money entering the household) - excluded on that basis,
-// not a guess. Deliberately narrow: only this one, concretely-verified
-// self-transfer pattern is excluded, not every TRANSFER_IN subtype
-// Plaid's taxonomy has - broadening this further without evidence a
-// specific subtype is actually causing a real problem in this account's
-// data would be exactly the kind of unverified guess this app's own
-// "never fabricate a financial fact" discipline exists to avoid.
-const SELF_TRANSFER_PRIMARY_CATEGORIES = new Set(['LOAN_DISBURSEMENTS']);
+// being credited onto a loan/credit account, not new money entering the
+// household) - found live 2026-09-15 miscounting $8,000 of a real
+// account's own card payments as income. Deliberately narrow - not every
+// TRANSFER_IN subtype Plaid's taxonomy has, only this one proven pattern.
+//
+// The two figures still legitimately diverge, just for a narrower reason
+// now: "expected" is a 90-day trailing average and (like every category
+// average in this app) nets a spend-category refund against that
+// category's own total rather than also counting it as separate income;
+// "actual" is this period only and counts every real credit regardless
+// of category, refunds included, for full transparency on what's being
+// shown. A month with a lot of one-off reimbursements can still show
+// "actual" well above "expected" - that's real, not a bug.
 
 async function getIncomeSummary(userId) {
   const { period_start, period_end } = currentMonthRange();

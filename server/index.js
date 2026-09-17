@@ -20,6 +20,7 @@ const {
   refreshAccessToken,
   listCandidateMessages,
   getMessage,
+  GoogleTokenRevokedError,
 } = require('./gmail');
 const { extractReceipts } = require('./receipts');
 const { matchReceiptsToTransactions } = require('./matching');
@@ -3860,6 +3861,7 @@ app.get('/auth/google/callback', async (req, res) => {
         access_token: encrypt(tokens.access_token),
         refresh_token: encrypt(tokens.refresh_token),
         expires_at: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
+        needs_relink: false,
       },
       { onConflict: 'user_id' }
     );
@@ -3875,12 +3877,12 @@ app.get('/auth/google/callback', async (req, res) => {
 app.get('/gmail/status', requireUser, async (req, res) => {
   const { data, error } = await supabaseAdmin
     .from('gmail_accounts')
-    .select('email')
+    .select('email, needs_relink')
     .eq('user_id', req.userId)
     .single();
 
   if (error || !data) return res.status(404).json({ error: 'No linked email account' });
-  res.json({ email: data.email });
+  res.json({ email: data.email, needs_relink: Boolean(data.needs_relink) });
 });
 
 app.post('/gmail/unlink', requireUser, async (req, res) => {
@@ -3914,7 +3916,7 @@ app.get('/receipts', requireUser, async (req, res) => {
     try {
       await scanForReceipts(req.userId, account);
     } catch (err) {
-      if (err instanceof DecryptionError) throw err;
+      if (err instanceof DecryptionError || err instanceof GoogleTokenRevokedError) throw err;
       logError('Gmail receipt scan failed (non-fatal):', err);
     }
 
@@ -3929,6 +3931,13 @@ app.get('/receipts', requireUser, async (req, res) => {
   } catch (err) {
     if (err instanceof DecryptionError) {
       console.error('Stored Gmail token failed to decrypt for user', req.userId, '-', err.message);
+      return res.status(409).json({
+        error: 'Your Gmail connection needs to be re-linked.',
+        code: 'RELINK_REQUIRED',
+      });
+    }
+    if (err instanceof GoogleTokenRevokedError) {
+      console.error('Gmail refresh token revoked/expired for user', req.userId, '-', err.message);
       return res.status(409).json({
         error: 'Your Gmail connection needs to be re-linked.',
         code: 'RELINK_REQUIRED',
@@ -3950,8 +3959,23 @@ async function scanForReceipts(userId, account) {
   let accessToken = decrypt(account.access_token);
 
   if (new Date(account.expires_at).getTime() < Date.now() + 60_000) {
-    const refreshed = await refreshAccessToken(decrypt(account.refresh_token));
+    // Audit fix (2026-09-17): a genuinely revoked/expired grant is now a
+    // distinct, caught error (GoogleTokenRevokedError - see gmail.js) so
+    // it can be flagged instead of being treated the same as a transient
+    // network blip. Mirrors plaid_items.needs_relink exactly.
+    let refreshed;
+    try {
+      refreshed = await refreshAccessToken(decrypt(account.refresh_token));
+    } catch (err) {
+      if (err instanceof GoogleTokenRevokedError) {
+        await supabaseAdmin.from('gmail_accounts').update({ needs_relink: true }).eq('user_id', userId);
+      }
+      throw err;
+    }
     accessToken = refreshed.access_token;
+    // A successful refresh is real, live proof the grant is valid again -
+    // clears any stale needs_relink flag in the same write as the new
+    // token, not a separate conditional check.
     await supabaseAdmin
       .from('gmail_accounts')
       .update({
@@ -3959,6 +3983,7 @@ async function scanForReceipts(userId, account) {
         expires_at: new Date(
           Date.now() + refreshed.expires_in * 1000
         ).toISOString(),
+        needs_relink: false,
       })
       .eq('user_id', userId);
   }

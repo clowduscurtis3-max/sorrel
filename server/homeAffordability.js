@@ -207,7 +207,7 @@ function computeHomeAffordability({
 // rates were 5%" question) without needing a second function.
 async function getHomeAffordability(userId, { homePrice, downPayment, state, loanTermYears, annualRatePercent }) {
   const [{ data: transactions, error: txError }, { data: recurringSeries, error: seriesError }] = await Promise.all([
-    supabaseAdmin.from('transactions').select('date, amount, category').eq('user_id', userId),
+    supabaseAdmin.from('transactions').select('date, amount, category, personal_finance_category').eq('user_id', userId),
     supabaseAdmin.from('recurring_series').select('typical_amount, interval, debt_type').eq('user_id', userId),
   ]);
   if (txError) throw txError;
