@@ -1,8 +1,14 @@
-import { useMemo } from 'react';
-import { View, Text, Modal, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, Modal, Pressable, ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useTheme } from '../_lib/theme';
-import { formatDecimal } from '../_lib/api';
+import {
+  apiErrorMessage,
+  formatDecimal,
+  formatAmount,
+  formatShortDate,
+  fetchTransactionsForCategoryPeriod,
+} from '../_lib/api';
 import { iconForCategory } from '../_lib/categoryIcons';
 
 // Direct user request: Home's Monthly Review card should open into "a
@@ -16,6 +22,41 @@ import { iconForCategory } from '../_lib/categoryIcons';
 export default function MonthlyReviewModal({ visible, onClose, monthlyReview }) {
   const { colors, styles } = useTheme();
   const localStyles = useMemo(() => buildLocalStyles(colors), [colors]);
+
+  // Direct user request, 2026-09-17: "what exactly i spent money on" per
+  // category within a closed month's review, not just the budgeted/
+  // actual/remaining totals this modal already showed. A local-state
+  // swap inside this same modal (not a second stacked <Modal>) - matches
+  // this app's own established "no modal-over-modal" discipline
+  // (Budget tab's own category detail view uses the identical pattern
+  // one level up, at the screen level instead of inside a modal).
+  const [viewingCategory, setViewingCategory] = useState(null);
+  const [categoryTransactions, setCategoryTransactions] = useState(null);
+  const [categoryTxError, setCategoryTxError] = useState(null);
+  // Read inside openCategory's async continuation below, which needs to
+  // know whether IT is still the most recently requested category by the
+  // time its own fetch resolves - a plain closure over `viewingCategory`
+  // would only ever see whatever it was at call time. Found by code
+  // review, 2026-09-17: tapping one category, backing out, then tapping a
+  // second (faster-resolving) one could let the first category's slower
+  // response land afterward and silently overwrite the second category's
+  // already-displayed transactions - same "ref tracks the current
+  // selection so a stale async result can be discarded" pattern this app
+  // already uses for viewingGoalId (goal.js) and viewingItemId (Home).
+  const viewingCategoryRef = useRef(null);
+
+  // Reset back to the category-list view whenever this modal closes, so
+  // reopening it (a different month, once one has closed) never starts
+  // stuck on the previous month's drill-down.
+  useEffect(() => {
+    if (!visible) {
+      viewingCategoryRef.current = null;
+      setViewingCategory(null);
+      setCategoryTransactions(null);
+      setCategoryTxError(null);
+    }
+  }, [visible]);
+
   if (!monthlyReview) return null;
 
   const monthLabel = new Date(`${monthlyReview.period_start}T00:00:00Z`).toLocaleDateString('en-US', {
@@ -25,11 +66,48 @@ export default function MonthlyReviewModal({ visible, onClose, monthlyReview }) 
   });
   const rows = [...(monthlyReview.status || [])].sort((a, b) => b.actual - a.actual);
 
+  function backToCategoryList() {
+    viewingCategoryRef.current = null;
+    setViewingCategory(null);
+  }
+
+  async function openCategory(category) {
+    viewingCategoryRef.current = category;
+    setViewingCategory(category);
+    setCategoryTransactions(null);
+    setCategoryTxError(null);
+    try {
+      const { transactions, error } = await fetchTransactionsForCategoryPeriod(
+        category,
+        monthlyReview.period_start,
+        monthlyReview.period_end
+      );
+      if (viewingCategoryRef.current !== category) return; // a newer tap already superseded this one
+      setCategoryTransactions(transactions);
+      if (error) setCategoryTxError(error);
+    } catch (err) {
+      if (viewingCategoryRef.current !== category) return;
+      console.error(err);
+      setCategoryTxError(apiErrorMessage(err));
+    }
+  }
+
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <View style={styles.container}>
         <View style={styles.topBar}>
-          <View />
+          {viewingCategory !== null ? (
+            <Pressable
+              style={localStyles.closeButton}
+              onPress={backToCategoryList}
+              accessibilityRole="button"
+              accessibilityLabel="Back to month review"
+            >
+              <MaterialIcons name="arrow-back" size={20} color={colors.primary} />
+            </Pressable>
+          ) : (
+            <View />
+          )}
           <Pressable
             style={localStyles.closeButton}
             onPress={onClose}
@@ -40,6 +118,35 @@ export default function MonthlyReviewModal({ visible, onClose, monthlyReview }) 
           </Pressable>
         </View>
 
+        {viewingCategory !== null ? (
+          <ScrollView style={localStyles.scroll} contentContainerStyle={localStyles.scrollContent}>
+            <Text style={styles.cardTitle}>{viewingCategory}</Text>
+            <Text style={localStyles.categoryDetailSubtitle}>{monthLabel}</Text>
+
+            {categoryTxError ? (
+              <Text style={styles.errorText}>{categoryTxError}</Text>
+            ) : categoryTransactions === null ? (
+              <ActivityIndicator style={localStyles.categoryDetailLoading} />
+            ) : categoryTransactions.length === 0 ? (
+              <Text style={localStyles.categoryMeta}>No transactions in this category this month.</Text>
+            ) : (
+              categoryTransactions.map((t) => (
+                <View key={t.transaction_id} style={[styles.card, localStyles.txRow]}>
+                  <View style={localStyles.categoryIconCircle}>
+                    <MaterialIcons name={iconForCategory(t.category)} size={16} color={colors.dark} />
+                  </View>
+                  <View style={localStyles.txTextCol}>
+                    <Text style={localStyles.categoryName} numberOfLines={1}>
+                      {t.merchant_name || t.name}
+                    </Text>
+                    <Text style={localStyles.categoryMeta}>{formatShortDate(t.date)}</Text>
+                  </View>
+                  <Text style={localStyles.categoryName}>{formatAmount(t.amount)}</Text>
+                </View>
+              ))
+            )}
+          </ScrollView>
+        ) : (
         <ScrollView style={localStyles.scroll} contentContainerStyle={localStyles.scrollContent}>
           <Text style={styles.cardTitle}>{monthLabel} Review</Text>
 
@@ -89,7 +196,13 @@ export default function MonthlyReviewModal({ visible, onClose, monthlyReview }) 
             <>
               <Text style={localStyles.sectionLabel}>BY CATEGORY</Text>
               {rows.map((r) => (
-                <View key={r.category} style={[styles.card, localStyles.categoryRow]}>
+                <Pressable
+                  key={r.category}
+                  style={[styles.card, localStyles.categoryRow]}
+                  onPress={() => openCategory(r.category)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`See ${r.category} transactions for ${monthLabel}`}
+                >
                   <View style={localStyles.categoryIconCircle}>
                     <MaterialIcons name={iconForCategory(r.category)} size={16} color={colors.dark} />
                   </View>
@@ -111,11 +224,13 @@ export default function MonthlyReviewModal({ visible, onClose, monthlyReview }) 
                       {r.remaining < 0 ? '-' : ''}${formatDecimal(Math.abs(r.remaining))}
                     </Text>
                   )}
-                </View>
+                  <MaterialIcons name="chevron-right" size={20} color={colors.muted} />
+                </Pressable>
               ))}
             </>
           )}
         </ScrollView>
+        )}
       </View>
     </Modal>
   );
@@ -221,6 +336,22 @@ function buildLocalStyles(colors) {
   categoryRemaining: {
     fontSize: 13,
     fontWeight: '600',
+  },
+  categoryDetailSubtitle: {
+    fontSize: 13,
+    color: colors.muted,
+    marginTop: -8,
+  },
+  categoryDetailLoading: {
+    marginTop: 12,
+  },
+  txRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  txTextCol: {
+    flex: 1,
   },
   });
 }

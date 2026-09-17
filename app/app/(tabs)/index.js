@@ -17,7 +17,7 @@ import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { createPlaidLinkSession } from 'react-native-plaid-link-sdk';
 import { MaterialIcons } from '@expo/vector-icons';
-import { apiFetch, apiErrorMessage, formatAmount, formatDecimal, formatWhole, CATEGORIES } from '../_lib/api';
+import { apiFetch, apiErrorMessage, formatAmount, formatDecimal, formatWhole, formatShortDate, CATEGORIES } from '../_lib/api';
 import { readableTextColor, isValidHexColor } from '../_lib/styles';
 import { useTheme } from '../_lib/theme';
 import { useAppData } from '../_lib/appData';
@@ -121,17 +121,6 @@ function formatUpNextText(date) {
   if (days <= 0) return 'expected today';
   if (days === 1) return 'expected tomorrow';
   return `expected in ${days} days`;
-}
-
-// Per-transaction date shown in the per-bank drill-down list (direct user
-// request, 2026-09-03: transactions had no visible date at all, grouped
-// only by category, so there was no way to tell when anything happened).
-// Short month + day, no year - the section header above each row already
-// establishes the month/year, so repeating it per row would be redundant;
-// this is just enough to scan quickly within a month's transactions.
-function formatShortDate(dateOnly) {
-  const d = new Date(`${dateOnly}T00:00:00Z`);
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 }
 
 function formatMonthTitle(monthKey) {

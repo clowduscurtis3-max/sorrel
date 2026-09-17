@@ -240,6 +240,49 @@ export function formatDateMDY(isoDate) {
   return `${mm}/${dd}/${d.getUTCFullYear()}`;
 }
 
+// Moved here from (tabs)/index.js, 2026-09-17 - a second consumer
+// (MonthlyReviewModal's own category transaction drill-down) needed the
+// exact same "short month + day, no year" per-transaction date, the
+// month/year already established by whatever heading sits above the
+// list. One implementation instead of a second copy.
+export function formatShortDate(dateOnly) {
+  const d = new Date(`${dateOnly}T00:00:00Z`);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
+// Extracted 2026-09-17 (flagged by /code-review medium) - Budget tab's
+// own category detail view and MonthlyReviewModal's new category
+// drill-down both need "this user's transactions in one category during
+// one period," and had started drifting as two near-identical copies
+// (this fetch/filter logic, not the surrounding component state). GET
+// /transactions returns the user's full history unscoped by period
+// (`?sync=false` reads straight from the DB instead of forcing a live
+// Plaid sync on every tap - see budget.js's own original comment on
+// why), so both call sites filter it down client-side the same way.
+// `periodStart`/`periodEnd` falsy (e.g. a budget status that hasn't
+// loaded yet) returns an empty list rather than comparing against
+// `undefined` - same defensive behavior the original two copies each
+// had, just expressed once now.
+export async function fetchTransactionsForCategoryPeriod(category, periodStart, periodEnd) {
+  const res = await apiFetch('/transactions?sync=false');
+  if (res.status === 404) {
+    return { transactions: [], error: null };
+  }
+  if (res.status === 409) {
+    const body = await res.json().catch(() => ({}));
+    return { transactions: [], error: body.error || 'Your bank connection needs to be re-linked.' };
+  }
+  if (!res.ok) throw new Error('SERVER_ERROR');
+  const data = await res.json();
+  const transactions =
+    periodStart && periodEnd
+      ? (data.transactions || []).filter(
+          (t) => t.category === category && t.date >= periodStart && t.date <= periodEnd
+        )
+      : [];
+  return { transactions, error: null };
+}
+
 // Shared by every plain typed/voice-transcribed dollar-amount field in this
 // app (the Goal Calculator's amount field, 2026-08-25; GoalForm's target
 // amount, 2026-08-27) - strips everything but digits/decimal point so

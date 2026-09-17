@@ -21,7 +21,14 @@ import { StatusBar } from 'expo-status-bar';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { apiFetch, apiErrorMessage, formatDecimal, formatAmount, logRecommendationEvent } from '../_lib/api';
+import {
+  apiFetch,
+  apiErrorMessage,
+  formatDecimal,
+  formatAmount,
+  logRecommendationEvent,
+  fetchTransactionsForCategoryPeriod,
+} from '../_lib/api';
 import { useTheme } from '../_lib/theme';
 import { useAppData } from '../_lib/appData';
 import { iconForCategory } from '../_lib/categoryIcons';
@@ -77,6 +84,11 @@ export default function Budget() {
   const [viewingCategory, setViewingCategory] = useState(null);
   const [categoryTransactions, setCategoryTransactions] = useState(null);
   const [categoryTxError, setCategoryTxError] = useState(null);
+  // See fetchCategoryTransactions's own comment (below) for why this
+  // exists - a ref, not just viewingCategory state, since it's read
+  // synchronously inside an async continuation that needs to know
+  // whether it's still the most recently requested category.
+  const viewingCategoryRef = useRef(null);
 
   const [budgetStatus, setBudgetStatus] = useState(null);
   const [loadingBudget, setLoadingBudget] = useState(false);
@@ -193,45 +205,35 @@ export default function Budget() {
   // stale (Home's own poll or focus-refetch already keeps it current).
   // `?sync=false` reads straight from the DB instead - still real data,
   // never fabricated, just not forcing a redundant resync on every tap.
+  // Code review, 2026-09-17: extracted into shared fetchTransactionsForCategoryPeriod
+  // (_lib/api.js) once MonthlyReviewModal.js needed the identical fetch/
+  // filter logic for a closed month's own period instead of this tab's
+  // live budgetStatus - one implementation instead of two drifting
+  // copies. Also added viewingCategoryRef (below) at the same time - a
+  // second, faster-resolving openCategory call (tap a category, back
+  // out, tap a different one before the first request lands) could
+  // otherwise let the first category's stale response silently overwrite
+  // the second category's already-displayed transactions.
   async function fetchCategoryTransactions(category) {
     setCategoryTxError(null);
     try {
-      const res = await apiFetch('/transactions?sync=false');
-      // 404 means "no linked bank account yet" (GET /transactions' own
-      // NoLinkedAccountError handling) - not a real error here, just an
-      // empty list.
-      if (res.status === 404) {
-        setCategoryTransactions([]);
-        return;
-      }
-      // Same re-link case Home's own fetchTransactions already handles -
-      // a decrypt failure across every linked Item reads the same way
-      // here: nothing to show, with the specific reason surfaced instead
-      // of falling through to a generic error.
-      if (res.status === 409) {
-        const body = await res.json().catch(() => ({}));
-        setCategoryTransactions([]);
-        setCategoryTxError(body.error || 'Your bank connection needs to be re-linked.');
-        return;
-      }
-      if (!res.ok) throw new Error('SERVER_ERROR');
-      const data = await res.json();
-      setCategoryTransactions(
-        (data.transactions || []).filter(
-          (t) =>
-            t.category === category &&
-            budgetStatus &&
-            t.date >= budgetStatus.period_start &&
-            t.date <= budgetStatus.period_end
-        )
+      const { transactions, error } = await fetchTransactionsForCategoryPeriod(
+        category,
+        budgetStatus?.period_start,
+        budgetStatus?.period_end
       );
+      if (viewingCategoryRef.current !== category) return; // a newer tap already superseded this one
+      setCategoryTransactions(transactions);
+      if (error) setCategoryTxError(error);
     } catch (err) {
+      if (viewingCategoryRef.current !== category) return;
       console.error(err);
       setCategoryTxError(apiErrorMessage(err));
     }
   }
 
   function openCategory(category) {
+    viewingCategoryRef.current = category;
     setViewingCategory(category);
     setCategoryTransactions(null);
     fetchCategoryTransactions(category);
@@ -609,7 +611,10 @@ export default function Budget() {
               <View style={budgetLocalStyles.categoryDetailHeaderRow}>
                 <Pressable
                   style={budgetLocalStyles.categoryDetailBackButton}
-                  onPress={() => setViewingCategory(null)}
+                  onPress={() => {
+                    viewingCategoryRef.current = null;
+                    setViewingCategory(null);
+                  }}
                   accessibilityRole="button"
                   accessibilityLabel="Back to Budget"
                 >
