@@ -37,6 +37,7 @@ import { describeFundingImpactLine, goalDisplayName } from '../_lib/goalFunding'
 import AffordabilityQuery from '../_components/AffordabilityQuery';
 import PrimaryButton from '../_components/PrimaryButton';
 import BudgetInsightModal from '../_components/BudgetInsightModal';
+import CategoryTransactionsModal from '../_components/CategoryTransactionsModal';
 import IncomeModal from '../_components/IncomeModal';
 import SorrelWordmark from '../_components/SorrelWordmark';
 import NotificationCenter, { resolveNotificationTarget } from '../_components/NotificationCenter';
@@ -284,6 +285,13 @@ export default function Budget() {
   const [periodReviews, setPeriodReviews] = useState({});
   const [loadingPeriod, setLoadingPeriod] = useState(null);
   const [periodError, setPeriodError] = useState(null);
+
+  // Category-within-a-past-month drill-down (direct user request,
+  // 2026-09-17, same ask already built for Home's Monthly Review modal -
+  // see CategoryTransactionsModal's own header comment for why this
+  // reuses a standalone modal instead of that component directly). `null`
+  // = closed; otherwise `{ category, periodStart, periodEnd, label }`.
+  const [historyDrilldown, setHistoryDrilldown] = useState(null);
 
   async function togglePeriod(period) {
     if (expandedPeriod === period.period_start) {
@@ -970,7 +978,20 @@ export default function Budget() {
                                   Income ${formatDecimal(review.income)}
                                 </Text>
                                 {review.status.map((s) => (
-                                  <View key={s.category} style={budgetLocalStyles.periodDetailRow}>
+                                  <Pressable
+                                    key={s.category}
+                                    style={budgetLocalStyles.periodDetailRow}
+                                    onPress={() =>
+                                      setHistoryDrilldown({
+                                        category: s.category,
+                                        periodStart: period.period_start,
+                                        periodEnd: period.period_end,
+                                        label: periodLabel(period.period_start),
+                                      })
+                                    }
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`See ${s.category} transactions for ${periodLabel(period.period_start)}`}
+                                  >
                                     <Text style={budgetLocalStyles.periodDetailCategory} numberOfLines={1}>
                                       {s.category}
                                     </Text>
@@ -993,7 +1014,7 @@ export default function Budget() {
                                         {s.remaining < 0 ? '-' : ''}${formatDecimal(Math.abs(s.remaining))}
                                       </Text>
                                     )}
-                                  </View>
+                                  </Pressable>
                                 ))}
                               </>
                             )}
@@ -1217,6 +1238,14 @@ export default function Budget() {
         visible={showIncomeDetail}
         onClose={() => setShowIncomeDetail(false)}
         incomeSummary={incomeSummary}
+      />
+      <CategoryTransactionsModal
+        visible={historyDrilldown !== null}
+        onClose={() => setHistoryDrilldown(null)}
+        category={historyDrilldown?.category}
+        periodStart={historyDrilldown?.periodStart}
+        periodEnd={historyDrilldown?.periodEnd}
+        periodLabel={historyDrilldown?.label}
       />
       <NotificationCenter
         visible={showNotificationCenter}
