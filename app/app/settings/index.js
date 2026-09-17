@@ -18,6 +18,7 @@ const SECTIONS = [
   { path: '/settings/notifications', title: 'Notifications', icon: 'notifications-none' },
   { path: '/settings/general', title: 'General', icon: 'tune' },
   { path: '/settings/transaction-rules', title: 'Transaction Rules', icon: 'rule' },
+  { path: '/settings/recommendation-history', title: 'Decision History', icon: 'history' },
 ];
 
 // Theme redesign (2026-09-11): real bug found live - this screen was

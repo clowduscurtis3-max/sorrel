@@ -100,7 +100,13 @@ const {
 } = require('./financeRate');
 const { runAffordabilityChatTurn } = require('./affordabilityChat');
 const { getHomeAffordability } = require('./homeAffordability');
-const { logRecommendationEvent, VALID_TYPES, VALID_STATUSES } = require('./recommendationEvents');
+const {
+  logRecommendationEvent,
+  getRecommendationHistory,
+  clearRecommendationHistory,
+  VALID_TYPES,
+  VALID_STATUSES,
+} = require('./recommendationEvents');
 const {
   signup,
   changePassword,
@@ -2272,6 +2278,39 @@ app.post('/recommendations/log', requireUser, async (req, res) => {
     console.error(err);
   }
   res.json({ ok: true });
+});
+
+// Phase 46 Step 3 (2026-09-16, direct user request) - a Settings screen
+// showing whether you've accepted or adjusted each of Sorrel's real
+// propose-then-act suggestions, with a way to clear that history. Unlike
+// /recommendations/log above, a failure here should surface as a real
+// error - this is the user directly asking to see/manage their own data,
+// not a fire-and-forget side effect of an action they already completed.
+app.get('/recommendations/history', requireUser, async (req, res) => {
+  try {
+    const events = await getRecommendationHistory(req.userId);
+    res.json({ events });
+  } catch (err) {
+    logError('Failed to load recommendation history:', err);
+    res.status(500).json({ error: 'Failed to load recommendation history' });
+  }
+});
+
+// `type` optional (query string) - clears just one recommendation type's
+// history, or everything if omitted. See clearRecommendationHistory's
+// own comment (recommendationEvents.js) for why this is a hard delete.
+app.delete('/recommendations/history', requireUser, async (req, res) => {
+  const { type } = req.query;
+  if (type && !VALID_TYPES.has(type)) {
+    return res.status(400).json({ error: 'Invalid recommendation_type' });
+  }
+  try {
+    await clearRecommendationHistory(req.userId, { type });
+    res.json({ ok: true });
+  } catch (err) {
+    logError('Failed to clear recommendation history:', err);
+    res.status(500).json({ error: 'Failed to clear recommendation history' });
+  }
 });
 
 // "Buy now" vs. "wait until your next detected paycheck," built on the same

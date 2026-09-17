@@ -43,8 +43,77 @@ async function logRecommendationEvent({ userId, recommendationType, status, cont
   if (error) throw error;
 }
 
+// Phase 46 Step 3 (2026-09-16, direct user request) - the read side of
+// this table's own long-write-only gap (see this file's own header
+// comment). Newest first, same convention as every other history-style
+// list in this app (NotificationCenter, WhatChanged). Capped at 200 -
+// this table has no pruning of its own yet and a genuinely unbounded
+// user could in theory accumulate more than that over a long enough
+// time, but a plain settings screen doesn't need to paginate through
+// more than that to be useful.
+async function getRecommendationHistory(userId) {
+  const { data, error } = await supabaseAdmin
+    .from('recommendation_events')
+    .select('id, recommendation_type, status, context, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(200);
+  if (error) throw error;
+  const events = data || [];
+
+  // goal_timeframe_extend's own context only ever carries a goal_id, not
+  // a display name - resolved here, server-side, rather than leaving the
+  // client to fetch GET /goal itself for it. Found by code review,
+  // 2026-09-16: GET /goal excludes archived goals (`archived_at is
+  // null`), so a goal since marked complete would silently lose its real
+  // name in this history forever; a client-side Promise.all across two
+  // fetches also meant a transient failure on the unrelated /goal call
+  // could fail the whole history screen. Resolving it in this one query
+  // (deliberately unfiltered by archived_at) avoids both.
+  const goalIds = [...new Set(
+    events
+      .filter((e) => e.recommendation_type === 'goal_timeframe_extend' && e.context?.goal_id)
+      .map((e) => e.context.goal_id)
+  )];
+  if (goalIds.length === 0) return events;
+
+  const { data: goals, error: goalsError } = await supabaseAdmin
+    .from('user_goals')
+    .select('id, goal_type, notes')
+    .eq('user_id', userId)
+    .in('id', goalIds);
+  if (goalsError) throw goalsError;
+  const goalsById = Object.fromEntries((goals || []).map((g) => [g.id, g]));
+
+  return events.map((e) => {
+    const goal = e.recommendation_type === 'goal_timeframe_extend' && goalsById[e.context?.goal_id];
+    return goal
+      ? { ...e, context: { ...e.context, goal_type: goal.goal_type, goal_notes: goal.notes } }
+      : e;
+  });
+}
+
+// `type` optional - a real reset of just one recommendation type's
+// history, or (unset) everything. Deliberately a hard delete, not a
+// soft-archive - this is a user-owned record of their own past
+// decisions, not financial data anything downstream currently depends
+// on existing (see Phase 33's own "no adaptive behavior built on this
+// yet" note) - there's nothing to preserve for later reconciliation the
+// way, say, an archived goal's history is kept for.
+async function clearRecommendationHistory(userId, { type } = {}) {
+  if (type && !VALID_TYPES.has(type)) {
+    throw new Error(`Unknown recommendation_type: ${type}`);
+  }
+  let query = supabaseAdmin.from('recommendation_events').delete().eq('user_id', userId);
+  if (type) query = query.eq('recommendation_type', type);
+  const { error } = await query;
+  if (error) throw error;
+}
+
 module.exports = {
   logRecommendationEvent,
+  getRecommendationHistory,
+  clearRecommendationHistory,
   VALID_TYPES,
   VALID_STATUSES,
 };
