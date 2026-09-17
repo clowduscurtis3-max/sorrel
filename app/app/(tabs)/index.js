@@ -23,6 +23,7 @@ import { useTheme } from '../_lib/theme';
 import { useAppData } from '../_lib/appData';
 import { useSessionContext } from '../_lib/session';
 import SorrelWordmark from '../_components/SorrelWordmark';
+import { TopEdgeFade } from '../_components/Illustrations';
 import NetWorthChart from '../_components/NetWorthChart';
 import PrimaryButton from '../_components/PrimaryButton';
 import { iconForAccount } from '../_lib/accountIcons';
@@ -1377,9 +1378,12 @@ export default function Home() {
         // Theme redesign (2026-09-11): plain ScrollView, not
         // Animated.ScrollView - onScroll/scrollY only ever fed the now-
         // deleted illustrated backdrop's parallax, nothing else in this
-        // file ever read scrollY.value. TopEdgeFade (the alpha-mask that
-        // faded content to reveal that backdrop's artwork underneath) is
-        // gone too - nothing left for it to reveal.
+        // file ever read scrollY.value.
+        // TopEdgeFade restored 2026-09-16 (see Illustrations.js's own
+        // header comment) - without it, scrolled content hit the top of
+        // the screen with a hard cut instead of fading into the flat
+        // container background behind it.
+        <TopEdgeFade height={90}>
         <ScrollView
           style={[styles.list, homeStyles.transparentScroll]}
           contentContainerStyle={{ paddingBottom: 150 }}
@@ -1517,6 +1521,7 @@ export default function Home() {
 
           {orderedCardsAfterStats.map(renderHomeCard)}
         </ScrollView>
+        </TopEdgeFade>
       )}
 
       <ProjectedSpendModal

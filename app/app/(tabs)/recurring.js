@@ -11,6 +11,7 @@ import { useAppData } from '../_lib/appData';
 import { iconForCategory } from '../_lib/categoryIcons';
 import SorrelWordmark from '../_components/SorrelWordmark';
 import NotificationCenter, { resolveNotificationTarget } from '../_components/NotificationCenter';
+import { TopEdgeFade } from '../_components/Illustrations';
 
 // Recurring tab restyle (2026-08-25, design-references/recurring-tab-mockup-
 // 2026-08-24.png). Investigated before building, per this app's own "no
@@ -342,6 +343,7 @@ export default function Recurring() {
         </Pressable>
       </View>
 
+      <TopEdgeFade height={90}>
       <ScrollView
         ref={scrollRef}
         style={[styles.list, recurringStyles.transparentScroll]}
@@ -543,6 +545,7 @@ export default function Recurring() {
           </>
         )}
       </ScrollView>
+      </TopEdgeFade>
 
       <NotificationCenter
         visible={showNotificationCenter}

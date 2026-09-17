@@ -156,12 +156,22 @@ export function buildColors(isNight) {
 // in once at call time, so this can never itself react to a color
 // changing; the caller re-invokes it (via useMemo, keyed on colors) only
 // when the active theme actually changes instead.
-export function buildStyles(colors) {
+// `insets` - real device safe-area insets (react-native-safe-area-context,
+// read once in _lib/theme.js's ThemeProvider and threaded through here -
+// see that file's own comment). `container.paddingTop` used to be a flat
+// guessed `60`, which could sit shorter than a device's real status-bar/
+// notch height, letting a screen's own header content (e.g. Home's
+// wordmark/bell strip) render partially hidden behind the status bar -
+// found 2026-09-16 from a real on-device screenshot. `+ 20` keeps roughly
+// the same visual breathing room the old flat value had beyond just
+// clearing the bar itself (a typical ~24-30 status bar left ~30-36px of
+// that on top of the bar), without guessing a device-specific total.
+export function buildStyles(colors, insets = { top: 0 }) {
   return StyleSheet.create({
     container: {
       flex: 1,
       backgroundColor: colors.background,
-      paddingTop: 60,
+      paddingTop: insets.top + 20,
     },
     goalScreen: {
       flex: 1,

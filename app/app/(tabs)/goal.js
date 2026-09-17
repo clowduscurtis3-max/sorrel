@@ -45,6 +45,7 @@ import SorrelWordmark from '../_components/SorrelWordmark';
 import PrimaryButton from '../_components/PrimaryButton';
 import DraggableCardList from '../_components/DraggableCardList';
 import NotificationCenter, { resolveNotificationTarget } from '../_components/NotificationCenter';
+import { TopEdgeFade } from '../_components/Illustrations';
 
 // Edit Goal redesign (2026-08-27) - per-goal-type icon (reusing the same
 // icon-circle visual language already established by targetIconCircle/
@@ -1169,6 +1170,7 @@ export default function Goal() {
             <View style={{ width: 40 }} />
           </View>
 
+          <TopEdgeFade height={90}>
           <ScrollView
             style={goalStyles.editingScroll}
             // 150 (the default every other tab uses) wasn't enough here -
@@ -1881,6 +1883,7 @@ export default function Goal() {
               </Pressable>
             )}
           </ScrollView>
+          </TopEdgeFade>
         </>
       ) : (
         <>
@@ -1896,6 +1899,7 @@ export default function Goal() {
             </Pressable>
           </View>
 
+          <TopEdgeFade height={90}>
           <ScrollView
             style={[styles.list, goalStyles.transparentScroll]}
             contentContainerStyle={{ paddingBottom: 150 }}
@@ -2473,6 +2477,7 @@ export default function Goal() {
               )}
             </View>
           </ScrollView>
+          </TopEdgeFade>
         </>
       )}
       <NotificationCenter

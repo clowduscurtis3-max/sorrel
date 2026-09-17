@@ -988,8 +988,22 @@ export default function RootLayout() {
     // inside (tabs)/_layout.js instead (like AppDataContext) would miss
     // all of them - the exact class of gap that already bit AppDataContext
     // once (Phase 38 Step 4).
-    <ThemeProvider>
+    // Reordered so SafeAreaProvider is OUTSIDE ThemeProvider (2026-09-16,
+    // dark-theme top-of-screen fix): the shared `styles.container`
+    // (_lib/styles.js) used a flat, guessed `paddingTop: 60` for every
+    // screen, the same class of bug the gesture-bar fix above already
+    // fixed once for the bottom tab bar - on a device whose real status-
+    // bar/notch height exceeds that guess, a screen's header content
+    // (e.g. Home's wordmark/bell strip) can render partially hidden
+    // behind the status bar, which reads as content abruptly starting
+    // right at the screen edge rather than clearing it. ThemeProvider now
+    // needs to call useSafeAreaInsets() itself to build a real-inset-aware
+    // `styles.container`, which requires a SafeAreaProvider ancestor -
+    // this reorder doesn't change what ThemeProvider wraps (still
+    // everything, same reasoning as above), only which of these two sits
+    // outside the other.
     <SafeAreaProvider>
+    <ThemeProvider>
       <GestureHandlerRootView style={{ flex: 1 }}>
         {goalCheckFailed ? (
           // Sits ahead of the Splash check below on purpose: `ready`
@@ -1017,7 +1031,7 @@ export default function RootLayout() {
           </SessionContext.Provider>
         )}
       </GestureHandlerRootView>
-    </SafeAreaProvider>
     </ThemeProvider>
+    </SafeAreaProvider>
   );
 }

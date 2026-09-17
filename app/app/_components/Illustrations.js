@@ -1,4 +1,6 @@
-import Svg, { Path, Circle, Line, Polygon } from 'react-native-svg';
+import { View } from 'react-native';
+import Svg, { Path, Circle, Line, Polygon, Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
+import MaskedView from '@react-native-masked-view/masked-view';
 import { useTheme } from '../_lib/theme';
 
 // Flat, thin-stroke line art for the Budget-tab Sorrel restyle, matching
@@ -12,13 +14,26 @@ import { useTheme } from '../_lib/theme';
 
 // Theme redesign (2026-09-11): the illustrated day/night backdrop
 // (AppBackdrop, backdropPeriod/isNightBackdrop, the parallax/
-// celestialBackdrops.js machinery), TopEdgeFade (existed only to fade
-// content and reveal that backdrop's artwork underneath), and
-// SeasonalHills (a separate calendar-season-driven illustration inside
-// Home's Financial Health card) were all removed from this file, per the
-// confirmed decision to replace the illustrated theme with a flat
-// day/night color switch (_lib/theme.js). The four illustrations below
-// are unrelated - kept unchanged.
+// celestialBackdrops.js machinery) and SeasonalHills (a separate
+// calendar-season-driven illustration inside Home's Financial Health
+// card) were removed from this file, per the confirmed decision to
+// replace the illustrated theme with a flat day/night color switch
+// (_lib/theme.js). The four illustrations below are unrelated - kept
+// unchanged.
+//
+// TopEdgeFade was removed in that same pass (it only ever existed to
+// fade content and reveal AppBackdrop's artwork underneath, which was
+// gone) but restored below on 2026-09-16, direct user report: without
+// it, scrolled content (a card, the greeting) hits the top of the
+// screen with a hard, abrupt cut instead of fading smoothly - true on
+// every tab, in both themes, once there was no backdrop-reveal reason
+// left to have removed it for. Same mechanism as before, minus
+// everything backdrop-specific: an alpha mask fades whatever currently
+// occupies the wrapped scroll area's own top `height` px to transparent,
+// revealing the flat container background (colors.background) behind it
+// - not scroll-position-driven, the ScrollView already clips its content
+// to its bounds, so whatever's in that top sliver at any given moment is
+// exactly what's supposed to fade.
 
 // The circular leaf/sprout mark from the Sorrel brand sheet (CLAUDE.md) -
 // used as the assistant's avatar next to its chat bubble on the Budget
@@ -203,5 +218,33 @@ export function MountainIllustration({ size = 96 }) {
         fill="none"
       />
     </Svg>
+  );
+}
+
+// See this file's own header comment for why this exists and what it
+// does. `height` is the pixel sliver from the top that fades; the rest
+// of `children` stays fully opaque and untouched.
+function TopEdgeFadeMaskShape({ height }) {
+  return (
+    <View style={{ flex: 1 }}>
+      <Svg width="100%" height={height} viewBox={`0 0 100 ${height}`} preserveAspectRatio="none">
+        <Defs>
+          <LinearGradient id="topEdgeFadeMask" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor="#000000" stopOpacity="0" />
+            <Stop offset="1" stopColor="#000000" stopOpacity="1" />
+          </LinearGradient>
+        </Defs>
+        <Rect x="0" y="0" width="100" height={height} fill="url(#topEdgeFadeMask)" />
+      </Svg>
+      <View style={{ flex: 1, backgroundColor: '#000' }} />
+    </View>
+  );
+}
+
+export function TopEdgeFade({ height = 90, children }) {
+  return (
+    <MaskedView style={{ flex: 1 }} maskElement={<TopEdgeFadeMaskShape height={height} />}>
+      {children}
+    </MaskedView>
   );
 }

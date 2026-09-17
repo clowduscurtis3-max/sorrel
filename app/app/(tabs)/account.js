@@ -22,6 +22,7 @@ import { useAppData } from '../_lib/appData';
 import PrimaryButton from '../_components/PrimaryButton';
 import SorrelWordmark from '../_components/SorrelWordmark';
 import NotificationCenter, { resolveNotificationTarget } from '../_components/NotificationCenter';
+import { TopEdgeFade } from '../_components/Illustrations';
 
 // Phase 14 (5-tab conversion, 2026-08-24): account-level actions - Gmail
 // link/unlink, per-bank re-link/delete, biometric-lock preference, sign
@@ -308,6 +309,7 @@ export default function Account() {
         </Pressable>
       </View>
 
+      <TopEdgeFade height={90}>
       <ScrollView
         style={[styles.list, accountStyles.transparentScroll]}
         contentContainerStyle={{ paddingBottom: 150 }}
@@ -515,6 +517,7 @@ export default function Account() {
           )}
         </View>
       </ScrollView>
+      </TopEdgeFade>
 
       <NotificationCenter
         visible={showNotificationCenter}

@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { buildColors, buildStyles } from './styles';
 import { getThemeMode, setThemeMode as persistThemeMode } from './themePreference';
 
@@ -58,10 +59,17 @@ export function ThemeProvider({ children }) {
   const isNight = themeMode === 'dark' ? true : themeMode === 'light' ? false : clockIsNight;
 
   const colors = useMemo(() => buildColors(isNight), [isNight]);
+  // Real device status-bar/notch inset (2026-09-16 fix) - requires
+  // SafeAreaProvider to be an ancestor, which is why _layout.js now mounts
+  // it outside this provider (see that file's own comment on the reorder).
+  // Previously `styles.container`'s top padding was a flat guessed value
+  // that could sit shorter than a given device's real inset, letting a
+  // screen's header content render partially behind the status bar.
+  const insets = useSafeAreaInsets();
   // The shared _lib/styles.js `styles` object is built once here and
   // handed out via context - consuming screens read it directly rather
   // than each rebuilding their own copy of it.
-  const styles = useMemo(() => buildStyles(colors), [colors]);
+  const styles = useMemo(() => buildStyles(colors, insets), [colors, insets]);
   const value = useMemo(
     () => ({ isNight, colors, styles, themeMode, setThemeMode }),
     [isNight, colors, styles, themeMode, setThemeMode]

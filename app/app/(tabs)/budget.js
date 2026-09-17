@@ -33,6 +33,7 @@ import BudgetInsightModal from '../_components/BudgetInsightModal';
 import IncomeModal from '../_components/IncomeModal';
 import SorrelWordmark from '../_components/SorrelWordmark';
 import NotificationCenter, { resolveNotificationTarget } from '../_components/NotificationCenter';
+import { TopEdgeFade } from '../_components/Illustrations';
 
 // Theme redesign (2026-09-11): module-level object literal referencing
 // colors - moved to a function taking colors as a parameter, same as
@@ -716,6 +717,11 @@ export default function Budget() {
           <ActivityIndicator />
         </View>
       ) : (
+        // TopEdgeFade restored 2026-09-16 (see Illustrations.js's own
+        // header comment) - without it, scrolled content hit the top of
+        // the screen with a hard cut instead of fading into the flat
+        // container background behind it.
+        <TopEdgeFade height={90}>
         <ScrollView
           ref={scrollRef}
           style={budgetLocalStyles.screen}
@@ -1194,6 +1200,7 @@ export default function Budget() {
             );
           })}
         </ScrollView>
+        </TopEdgeFade>
       ))}
       <BudgetInsightModal
         visible={insightModalVisible}
