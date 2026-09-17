@@ -1,15 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Modal, Pressable, ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, Modal, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useTheme } from '../_lib/theme';
-import {
-  apiErrorMessage,
-  formatDecimal,
-  formatAmount,
-  formatShortDate,
-  fetchTransactionsForCategoryPeriod,
-} from '../_lib/api';
+import { apiErrorMessage, formatDecimal, fetchTransactionsForCategoryPeriod } from '../_lib/api';
 import { iconForCategory } from '../_lib/categoryIcons';
+import CategoryTransactionsList from './CategoryTransactionsList';
 
 // Direct user request: Home's Monthly Review card should open into "a
 // larger window with more details." The card itself only has room for one
@@ -123,28 +118,7 @@ export default function MonthlyReviewModal({ visible, onClose, monthlyReview }) 
             <Text style={styles.cardTitle}>{viewingCategory}</Text>
             <Text style={localStyles.categoryDetailSubtitle}>{monthLabel}</Text>
 
-            {categoryTxError ? (
-              <Text style={styles.errorText}>{categoryTxError}</Text>
-            ) : categoryTransactions === null ? (
-              <ActivityIndicator style={localStyles.categoryDetailLoading} />
-            ) : categoryTransactions.length === 0 ? (
-              <Text style={localStyles.categoryMeta}>No transactions in this category this month.</Text>
-            ) : (
-              categoryTransactions.map((t) => (
-                <View key={t.transaction_id} style={[styles.card, localStyles.txRow]}>
-                  <View style={localStyles.categoryIconCircle}>
-                    <MaterialIcons name={iconForCategory(t.category)} size={16} color={colors.dark} />
-                  </View>
-                  <View style={localStyles.txTextCol}>
-                    <Text style={localStyles.categoryName} numberOfLines={1}>
-                      {t.merchant_name || t.name}
-                    </Text>
-                    <Text style={localStyles.categoryMeta}>{formatShortDate(t.date)}</Text>
-                  </View>
-                  <Text style={localStyles.categoryName}>{formatAmount(t.amount)}</Text>
-                </View>
-              ))
-            )}
+            <CategoryTransactionsList transactions={categoryTransactions} error={categoryTxError} />
           </ScrollView>
         ) : (
         <ScrollView style={localStyles.scroll} contentContainerStyle={localStyles.scrollContent}>
@@ -341,17 +315,6 @@ function buildLocalStyles(colors) {
     fontSize: 13,
     color: colors.muted,
     marginTop: -8,
-  },
-  categoryDetailLoading: {
-    marginTop: 12,
-  },
-  txRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  txTextCol: {
-    flex: 1,
   },
   });
 }

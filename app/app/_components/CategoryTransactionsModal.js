@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Modal, Pressable, ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, Modal, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useTheme } from '../_lib/theme';
-import { apiErrorMessage, formatAmount, formatShortDate, fetchTransactionsForCategoryPeriod } from '../_lib/api';
-import { iconForCategory } from '../_lib/categoryIcons';
+import { apiErrorMessage, fetchTransactionsForCategoryPeriod } from '../_lib/api';
+import CategoryTransactionsList from './CategoryTransactionsList';
 
 // Direct user request, 2026-09-17: the same "what exactly did I spend
 // money on" category drill-down MonthlyReviewModal.js just got, for
@@ -87,28 +87,7 @@ export default function CategoryTransactionsModal({
           <Text style={styles.cardTitle}>{category}</Text>
           {periodLabel && <Text style={localStyles.subtitle}>{periodLabel}</Text>}
 
-          {error ? (
-            <Text style={styles.errorText}>{error}</Text>
-          ) : transactions === null ? (
-            <ActivityIndicator style={localStyles.loading} />
-          ) : transactions.length === 0 ? (
-            <Text style={localStyles.emptyText}>No transactions in this category this month.</Text>
-          ) : (
-            transactions.map((t) => (
-              <View key={t.transaction_id} style={[styles.card, localStyles.txRow]}>
-                <View style={localStyles.iconCircle}>
-                  <MaterialIcons name={iconForCategory(t.category)} size={16} color={colors.dark} />
-                </View>
-                <View style={localStyles.txTextCol}>
-                  <Text style={localStyles.txName} numberOfLines={1}>
-                    {t.merchant_name || t.name}
-                  </Text>
-                  <Text style={localStyles.txDate}>{formatShortDate(t.date)}</Text>
-                </View>
-                <Text style={localStyles.txAmount}>{formatAmount(t.amount)}</Text>
-              </View>
-            ))
-          )}
+          <CategoryTransactionsList transactions={transactions} error={error} />
         </ScrollView>
       </View>
     </Modal>
@@ -137,44 +116,6 @@ function buildLocalStyles(colors) {
       fontSize: 13,
       color: colors.muted,
       marginTop: -8,
-    },
-    loading: {
-      marginTop: 12,
-    },
-    emptyText: {
-      fontSize: 13,
-      color: colors.muted,
-    },
-    txRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-    },
-    iconCircle: {
-      width: 30,
-      height: 30,
-      borderRadius: 15,
-      backgroundColor: colors.background,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    txTextCol: {
-      flex: 1,
-    },
-    txName: {
-      fontSize: 13,
-      fontWeight: '600',
-      color: colors.darkest,
-    },
-    txDate: {
-      fontSize: 11,
-      color: colors.muted,
-      marginTop: 1,
-    },
-    txAmount: {
-      fontSize: 13,
-      fontWeight: '600',
-      color: colors.darkest,
     },
   });
 }
