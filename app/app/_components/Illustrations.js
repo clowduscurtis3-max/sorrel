@@ -1,6 +1,6 @@
 import { View } from 'react-native';
-import Svg, { Path, Circle, Line, Polygon, Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
-import MaskedView from '@react-native-masked-view/masked-view';
+import Svg, { Path, Circle, Line, Polygon } from 'react-native-svg';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../_lib/theme';
 
 // Flat, thin-stroke line art for the Budget-tab Sorrel restyle, matching
@@ -27,13 +27,36 @@ import { useTheme } from '../_lib/theme';
 // it, scrolled content (a card, the greeting) hits the top of the
 // screen with a hard, abrupt cut instead of fading smoothly - true on
 // every tab, in both themes, once there was no backdrop-reveal reason
-// left to have removed it for. Same mechanism as before, minus
-// everything backdrop-specific: an alpha mask fades whatever currently
-// occupies the wrapped scroll area's own top `height` px to transparent,
-// revealing the flat container background (colors.background) behind it
-// - not scroll-position-driven, the ScrollView already clips its content
-// to its bounds, so whatever's in that top sliver at any given moment is
-// exactly what's supposed to fade.
+// left to have removed it for.
+//
+// First rebuilt with the exact pre-redesign mechanism (a MaskedView
+// alpha mask wrapping the whole scrolled child) - a same-day
+// `/code-review medium` pass caught two real problems with that before
+// it shipped further: (1) it wrapped DraggableCardList's own
+// gesture-handler drag-to-reorder (used inside the Goal tab's list) in a
+// MaskedView, a component-nesting combination never exercised anywhere
+// in this app before, and this app's own history (the Modal+Swipeable
+// notification-center risk, Phase 45; the ScrollView-vs-wheel-picker
+// touch-dispatch saga under "Not yet scoped") is full of exactly this
+// failure class - a gesture system fighting an unfamiliar container it's
+// nested inside; (2) MaskedView forces the OS to render its entire child
+// subtree to an offscreen buffer every frame to apply the mask - real,
+// permanent overdraw on every scroll frame, for content that can run to
+// dozens of cards, just to fade a decorative 90px sliver.
+//
+// Rebuilt instead as a plain, non-interactive gradient overlay
+// (expo-linear-gradient, already an installed dependency - Home
+// Settings' own color-picker gradient bar, Phase 38 Step 3) painted on
+// top of the unwrapped children, `colors.background` fading to fully
+// transparent over the top `height` px. Visually identical to the mask
+// version (content still appears to sink into the flat background near
+// the top) but structurally simpler and cheaper: children render
+// completely normally (no offscreen compositing, no interference with
+// anything gesture-driven inside them), and `pointerEvents="none"` on
+// the overlay means it can never intercept a scroll/drag/tap underneath
+// it. Not scroll-position-driven, same as the original - the ScrollView
+// already clips its content to its bounds, so whatever's in that top
+// sliver at any given moment is exactly what's supposed to fade.
 
 // The circular leaf/sprout mark from the Sorrel brand sheet (CLAUDE.md) -
 // used as the assistant's avatar next to its chat bubble on the Budget
@@ -223,28 +246,23 @@ export function MountainIllustration({ size = 96 }) {
 
 // See this file's own header comment for why this exists and what it
 // does. `height` is the pixel sliver from the top that fades; the rest
-// of `children` stays fully opaque and untouched.
-function TopEdgeFadeMaskShape({ height }) {
+// of `children` renders completely normally, untouched by this wrapper.
+// `pointerEvents="none"` on the gradient is load-bearing, not decoration
+// - without it this overlay would sit on top of the real content and
+// swallow the first `height` px of every touch (scroll, a tappable card,
+// a drag handle) underneath it.
+export function TopEdgeFade({ height = 90, children }) {
+  const { colors } = useTheme();
   return (
     <View style={{ flex: 1 }}>
-      <Svg width="100%" height={height} viewBox={`0 0 100 ${height}`} preserveAspectRatio="none">
-        <Defs>
-          <LinearGradient id="topEdgeFadeMask" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor="#000000" stopOpacity="0" />
-            <Stop offset="1" stopColor="#000000" stopOpacity="1" />
-          </LinearGradient>
-        </Defs>
-        <Rect x="0" y="0" width="100" height={height} fill="url(#topEdgeFadeMask)" />
-      </Svg>
-      <View style={{ flex: 1, backgroundColor: '#000' }} />
-    </View>
-  );
-}
-
-export function TopEdgeFade({ height = 90, children }) {
-  return (
-    <MaskedView style={{ flex: 1 }} maskElement={<TopEdgeFadeMaskShape height={height} />}>
       {children}
-    </MaskedView>
+      <LinearGradient
+        pointerEvents="none"
+        colors={[colors.background, `${colors.background}00`]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+        style={{ position: 'absolute', top: 0, left: 0, right: 0, height }}
+      />
+    </View>
   );
 }
