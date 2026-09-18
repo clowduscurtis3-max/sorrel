@@ -30,7 +30,10 @@ test('#1 averages essential spend across distinct months, ignoring discretionary
     NOW
   );
   // essential total: (300+200) + (320+100) = 920, across 2 months = 460
-  assert.deepEqual(result, { averageMonthlyEssential: 460, monthsOfHistory: 2 });
+  assert.deepEqual(result, {
+    averageMonthlyEssential: 460,
+    monthsOfHistory: 2,
+  });
 });
 
 test('#2 refuses when fewer than MIN_MONTHS_OF_HISTORY distinct months are present', () => {
@@ -88,7 +91,10 @@ test('#6 transactions older than the HISTORY_DAYS window are excluded from the a
     ],
     NOW
   );
-  assert.deepEqual(result, { averageMonthlyEssential: 100, monthsOfHistory: 2 });
+  assert.deepEqual(result, {
+    averageMonthlyEssential: 100,
+    monthsOfHistory: 2,
+  });
 });
 
 test('#7 a refund/credit in an essential category pushing the total non-positive refuses rather than returning a negative "essential expenses" figure - real bug found by /code-review (2026-08-20)', () => {
@@ -101,7 +107,10 @@ test('#7 a refund/credit in an essential category pushing the total non-positive
     ],
     NOW
   );
-  assert.deepEqual(result, { non_positive_essential_spend: true, monthsOfHistory: 2 });
+  assert.deepEqual(result, {
+    non_positive_essential_spend: true,
+    monthsOfHistory: 2,
+  });
 });
 
 test('#8 exactly zero essential spend also refuses, not just negative', () => {
@@ -112,11 +121,19 @@ test('#8 exactly zero essential spend also refuses, not just negative', () => {
     ],
     NOW
   );
-  assert.deepEqual(result, { non_positive_essential_spend: true, monthsOfHistory: 2 });
+  assert.deepEqual(result, {
+    non_positive_essential_spend: true,
+    monthsOfHistory: 2,
+  });
 });
 
 function account(overrides) {
-  return { id: 'acc-1', available_balance: 1000, current_balance: 1000, ...overrides };
+  return {
+    id: 'acc-1',
+    available_balance: 1000,
+    current_balance: 1000,
+    ...overrides,
+  };
 }
 
 test('computeEmergencyFundProgress returns { enabled: false } when disabled, regardless of config', () => {
@@ -135,7 +152,11 @@ test('computeEmergencyFundProgress sums only the selected accounts, preferring a
     account({ id: 'acc-3', available_balance: 9999, current_balance: 9999 }), // not selected
   ];
   const result = computeEmergencyFundProgress({
-    config: { enabled: true, target_amount: 3000, account_ids: ['acc-1', 'acc-2'] },
+    config: {
+      enabled: true,
+      target_amount: 3000,
+      account_ids: ['acc-1', 'acc-2'],
+    },
     accounts,
   });
   assert.equal(result.current_amount, 1500);
@@ -155,7 +176,11 @@ test('computeEmergencyFundProgress falls back to current_balance when available_
 test('computeEmergencyFundProgress reports a selected account that no longer exists, without crashing or under-counting silently', () => {
   const accounts = [account({ id: 'acc-1', available_balance: 200, current_balance: 200 })];
   const result = computeEmergencyFundProgress({
-    config: { enabled: true, target_amount: 1000, account_ids: ['acc-1', 'acc-gone'] },
+    config: {
+      enabled: true,
+      target_amount: 1000,
+      account_ids: ['acc-1', 'acc-gone'],
+    },
     accounts,
   });
   assert.equal(result.current_amount, 200);

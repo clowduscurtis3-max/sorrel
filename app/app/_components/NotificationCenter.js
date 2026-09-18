@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { View, Text, Modal, Pressable, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  ActivityIndicator,
+} from 'react-native';
 import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useTheme } from '../_lib/theme';
@@ -187,10 +195,13 @@ export default function NotificationCenter({ visible, onClose, onSelectEvent }) 
                       onPress={() => !isCurrent && toggleMonth(group.key)}
                       disabled={isCurrent}
                       accessibilityRole={isCurrent ? undefined : 'button'}
-                      accessibilityLabel={isCurrent ? undefined : `${isExpanded ? 'Hide' : 'Show'} ${group.label}`}
+                      accessibilityLabel={
+                        isCurrent ? undefined : `${isExpanded ? 'Hide' : 'Show'} ${group.label}`
+                      }
                     >
                       <Text style={localStyles.monthLabel}>
-                        {group.label} <Text style={localStyles.monthCount}>({group.events.length})</Text>
+                        {group.label}{' '}
+                        <Text style={localStyles.monthCount}>({group.events.length})</Text>
                       </Text>
                       {!isCurrent && (
                         <MaterialIcons

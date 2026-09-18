@@ -177,7 +177,10 @@ test('#15 a trivial recurring credit is not mistaken for a payday even when genu
   assert.equal(nextExpectedIncome({ series: [interestPayment, RENT], from: '2026-08-01' }), null);
 
   // A real paycheck, even a modest one, must still clear the floor.
-  const modestPaycheck = { ...PAYCHECK, typical_amount: -(MIN_INCOME_AMOUNT + 1) };
+  const modestPaycheck = {
+    ...PAYCHECK,
+    typical_amount: -(MIN_INCOME_AMOUNT + 1),
+  };
   assert.equal(isIncomeSeries(modestPaycheck), true);
 });
 
@@ -199,7 +202,9 @@ test('#16 an extreme pressure ratio is never rendered as an absurd percentage', 
   });
 
   assert.ok(result.cash.pressure_ratio > PRESSURE_RATIO_PERCENT_DISPLAY_CAP);
-  const timingText = result.tradeoffs.find((t) => t.kind === 'timing' && t.severity === 'high').text;
+  const timingText = result.tradeoffs.find(
+    (t) => t.kind === 'timing' && t.severity === 'high'
+  ).text;
   assert.doesNotMatch(timingText, /\d{4,}%/);
   assert.match(timingText, /well more than that income covers/);
 });
@@ -253,7 +258,10 @@ test('#3 a projection past year 9999 is reported as unprojectable, not as a garb
       }),
     ],
   });
-  const result = evaluateScenario({ context, scenario: { amount: 0.2, category: 'Dining' } });
+  const result = evaluateScenario({
+    context,
+    scenario: { amount: 0.2, category: 'Dining' },
+  });
 
   const g = result.goal_impact;
   // Either it declines to project, or every date it reports is a real
@@ -272,7 +280,10 @@ test('#4 wiping out the whole remaining budget is never "comfortable"', () => {
   // $100 of remaining budget across the board; no category given, so the
   // category-level rules can't fire. The total-level rules must.
   for (const amount of [500, 5000, 500000]) {
-    const result = evaluateScenario({ context: contextWith(), scenario: { amount } });
+    const result = evaluateScenario({
+      context: contextWith(),
+      scenario: { amount },
+    });
     assert.notEqual(result.status, 'comfortable', `$${amount} reported as comfortable`);
     assert.ok(
       result.tradeoffs.some((t) => t.kind === 'budget'),
@@ -304,9 +315,17 @@ test('#5 a one-time purchase never reports as stalling the goal via a changed pa
   // pair to accidentally disagree). This regression guards that a purchase
   // this small never gets reported as having stalled the goal on its own.
   const context = contextWith({
-    goals: [goalFixture({ saved_amount: 0.01, realized_pace: { insufficient_history: false, monthly_pace: 5 } })],
+    goals: [
+      goalFixture({
+        saved_amount: 0.01,
+        realized_pace: { insufficient_history: false, monthly_pace: 5 },
+      }),
+    ],
   });
-  const result = evaluateScenario({ context, scenario: { amount: 10, category: 'Dining' } });
+  const result = evaluateScenario({
+    context,
+    scenario: { amount: 10, category: 'Dining' },
+  });
 
   const g = result.goal_impact;
   if (g.available) {
@@ -366,16 +385,28 @@ test('#7 Uncategorized spend counts toward the overall remaining budget', () => 
   const status = computeBudgetStatus({ budgets, actuals });
   const totalFromStatus =
     status.reduce((s, r) => s + (r.budgeted ?? 0), 0) - status.reduce((s, r) => s + r.actual, 0);
-  assert.equal(result.budget_impact.total_remaining_before, Math.round(totalFromStatus * 100) / 100);
+  assert.equal(
+    result.budget_impact.total_remaining_before,
+    Math.round(totalFromStatus * 100) / 100
+  );
 });
 
 // --- 9. Goal already reached ------------------------------------------------
 
 test('#9 a purchase that drops a finished goal back under target is surfaced', () => {
   const context = contextWith({
-    goals: [goalFixture({ target_amount: 1000, saved_amount: 1200, percent_complete: 100 })],
+    goals: [
+      goalFixture({
+        target_amount: 1000,
+        saved_amount: 1200,
+        percent_complete: 100,
+      }),
+    ],
   });
-  const result = evaluateScenario({ context, scenario: { amount: 900, category: 'Shopping' } });
+  const result = evaluateScenario({
+    context,
+    scenario: { amount: 900, category: 'Shopping' },
+  });
 
   assert.equal(result.goal_impact.reason, 'goal_reached');
   assert.equal(result.goal_impact.drops_below_target, true);
@@ -386,9 +417,18 @@ test('#9 a purchase that drops a finished goal back under target is surfaced', (
 
 test('#9 a small purchase against a comfortably-met goal does not raise a goal tradeoff', () => {
   const context = contextWith({
-    goals: [goalFixture({ target_amount: 1000, saved_amount: 5000, percent_complete: 100 })],
+    goals: [
+      goalFixture({
+        target_amount: 1000,
+        saved_amount: 5000,
+        percent_complete: 100,
+      }),
+    ],
   });
-  const result = evaluateScenario({ context, scenario: { amount: 50, category: 'Dining' } });
+  const result = evaluateScenario({
+    context,
+    scenario: { amount: 50, category: 'Dining' },
+  });
 
   assert.equal(result.goal_impact.reason, 'goal_reached');
   assert.equal(result.goal_impact.drops_below_target, false);
@@ -400,7 +440,14 @@ test('#10 a recurring commitment never claims a goal impact, even on a no-target
   // This is the branch the app's own one-tap "just be smarter with money"
   // default goal lands in, so getting it wrong is not an edge case.
   const context = contextWith({
-    goals: [goalFixture({ has_target: false, target_amount: null, saved_amount: 500, percent_complete: null })],
+    goals: [
+      goalFixture({
+        has_target: false,
+        target_amount: null,
+        saved_amount: 500,
+        percent_complete: null,
+      }),
+    ],
   });
 
   const recurring = evaluateScenario({
@@ -409,9 +456,16 @@ test('#10 a recurring commitment never claims a goal impact, even on a no-target
   });
   assert.equal(recurring.goal_impact.available, false);
   assert.equal(recurring.goal_impact.reason, 'recurring_no_realized_pace');
-  assert.equal(recurring.goal_impact.balance_after, undefined, 'a recurring commitment reports no balance impact at all');
+  assert.equal(
+    recurring.goal_impact.balance_after,
+    undefined,
+    'a recurring commitment reports no balance impact at all'
+  );
 
-  const oneTime = evaluateScenario({ context, scenario: { amount: 100, category: 'Shopping' } });
+  const oneTime = evaluateScenario({
+    context,
+    scenario: { amount: 100, category: 'Shopping' },
+  });
   assert.equal(oneTime.goal_impact.reason, 'no_target');
   assert.equal(oneTime.goal_impact.balance_after, 400);
 });
@@ -488,7 +542,13 @@ test('no result ever reports a non-plain date or a NaN number', () => {
     contextWith(),
     contextWith({ recurringSeries: [] }),
     contextWith({ goals: [] }),
-    contextWith({ goals: [goalFixture({ realized_pace: { insufficient_history: false, monthly_pace: 0.01 } })] }),
+    contextWith({
+      goals: [
+        goalFixture({
+          realized_pace: { insufficient_history: false, monthly_pace: 0.01 },
+        }),
+      ],
+    }),
     contextWith({ budgets: [], actuals: [] }),
   ];
   const scenarios = [
@@ -516,10 +576,19 @@ test('no result ever reports a non-plain date or a NaN number', () => {
 test('compareBuyNowVsWait never throws across the same matrix', () => {
   for (const context of [
     contextWith(),
-    contextWith({ goals: [goalFixture({ realized_pace: { insufficient_history: false, monthly_pace: 0.01 } })] }),
+    contextWith({
+      goals: [
+        goalFixture({
+          realized_pace: { insufficient_history: false, monthly_pace: 0.01 },
+        }),
+      ],
+    }),
   ]) {
     assert.doesNotThrow(() => {
-      compareBuyNowVsWait({ context, scenario: { amount: 500, category: 'Shopping' } });
+      compareBuyNowVsWait({
+        context,
+        scenario: { amount: 500, category: 'Shopping' },
+      });
     });
   }
 });

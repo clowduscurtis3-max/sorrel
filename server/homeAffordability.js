@@ -135,7 +135,9 @@ function computeHomeAffordability({
   });
 
   const housingCosts = getStateHousingCosts(state);
-  const monthlyPropertyTax = housingCosts ? round2((homePrice * housingCosts.propertyTaxRate) / 12) : null;
+  const monthlyPropertyTax = housingCosts
+    ? round2((homePrice * housingCosts.propertyTaxRate) / 12)
+    : null;
   const monthlyInsurance = housingCosts ? round2(housingCosts.annualInsurance / 12) : null;
 
   // Compared against the raw ratio, not the rounded display percent -
@@ -182,7 +184,8 @@ function computeHomeAffordability({
     monthly_income: hasIncome ? round2(monthlyIncome) : null,
     front_end_dti_percent: frontEndDti,
     back_end_dti_percent: backEndDti,
-    front_end_dti_exceeds_display_cap: frontEndDti !== null && frontEndDti > DTI_PERCENT_DISPLAY_CAP,
+    front_end_dti_exceeds_display_cap:
+      frontEndDti !== null && frontEndDti > DTI_PERCENT_DISPLAY_CAP,
     back_end_dti_exceeds_display_cap: backEndDti !== null && backEndDti > DTI_PERCENT_DISPLAY_CAP,
     front_end_dti_guideline_percent: round2(FRONT_END_DTI_GUIDELINE * 100),
     back_end_dti_tier: backEndDti !== null ? classifyBackEndDti(backEndDtiRatio) : null,
@@ -205,11 +208,21 @@ function computeHomeAffordability({
 // getCurrentAutoLoanRate). `annualRatePercent` is optional so a caller
 // can override with a hypothetical rate later (e.g. a future "what if
 // rates were 5%" question) without needing a second function.
-async function getHomeAffordability(userId, { homePrice, downPayment, state, loanTermYears, annualRatePercent }) {
-  const [{ data: transactions, error: txError }, { data: recurringSeries, error: seriesError }] = await Promise.all([
-    supabaseAdmin.from('transactions').select('date, amount, category, personal_finance_category').eq('user_id', userId),
-    supabaseAdmin.from('recurring_series').select('typical_amount, interval, debt_type').eq('user_id', userId),
-  ]);
+async function getHomeAffordability(
+  userId,
+  { homePrice, downPayment, state, loanTermYears, annualRatePercent }
+) {
+  const [{ data: transactions, error: txError }, { data: recurringSeries, error: seriesError }] =
+    await Promise.all([
+      supabaseAdmin
+        .from('transactions')
+        .select('date, amount, category, personal_finance_category')
+        .eq('user_id', userId),
+      supabaseAdmin
+        .from('recurring_series')
+        .select('typical_amount, interval, debt_type')
+        .eq('user_id', userId),
+    ]);
   if (txError) throw txError;
   if (seriesError) throw seriesError;
 
@@ -228,7 +241,10 @@ async function getHomeAffordability(userId, { homePrice, downPayment, state, loa
     existingMonthlyDebt,
   });
 
-  return { ...result, mortgage_rate_source: annualRatePercent ? 'override' : 'fred_live' };
+  return {
+    ...result,
+    mortgage_rate_source: annualRatePercent ? 'override' : 'fred_live',
+  };
 }
 
 module.exports = {

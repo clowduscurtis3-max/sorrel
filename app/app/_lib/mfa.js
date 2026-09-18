@@ -33,7 +33,9 @@ export async function enrollTotp() {
 // anything, while sign-in's challenge only happens once they already have
 // a code ready.
 export async function verifyTotpEnrollment(factorId, code) {
-  const { data: challenge, error: challengeError } = await supabase.auth.mfa.challenge({ factorId });
+  const { data: challenge, error: challengeError } = await supabase.auth.mfa.challenge({
+    factorId,
+  });
   if (challengeError) throw challengeError;
   const { data, error } = await supabase.auth.mfa.verify({
     factorId,

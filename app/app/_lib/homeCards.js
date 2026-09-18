@@ -28,7 +28,13 @@ export const HOME_CARD_GROUP_BEFORE_STATS = [
   'what_changed',
   'monthly_review',
 ];
-export const HOME_CARD_GROUP_AFTER_STATS = ['up_next', 'goal_progress', 'upcoming_bills', 'accounts', 'net_worth'];
+export const HOME_CARD_GROUP_AFTER_STATS = [
+  'up_next',
+  'goal_progress',
+  'upcoming_bills',
+  'accounts',
+  'net_worth',
+];
 export const HOME_CARD_KEYS = [...HOME_CARD_GROUP_BEFORE_STATS, ...HOME_CARD_GROUP_AFTER_STATS];
 
 export const HOME_CARD_TITLES = {

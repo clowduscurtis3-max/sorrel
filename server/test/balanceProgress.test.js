@@ -7,7 +7,12 @@ const { computeBalanceProgress } = require('../balanceProgress');
 // the same math, now exercised directly against the shared function.
 
 function account(overrides) {
-  return { id: 'acc-1', available_balance: 1000, current_balance: 1000, ...overrides };
+  return {
+    id: 'acc-1',
+    available_balance: 1000,
+    current_balance: 1000,
+    ...overrides,
+  };
 }
 
 test('computeBalanceProgress sums only the selected accounts, preferring available_balance', () => {
@@ -29,7 +34,11 @@ test('computeBalanceProgress sums only the selected accounts, preferring availab
 
 test('computeBalanceProgress falls back to current_balance when available_balance is null', () => {
   const accounts = [account({ id: 'acc-1', available_balance: null, current_balance: 250 })];
-  const result = computeBalanceProgress({ targetAmount: 500, accountIds: ['acc-1'], accounts });
+  const result = computeBalanceProgress({
+    targetAmount: 500,
+    accountIds: ['acc-1'],
+    accounts,
+  });
   assert.equal(result.current_amount, 250);
 });
 
@@ -46,7 +55,11 @@ test('computeBalanceProgress reports a selected account that no longer exists, w
 
 test('computeBalanceProgress returns a null percent (not a divide-by-zero) when no target is set', () => {
   const accounts = [account({ id: 'acc-1' })];
-  const result = computeBalanceProgress({ targetAmount: null, accountIds: ['acc-1'], accounts });
+  const result = computeBalanceProgress({
+    targetAmount: null,
+    accountIds: ['acc-1'],
+    accounts,
+  });
   assert.equal(result.has_target, false);
   assert.equal(result.target_amount, null);
   assert.equal(result.percent_complete, null);
@@ -55,12 +68,20 @@ test('computeBalanceProgress returns a null percent (not a divide-by-zero) when 
 
 test('computeBalanceProgress caps percent_complete at 100 once the target is exceeded', () => {
   const accounts = [account({ id: 'acc-1', available_balance: 5000, current_balance: 5000 })];
-  const result = computeBalanceProgress({ targetAmount: 1000, accountIds: ['acc-1'], accounts });
+  const result = computeBalanceProgress({
+    targetAmount: 1000,
+    accountIds: ['acc-1'],
+    accounts,
+  });
   assert.equal(result.percent_complete, 100);
 });
 
 test('computeBalanceProgress with no selected accounts at all is a valid, honest $0-of-target state', () => {
-  const result = computeBalanceProgress({ targetAmount: 1000, accountIds: [], accounts: [account()] });
+  const result = computeBalanceProgress({
+    targetAmount: 1000,
+    accountIds: [],
+    accounts: [account()],
+  });
   assert.equal(result.current_amount, 0);
   assert.equal(result.percent_complete, 0);
   assert.deepEqual(result.missing_account_ids, []);

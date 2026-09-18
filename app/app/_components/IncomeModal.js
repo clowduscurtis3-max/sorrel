@@ -42,13 +42,13 @@ export default function IncomeModal({ visible, onClose, incomeSummary }) {
         <ScrollView style={localStyles.scroll} contentContainerStyle={localStyles.scrollContent}>
           <Text style={styles.cardTitle}>Income</Text>
           <Text style={localStyles.subtitle}>
-            ${formatDecimal(incomeSummary.actual_income_this_period)} counted so far this month, against
-            an expected ${formatDecimal(incomeSummary.expected_monthly_income)}/month.
+            ${formatDecimal(incomeSummary.actual_income_this_period)} counted so far this month,
+            against an expected ${formatDecimal(incomeSummary.expected_monthly_income)}/month.
           </Text>
           <Text style={localStyles.explainerText}>
-            Every real credit landing in your linked accounts counts here, not just paychecks - Zelle/
-            Cash App/Venmo-style payments from other people, refunds, and reimbursements are all
-            included, in addition to your regular income.
+            Every real credit landing in your linked accounts counts here, not just paychecks -
+            Zelle/ Cash App/Venmo-style payments from other people, refunds, and reimbursements are
+            all included, in addition to your regular income.
           </Text>
 
           {transactions.length === 0 && (

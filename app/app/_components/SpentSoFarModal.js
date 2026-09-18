@@ -30,7 +30,14 @@ function statusColorMap(colors) {
   };
 }
 
-export default function SpentSoFarModal({ visible, onClose, budgetStatus, alerts, spendStats, onSelectCategory }) {
+export default function SpentSoFarModal({
+  visible,
+  onClose,
+  budgetStatus,
+  alerts,
+  spendStats,
+  onSelectCategory,
+}) {
   const { colors, styles } = useTheme();
   const localStyles = useMemo(() => buildLocalStyles(colors), [colors]);
   const STATUS_COLOR = useMemo(() => statusColorMap(colors), [colors]);
@@ -57,7 +64,8 @@ export default function SpentSoFarModal({ visible, onClose, budgetStatus, alerts
           <Text style={styles.cardTitle}>Spent So Far</Text>
           {spendStats && (
             <Text style={localStyles.subtitle}>
-              ${formatDecimal(spendStats.spent)} of ${formatDecimal(spendStats.budgeted)} budgeted this month
+              ${formatDecimal(spendStats.spent)} of ${formatDecimal(spendStats.budgeted)} budgeted
+              this month
             </Text>
           )}
 
@@ -67,7 +75,8 @@ export default function SpentSoFarModal({ visible, onClose, budgetStatus, alerts
 
           {rows.map((s) => {
             const status = statusForCategory(s.category, s.budgeted, alerts);
-            const percent = s.budgeted > 0 ? Math.min(1, s.actual / s.budgeted) : s.budgeted === 0 ? 1 : 0;
+            const percent =
+              s.budgeted > 0 ? Math.min(1, s.actual / s.budgeted) : s.budgeted === 0 ? 1 : 0;
             return (
               <Pressable
                 key={s.category}
@@ -78,13 +87,20 @@ export default function SpentSoFarModal({ visible, onClose, budgetStatus, alerts
               >
                 <View style={localStyles.categoryTopRow}>
                   <View style={localStyles.categoryIconCircle}>
-                    <MaterialIcons name={iconForCategory(s.category)} size={16} color={colors.dark} />
+                    <MaterialIcons
+                      name={iconForCategory(s.category)}
+                      size={16}
+                      color={colors.dark}
+                    />
                   </View>
                   <Text style={localStyles.categoryName}>{s.category}</Text>
                   <Text style={localStyles.categoryAmount}>
                     ${formatDecimal(s.actual)}
                     {s.budgeted != null && (
-                      <Text style={localStyles.categoryAmountMuted}> / ${formatDecimal(s.budgeted)}</Text>
+                      <Text style={localStyles.categoryAmountMuted}>
+                        {' '}
+                        / ${formatDecimal(s.budgeted)}
+                      </Text>
                     )}
                   </Text>
                   <MaterialIcons name="chevron-right" size={18} color={colors.muted} />
@@ -110,72 +126,72 @@ export default function SpentSoFarModal({ visible, onClose, budgetStatus, alerts
 
 function buildLocalStyles(colors) {
   return StyleSheet.create({
-  closeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scroll: {
-    flex: 1,
-    paddingHorizontal: 24,
-  },
-  scrollContent: {
-    gap: 10,
-    paddingBottom: 40,
-  },
-  subtitle: {
-    fontSize: 13,
-    color: colors.dark,
-    marginBottom: 4,
-  },
-  emptyText: {
-    fontSize: 13,
-    color: colors.muted,
-  },
-  categoryRow: {
-    gap: 6,
-  },
-  categoryTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  categoryIconCircle: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  categoryName: {
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-  categoryAmount: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-  categoryAmountMuted: {
-    fontSize: 12,
-    fontWeight: '400',
-    color: colors.muted,
-  },
-  progressTrack: {
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: colors.background,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 3,
-  },
+    closeButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: colors.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    scroll: {
+      flex: 1,
+      paddingHorizontal: 24,
+    },
+    scrollContent: {
+      gap: 10,
+      paddingBottom: 40,
+    },
+    subtitle: {
+      fontSize: 13,
+      color: colors.dark,
+      marginBottom: 4,
+    },
+    emptyText: {
+      fontSize: 13,
+      color: colors.muted,
+    },
+    categoryRow: {
+      gap: 6,
+    },
+    categoryTopRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    categoryIconCircle: {
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    categoryName: {
+      flex: 1,
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+    categoryAmount: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+    categoryAmountMuted: {
+      fontSize: 12,
+      fontWeight: '400',
+      color: colors.muted,
+    },
+    progressTrack: {
+      height: 5,
+      borderRadius: 3,
+      backgroundColor: colors.background,
+      overflow: 'hidden',
+    },
+    progressFill: {
+      height: '100%',
+      borderRadius: 3,
+    },
   });
 }

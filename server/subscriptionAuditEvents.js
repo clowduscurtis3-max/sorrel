@@ -59,7 +59,15 @@ function reconcileTrackedItems({ existingEvents, activeItems, buildDedupKey, bui
       // notificationEvents.js's own reopen branches (real bug found by
       // /code-review 2026-09-16): a dismiss is "stop telling me about this
       // specific occurrence," not "never tell me about this series again."
-      toUpdate.push({ id: existing.id, patch: { ...event, status: 'pending', resolved_at: null, dismissed_at: null } });
+      toUpdate.push({
+        id: existing.id,
+        patch: {
+          ...event,
+          status: 'pending',
+          resolved_at: null,
+          dismissed_at: null,
+        },
+      });
     } else if (existing.status === 'pending') {
       // Still queued, not sent yet - keep its snapshot current (delivery
       // re-checks the condition again right before actually sending; this
@@ -96,7 +104,8 @@ function reconcileSubscriptionAuditEvents({ existingEvents, audit }) {
   const creep = reconcileTrackedItems({
     existingEvents: existingByType.subscription_price_creep,
     activeItems: audit.gradual_increases,
-    buildDedupKey: (item) => `subscription_price_creep:${item.series_id}:${priceCreepBucket(item.increase_ratio)}`,
+    buildDedupKey: (item) =>
+      `subscription_price_creep:${item.series_id}:${priceCreepBucket(item.increase_ratio)}`,
     buildEvent: (item, dedupKey) => {
       const pct = Math.round(item.increase_ratio * 100);
       return {
@@ -123,7 +132,8 @@ function reconcileSubscriptionAuditEvents({ existingEvents, audit }) {
   const jump = reconcileTrackedItems({
     existingEvents: existingByType.subscription_price_jump,
     activeItems: audit.price_jumps,
-    buildDedupKey: (item) => `subscription_price_jump:${item.previous_series_id}:${item.current_series_id}`,
+    buildDedupKey: (item) =>
+      `subscription_price_jump:${item.previous_series_id}:${item.current_series_id}`,
     buildEvent: (item, dedupKey) => {
       const pct = Math.round(item.increase_ratio * 100);
       return {

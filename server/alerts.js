@@ -25,10 +25,7 @@ function computeOverspendAlerts({ budgets, actuals, periodStart, periodEnd, now 
   const start = new Date(periodStart + 'T00:00:00Z');
   const end = new Date(periodEnd + 'T00:00:00Z');
   const daysInPeriod = Math.round((end - start) / 86400000) + 1;
-  const elapsedDays = Math.min(
-    daysInPeriod,
-    Math.max(1, Math.floor((now - start) / 86400000) + 1)
-  );
+  const elapsedDays = Math.min(daysInPeriod, Math.max(1, Math.floor((now - start) / 86400000) + 1));
 
   if (elapsedDays < MIN_DAYS_ELAPSED) return [];
 
@@ -54,7 +51,9 @@ function computeOverspendAlerts({ budgets, actuals, periodStart, periodEnd, now 
     // than scaling either one) means this can only ever flag a genuine
     // overspend, never an early-month posting artifact.
     const projected =
-      category === 'Bills & Utilities' ? Math.max(actual, budgeted) : round2(actual * (daysInPeriod / elapsedDays));
+      category === 'Bills & Utilities'
+        ? Math.max(actual, budgeted)
+        : round2(actual * (daysInPeriod / elapsedDays));
     if (projected <= budgeted * OVERSPEND_THRESHOLD_RATIO) continue;
 
     const overBy = round2(projected - budgeted);
@@ -85,18 +84,19 @@ function computeOverspendAlerts({ budgets, actuals, periodStart, periodEnd, now 
 async function recomputeOverspendAlerts(userId) {
   const { period_start, period_end } = currentMonthRange();
 
-  const [{ data: budgets, error: budgetError }, { data: actuals, error: actualError }] = await Promise.all([
-    supabaseAdmin
-      .from('budgets')
-      .select('category, budgeted_amount')
-      .eq('user_id', userId)
-      .eq('period_start', period_start),
-    supabaseAdmin
-      .from('budget_actuals')
-      .select('category, actual_amount')
-      .eq('user_id', userId)
-      .eq('period_start', period_start),
-  ]);
+  const [{ data: budgets, error: budgetError }, { data: actuals, error: actualError }] =
+    await Promise.all([
+      supabaseAdmin
+        .from('budgets')
+        .select('category, budgeted_amount')
+        .eq('user_id', userId)
+        .eq('period_start', period_start),
+      supabaseAdmin
+        .from('budget_actuals')
+        .select('category, actual_amount')
+        .eq('user_id', userId)
+        .eq('period_start', period_start),
+    ]);
   if (budgetError) throw budgetError;
   if (actualError) throw actualError;
 

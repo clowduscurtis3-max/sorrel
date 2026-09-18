@@ -48,7 +48,6 @@ export default function DigitAmountPicker({ value, onValueChange, digitCount = D
   useEffect(() => {
     const next = digitsFromValue(value, digitCount);
     setDigits((current) => (current.join('') === next.join('') ? current : next));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, digitCount]);
 
   function handleDigitChange(position, newDigit) {

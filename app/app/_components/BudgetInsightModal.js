@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { View, Text, Modal, Pressable, ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, Modal, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { apiFetch, apiErrorMessage, formatDecimal, logRecommendationEvent } from '../_lib/api';
 import { useTheme } from '../_lib/theme';
@@ -250,9 +250,10 @@ export default function BudgetInsightModal({ visible, onClose, insight, onBudget
               ) : (
                 <View style={[styles.card, localStyles.resultCard]}>
                   <Text style={localStyles.resultText}>
-                    Your current budget is ${formatDecimal(realistic.total_budgeted)}, but your actual
-                    spending has averaged ${formatDecimal(realistic.total_average_spend)} over the last{' '}
-                    {realistic.months_of_history} month{realistic.months_of_history === 1 ? '' : 's'}.
+                    Your current budget is ${formatDecimal(realistic.total_budgeted)}, but your
+                    actual spending has averaged ${formatDecimal(realistic.total_average_spend)}{' '}
+                    over the last {realistic.months_of_history} month
+                    {realistic.months_of_history === 1 ? '' : 's'}.
                   </Text>
                   <Text style={styles.smallText}>
                     Regenerating rebuilds your AI-set categories from that recent spending history.
@@ -279,68 +280,68 @@ export default function BudgetInsightModal({ visible, onClose, insight, onBudget
 
 function buildLocalStyles(colors) {
   return StyleSheet.create({
-  closeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: colors.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scroll: {
-    flex: 1,
-    paddingHorizontal: 24,
-  },
-  scrollContent: {
-    gap: 16,
-    paddingBottom: 32,
-  },
-  headline: {
-    fontSize: 15,
-    color: colors.darkest,
-    lineHeight: 21,
-  },
-  actionBlock: {
-    gap: 8,
-  },
-  resultCard: {
-    gap: 8,
-  },
-  resultText: {
-    fontSize: 13,
-    color: colors.darkest,
-    lineHeight: 19,
-  },
-  merchantRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 4,
-  },
-  merchantName: {
-    flex: 1,
-    fontSize: 13,
-    color: colors.dark,
-    paddingRight: 8,
-  },
-  merchantAmount: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-  adjustmentRow: {
-    gap: 2,
-    paddingVertical: 4,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.sage,
-  },
-  leaveAsIs: {
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  leaveAsIsText: {
-    fontSize: 13,
-    color: colors.muted,
-    fontWeight: '600',
-  },
+    closeButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 10,
+      backgroundColor: colors.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    scroll: {
+      flex: 1,
+      paddingHorizontal: 24,
+    },
+    scrollContent: {
+      gap: 16,
+      paddingBottom: 32,
+    },
+    headline: {
+      fontSize: 15,
+      color: colors.darkest,
+      lineHeight: 21,
+    },
+    actionBlock: {
+      gap: 8,
+    },
+    resultCard: {
+      gap: 8,
+    },
+    resultText: {
+      fontSize: 13,
+      color: colors.darkest,
+      lineHeight: 19,
+    },
+    merchantRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      paddingVertical: 4,
+    },
+    merchantName: {
+      flex: 1,
+      fontSize: 13,
+      color: colors.dark,
+      paddingRight: 8,
+    },
+    merchantAmount: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+    adjustmentRow: {
+      gap: 2,
+      paddingVertical: 4,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.sage,
+    },
+    leaveAsIs: {
+      alignItems: 'center',
+      paddingVertical: 8,
+    },
+    leaveAsIsText: {
+      fontSize: 13,
+      color: colors.muted,
+      fontWeight: '600',
+    },
   });
 }

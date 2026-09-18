@@ -39,7 +39,11 @@ function computeMonthlyReview({ period, prior, goals }) {
       const delta = round2(s.actual - (priorByCategory[s.category] || 0));
       if (delta === 0) continue;
       if (!biggestMove || Math.abs(delta) > Math.abs(biggestMove.delta)) {
-        biggestMove = { category: s.category, delta, direction: delta > 0 ? 'up' : 'down' };
+        biggestMove = {
+          category: s.category,
+          delta,
+          direction: delta > 0 ? 'up' : 'down',
+        };
       }
     }
   }

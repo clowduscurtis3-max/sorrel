@@ -88,7 +88,7 @@ test('buildBudgetRows: allowDiscretionaryBelowFloor omitted (default false) stil
   assert.equal(rows.find((r) => r.category === 'Dining').budgeted_amount, 40);
 });
 
-test('buildBudgetRows: real capacity to spare - the cap never engages, Claude\'s own numbers pass through unchanged', () => {
+test("buildBudgetRows: real capacity to spare - the cap never engages, Claude's own numbers pass through unchanged", () => {
   const rows = buildBudgetRows(
     baseArgs({
       proposed: {
@@ -113,7 +113,10 @@ test('buildBudgetRows: the known-bills floor and the discretionary rescale both 
   const rows = buildBudgetRows(
     baseArgs({
       proposed: {
-        'Bills & Utilities': { budgeted_amount: 800, reasoning: 'Average bills.' },
+        'Bills & Utilities': {
+          budgeted_amount: 800,
+          reasoning: 'Average bills.',
+        },
         Dining: { budgeted_amount: 300, reasoning: 'r' },
       },
       categoriesToGenerate: ['Bills & Utilities', 'Dining'],
@@ -130,7 +133,7 @@ test('buildBudgetRows: the known-bills floor and the discretionary rescale both 
   assert.equal(dining.budgeted_amount, 150); // independently rescaled
 });
 
-test('buildBudgetRows: no discretionary categories left to generate (all user-set) - the cap is never engaged, matching generateBudget\'s own guard', () => {
+test("buildBudgetRows: no discretionary categories left to generate (all user-set) - the cap is never engaged, matching generateBudget's own guard", () => {
   const rows = buildBudgetRows(
     baseArgs({
       proposed: { Groceries: { budgeted_amount: 400, reasoning: 'r' } },
@@ -157,7 +160,10 @@ test('buildBudgetRows: a negative, NaN, or Infinity proposed amount is filtered 
       categoriesToGenerate: ['Dining', 'Shopping', 'Entertainment', 'Groceries'],
     })
   );
-  assert.deepEqual(rows.map((r) => r.category), ['Groceries']);
+  assert.deepEqual(
+    rows.map((r) => r.category),
+    ['Groceries']
+  );
 });
 
 test('buildBudgetRows: tolerates a bare number instead of the requested {budgeted_amount, reasoning} shape', () => {
@@ -194,5 +200,8 @@ test('buildBudgetRows: a category Claude omits entirely from its response is sim
       categoriesToGenerate: ['Dining', 'Groceries'],
     })
   );
-  assert.deepEqual(rows.map((r) => r.category), ['Dining']);
+  assert.deepEqual(
+    rows.map((r) => r.category),
+    ['Dining']
+  );
 });

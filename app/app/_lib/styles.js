@@ -490,4 +490,3 @@ export function buildStyles(colors, insets = { top: 0 }) {
     },
   });
 }
-

@@ -106,7 +106,10 @@ async function getUsernameStatus(userId) {
 // account creation) and signinUsername below, so there is exactly one
 // place this happens rather than two slightly-different copies.
 async function signInWithEmail(email, password) {
-  const { data, error } = await supabaseAnon.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabaseAnon.auth.signInWithPassword({
+    email,
+    password,
+  });
   if (error || !data?.session) {
     throw new InvalidCredentialsError('Invalid username or password.');
   }
@@ -212,7 +215,9 @@ async function linkUsernamePassword({ userId, username, password }) {
     throw new AccountAlreadyHasUsernameError('This account already has a username set up.');
   }
 
-  const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(userId, { password });
+  const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+    password,
+  });
   if (updateError) throw updateError;
 
   const { error: profileError } = await supabaseAdmin

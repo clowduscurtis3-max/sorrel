@@ -35,7 +35,10 @@ async function registerDevice(userId, { expoPushToken, platform, timezone }) {
   // ON CONFLICT DO UPDATE only touches the columns actually listed, so a
   // user's own preference edits (once a settings screen exists) survive
   // every later device registration untouched.
-  const preferencesRow = { user_id: userId, updated_at: new Date().toISOString() };
+  const preferencesRow = {
+    user_id: userId,
+    updated_at: new Date().toISOString(),
+  };
   if (typeof timezone === 'string' && timezone.length > 0 && timezone.length < 100) {
     preferencesRow.timezone = timezone;
   }

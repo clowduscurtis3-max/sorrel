@@ -70,7 +70,8 @@ export function describeRealisticDateInsight(allocation, goalName) {
 // missing/empty list here means something upstream changed - falls back
 // to generic wording rather than silently naming nothing or crashing.
 export function discretionaryShortfallAlert(errorMessage, categories) {
-  const categoryList = Array.isArray(categories) && categories.length > 0 ? categories.join(', ') : null;
+  const categoryList =
+    Array.isArray(categories) && categories.length > 0 ? categories.join(', ') : null;
   return {
     title: 'Your budget doesn’t fit your income',
     message:

@@ -59,22 +59,45 @@ test('computeEstimatedPayment matches a hand-checked amortization example', () =
   // $35,000 principal, 60-month term, 7.53% APR - cross-checked against a
   // standard loan amortization formula independently (see build notes):
   // expect ~$701.83/month.
-  const payment = computeEstimatedPayment({ totalPrice: 35000, termMonths: 60, annualRatePercent: 7.53 });
+  const payment = computeEstimatedPayment({
+    totalPrice: 35000,
+    termMonths: 60,
+    annualRatePercent: 7.53,
+  });
   assert.equal(payment, 701.83);
 });
 
 test('computeEstimatedPayment at 0% APR is a plain even split, no NaN/Infinity from division by a zero rate', () => {
-  const payment = computeEstimatedPayment({ totalPrice: 12000, termMonths: 12, annualRatePercent: 0 });
+  const payment = computeEstimatedPayment({
+    totalPrice: 12000,
+    termMonths: 12,
+    annualRatePercent: 0,
+  });
   assert.equal(payment, 1000);
 });
 
 test('computeEstimatedPayment scales sensibly: a longer term produces a smaller payment for the same principal/rate', () => {
-  const shortTerm = computeEstimatedPayment({ totalPrice: 20000, termMonths: 36, annualRatePercent: 6 });
-  const longTerm = computeEstimatedPayment({ totalPrice: 20000, termMonths: 72, annualRatePercent: 6 });
-  assert.ok(longTerm < shortTerm, 'a 72-month term should produce a lower payment than a 36-month term');
+  const shortTerm = computeEstimatedPayment({
+    totalPrice: 20000,
+    termMonths: 36,
+    annualRatePercent: 6,
+  });
+  const longTerm = computeEstimatedPayment({
+    totalPrice: 20000,
+    termMonths: 72,
+    annualRatePercent: 6,
+  });
+  assert.ok(
+    longTerm < shortTerm,
+    'a 72-month term should produce a lower payment than a 36-month term'
+  );
 });
 
 test('computeEstimatedPayment rounds to the cent', () => {
-  const payment = computeEstimatedPayment({ totalPrice: 10000, termMonths: 36, annualRatePercent: 5.25 });
+  const payment = computeEstimatedPayment({
+    totalPrice: 10000,
+    termMonths: 36,
+    annualRatePercent: 5.25,
+  });
   assert.equal(Math.round(payment * 100), payment * 100);
 });

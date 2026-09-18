@@ -170,11 +170,9 @@ export default function RootLayout() {
       setLoading(false);
     });
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      (_event, newSession) => {
-        setSession(newSession);
-      }
-    );
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+    });
 
     return () => authListener.subscription.unsubscribe();
   }, []);
@@ -472,7 +470,9 @@ export default function RootLayout() {
     // past this one line.
     const sessionTimeoutMinutes = await getSessionTimeoutMinutes();
     const lockAfterMs =
-      sessionTimeoutMinutes === null ? SIGN_OUT_AFTER_BACKGROUND_MS : sessionTimeoutMinutes * 60 * 1000;
+      sessionTimeoutMinutes === null
+        ? SIGN_OUT_AFTER_BACKGROUND_MS
+        : sessionTimeoutMinutes * 60 * 1000;
     if (elapsed < lockAfterMs) return; // short elapsed: no-op
 
     // Determine biometric availability directly, live, rather than trusting
@@ -596,8 +596,7 @@ export default function RootLayout() {
             resumeChurnStartRef.current = now;
           }
           const churnElapsed = now - resumeChurnStartRef.current;
-          const delay =
-            churnElapsed >= RESUME_MAX_CHURN_WAIT_MS ? 0 : RESUME_SETTLE_DEBOUNCE_MS;
+          const delay = churnElapsed >= RESUME_MAX_CHURN_WAIT_MS ? 0 : RESUME_SETTLE_DEBOUNCE_MS;
           pendingResumeCheckRef.current = setTimeout(() => {
             pendingResumeCheckRef.current = null;
             resumeChurnStartRef.current = null;
@@ -852,7 +851,13 @@ export default function RootLayout() {
   // sign-in gets its own fresh check rather than this effect silently
   // no-op'ing forever after the first session.
   useEffect(() => {
-    if (ready && !target && backgroundElapsedCheckDone && mfaGateCleared && !biometricCheckStartedRef.current) {
+    if (
+      ready &&
+      !target &&
+      backgroundElapsedCheckDone &&
+      mfaGateCleared &&
+      !biometricCheckStartedRef.current
+    ) {
       runBiometricCheck();
     }
   }, [ready, target, backgroundElapsedCheckDone, mfaGateCleared]);
@@ -911,9 +916,8 @@ export default function RootLayout() {
 
     // Warm/backgrounded: the app was already running when the notification
     // was tapped.
-    const subscription = Notifications.addNotificationResponseReceivedListener(
-      handleNotificationTap
-    );
+    const subscription =
+      Notifications.addNotificationResponseReceivedListener(handleNotificationTap);
     return () => subscription.remove();
   }, []);
 
@@ -1003,35 +1007,35 @@ export default function RootLayout() {
     // everything, same reasoning as above), only which of these two sits
     // outside the other.
     <SafeAreaProvider>
-    <ThemeProvider>
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        {goalCheckFailed ? (
-          // Sits ahead of the Splash check below on purpose: `ready`
-          // (and therefore `tabsReady`) can never become true while
-          // `goal` is stuck at `undefined` after a failed initial check
-          // (see fetchGoal()'s own comment) - without this branch the app
-          // would spin on Splash forever instead of giving the user a way
-          // to retry or bail out.
-          <GoalCheckError onRetry={fetchGoal} onSignOut={forceSignOut} />
-        ) : !tabsReady && !mfaLocked && !biometricLocked ? (
-          <Splash />
-        ) : mfaLocked ? (
-          // forceSignOut, not the local `signOut` above - this screen renders
-          // outside AppDataProvider's tree (before <Slot/> ever mounts), so
-          // the push-token-unregistering wrapped sign-out that context would
-          // normally expose isn't reachable here either way. forceSignOut is
-          // the same single choke point Phase 18/19's own sign-out path
-          // already routes through, for the same reason.
-          <MfaChallenge onVerified={() => setMfaPassed(true)} onSignOut={forceSignOut} />
-        ) : biometricLocked ? (
-          <BiometricLock onRetry={attemptBiometricAuth} />
-        ) : (
-          <SessionContext.Provider value={{ session, goals, refetchGoal: fetchGoal, signOut }}>
-            <Slot />
-          </SessionContext.Provider>
-        )}
-      </GestureHandlerRootView>
-    </ThemeProvider>
+      <ThemeProvider>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          {goalCheckFailed ? (
+            // Sits ahead of the Splash check below on purpose: `ready`
+            // (and therefore `tabsReady`) can never become true while
+            // `goal` is stuck at `undefined` after a failed initial check
+            // (see fetchGoal()'s own comment) - without this branch the app
+            // would spin on Splash forever instead of giving the user a way
+            // to retry or bail out.
+            <GoalCheckError onRetry={fetchGoal} onSignOut={forceSignOut} />
+          ) : !tabsReady && !mfaLocked && !biometricLocked ? (
+            <Splash />
+          ) : mfaLocked ? (
+            // forceSignOut, not the local `signOut` above - this screen renders
+            // outside AppDataProvider's tree (before <Slot/> ever mounts), so
+            // the push-token-unregistering wrapped sign-out that context would
+            // normally expose isn't reachable here either way. forceSignOut is
+            // the same single choke point Phase 18/19's own sign-out path
+            // already routes through, for the same reason.
+            <MfaChallenge onVerified={() => setMfaPassed(true)} onSignOut={forceSignOut} />
+          ) : biometricLocked ? (
+            <BiometricLock onRetry={attemptBiometricAuth} />
+          ) : (
+            <SessionContext.Provider value={{ session, goals, refetchGoal: fetchGoal, signOut }}>
+              <Slot />
+            </SessionContext.Provider>
+          )}
+        </GestureHandlerRootView>
+      </ThemeProvider>
     </SafeAreaProvider>
   );
 }

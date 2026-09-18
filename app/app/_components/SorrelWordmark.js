@@ -59,9 +59,7 @@ export default function SorrelWordmark({ leafSize = 64, showTagline = true, layo
         sorrel
       </Text>
       {showTagline ? (
-        <Text style={themedStyles.tagline}>
-          Your money. Your goals.{'\n'}We'll guide the way.
-        </Text>
+        <Text style={themedStyles.tagline}>Your money. Your goals.{'\n'}We'll guide the way.</Text>
       ) : null}
     </View>
   );

@@ -44,7 +44,13 @@ const FRIENDLY_CATEGORIES = [...SPEND_CATEGORIES, ...FLOW_CATEGORIES];
 // it's a catch-all with no reliable essential/discretionary signal either way.
 // 'Gas' added 2026-09-01 alongside the split above, per direct user request
 // ("gas should be treated as a necessity as well").
-const ESSENTIAL_CATEGORIES = ['Groceries', 'Bills & Utilities', 'Transportation', 'Gas', 'Health & Personal Care'];
+const ESSENTIAL_CATEGORIES = [
+  'Groceries',
+  'Bills & Utilities',
+  'Transportation',
+  'Gas',
+  'Health & Personal Care',
+];
 
 // The other side of the same split, also promoted from hardcoded prose
 // (budget.js's two AI prompts, proposeRebalance's own comments) to a real
@@ -293,7 +299,8 @@ function guardAiCategoryAgainstAmountSign(category, reasoning, confidence, amoun
   }
   return {
     category: 'Transfers',
-    reasoning: 'A negative amount means money coming into your account, not a purchase - counted as a transfer, not spend.',
+    reasoning:
+      'A negative amount means money coming into your account, not a purchase - counted as a transfer, not spend.',
     confidence: 'high',
   };
 }

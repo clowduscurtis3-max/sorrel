@@ -35,7 +35,7 @@ test('computeRealizedAccountPace: exact arithmetic - net deposits over a real wi
   assert.equal(result.window_start, '2026-08-09');
   // net transacted = -300 -300 -300 +300 = -600; net change = -(-600) = 600
   const daysOfHistory = Math.floor((NOW - new Date('2026-08-09')) / 86400000);
-  const expectedMonthlyPace = 600 / (daysOfHistory / (30.44));
+  const expectedMonthlyPace = 600 / (daysOfHistory / 30.44);
   assert.ok(Math.abs(result.monthly_pace - expectedMonthlyPace) < 0.01);
   assert.ok(result.monthly_pace > 0);
 });
@@ -57,7 +57,7 @@ test('computeRealizedAccountPace: transfers are included, not excluded like comp
   assert.ok(withTransfer.monthly_pace > 0);
 });
 
-test('computeRealizedAccountPace: window never extends before the account\'s own earliest known transaction', () => {
+test("computeRealizedAccountPace: window never extends before the account's own earliest known transaction", () => {
   // Only 20 real days of transaction history exist for this account, even
   // though the lookback would otherwise reach back 90 days - the window
   // must be capped at the earliest known transaction, not assumed complete
@@ -76,7 +76,7 @@ test('computeRealizedAccountPace: window never extends before the account\'s own
   assert.equal(result.window_start, '2026-08-19');
 });
 
-test('computeRealizedAccountPace: refuses when there\'s enough calendar history but too few real transactions in the window', () => {
+test("computeRealizedAccountPace: refuses when there's enough calendar history but too few real transactions in the window", () => {
   // Real bug found testing against the live account (2026-09-08): a
   // 70-day-old earliest transaction with only 2 transactions total still
   // cleared the days-based gate alone and produced a wildly noisy pace.
@@ -93,17 +93,23 @@ test('computeRealizedAccountPace: refuses when there\'s enough calendar history 
 });
 
 test('computeGoalRealizedPace: no linked accounts is an honest refusal, not a fabricated $0', () => {
-  const result = computeGoalRealizedPace({ accountIds: [], accountPaces: new Map() });
+  const result = computeGoalRealizedPace({
+    accountIds: [],
+    accountPaces: new Map(),
+  });
   assert.equal(result.insufficient_history, true);
   assert.equal(result.reason, 'no_accounts_linked');
 });
 
-test('computeGoalRealizedPace: sums every linked account\'s pace when all clear the gate', () => {
+test("computeGoalRealizedPace: sums every linked account's pace when all clear the gate", () => {
   const accountPaces = new Map([
     ['acc-1', { insufficient_history: false, monthly_pace: 200 }],
     ['acc-2', { insufficient_history: false, monthly_pace: 150 }],
   ]);
-  const result = computeGoalRealizedPace({ accountIds: ['acc-1', 'acc-2'], accountPaces });
+  const result = computeGoalRealizedPace({
+    accountIds: ['acc-1', 'acc-2'],
+    accountPaces,
+  });
   assert.equal(result.insufficient_history, false);
   assert.equal(result.monthly_pace, 350);
 });
@@ -113,7 +119,10 @@ test('computeGoalRealizedPace: all-or-nothing - one thin account refuses the who
     ['acc-1', { insufficient_history: false, monthly_pace: 200 }],
     ['acc-2', { insufficient_history: true, days_of_history: 3 }],
   ]);
-  const result = computeGoalRealizedPace({ accountIds: ['acc-1', 'acc-2'], accountPaces });
+  const result = computeGoalRealizedPace({
+    accountIds: ['acc-1', 'acc-2'],
+    accountPaces,
+  });
   assert.equal(result.insufficient_history, true);
   assert.equal(result.reason, 'insufficient_history');
 });

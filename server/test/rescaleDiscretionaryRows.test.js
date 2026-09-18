@@ -11,7 +11,9 @@ function row(category, budgeted_amount, reasoning) {
 test('rescaleDiscretionaryRows: does nothing when the proposed total already matches the target', () => {
   const rows = [row('Dining', 200), row('Shopping', 100), row('Groceries', 999)];
   rescaleDiscretionaryRows({
-    rows, discretionaryCategories: ['Dining', 'Shopping'], target: 300,
+    rows,
+    discretionaryCategories: ['Dining', 'Shopping'],
+    target: 300,
     averages: { Dining: 300, Shopping: 150 },
   });
   assert.equal(rows[0].budgeted_amount, 200);
@@ -26,7 +28,9 @@ test('rescaleDiscretionaryRows: proportionally scales down when Claude proposed 
   // the scaled results (150, 50), so neither interferes with this test's
   // actual point - pure proportional scaling.
   rescaleDiscretionaryRows({
-    rows, discretionaryCategories: ['Dining', 'Shopping'], target: 200,
+    rows,
+    discretionaryCategories: ['Dining', 'Shopping'],
+    target: 200,
     averages: { Dining: 200, Shopping: 60 },
   });
   assert.equal(rows[0].budgeted_amount, 150);
@@ -38,14 +42,16 @@ test('rescaleDiscretionaryRows: proportionally scales up when Claude proposed to
   // proposed total 200, target 300 -> scale 1.5. Averages picked so the
   // ceiling (100% of average) sits clear of the scaled result (150).
   rescaleDiscretionaryRows({
-    rows, discretionaryCategories: ['Dining', 'Shopping'], target: 300,
+    rows,
+    discretionaryCategories: ['Dining', 'Shopping'],
+    target: 300,
     averages: { Dining: 200, Shopping: 200 },
   });
   assert.equal(rows[0].budgeted_amount, 150);
   assert.equal(rows[1].budgeted_amount, 150);
 });
 
-test('rescaleDiscretionaryRows: a ceiling (a category\'s own real average) bounds scale-up - real bug fixed 2026-09-13', () => {
+test("rescaleDiscretionaryRows: a ceiling (a category's own real average) bounds scale-up - real bug fixed 2026-09-13", () => {
   // The exact scenario a code review caught: Claude badly under-proposes one
   // category (Dining: $90 against a $100 real average) relative to how much
   // the total needs to scale up (target $450 vs. a $100 proposed total,
@@ -58,7 +64,9 @@ test('rescaleDiscretionaryRows: a ceiling (a category\'s own real average) bound
   // included here just so the full picture of both rows is asserted.
   const rows = [row('Dining', 90), row('Shopping', 10)];
   rescaleDiscretionaryRows({
-    rows, discretionaryCategories: ['Dining', 'Shopping'], target: 450,
+    rows,
+    discretionaryCategories: ['Dining', 'Shopping'],
+    target: 450,
     averages: { Dining: 100, Shopping: 400 },
   });
   assert.equal(rows[0].budgeted_amount, 100); // capped at its own $100 average, not $405
@@ -81,7 +89,9 @@ test('rescaleDiscretionaryRows: reasoning text is updated to match a rescaled am
   // value (75), a real change from its original $50 - its reasoning must
   // get the factual adjustment note appended.
   rescaleDiscretionaryRows({
-    rows, discretionaryCategories: ['Dining', 'Shopping'], target: 225,
+    rows,
+    discretionaryCategories: ['Dining', 'Shopping'],
+    target: 225,
     averages: { Dining: 100, Shopping: 400 },
   });
   assert.equal(rows[0].budgeted_amount, 100);
@@ -97,20 +107,24 @@ test('rescaleDiscretionaryRows: a category floor is a harder constraint than the
   // its floor (20% of 100 average = 20) is far higher - the floor wins,
   // and the actual resulting total legitimately overshoots the target.
   rescaleDiscretionaryRows({
-    rows, discretionaryCategories: ['Dining', 'Shopping'], target: 5,
+    rows,
+    discretionaryCategories: ['Dining', 'Shopping'],
+    target: 5,
     averages: { Dining: 100, Shopping: 100 },
   });
   assert.equal(rows[0].budgeted_amount, 20); // clamped to its floor, not 2.5
   assert.equal(rows[1].budgeted_amount, 20);
 });
 
-test('rescaleDiscretionaryRows: Claude proposing $0 everywhere falls back to an even split, bounded by each category\'s own ceiling', () => {
+test("rescaleDiscretionaryRows: Claude proposing $0 everywhere falls back to an even split, bounded by each category's own ceiling", () => {
   const rows = [row('Dining', 0), row('Shopping', 0)];
   // even share (300/2 = 150) exceeds each category's own $100 ceiling, so
   // both get capped there instead - an honest shortfall against the $300
   // target, not silently forced past what either category actually spends.
   rescaleDiscretionaryRows({
-    rows, discretionaryCategories: ['Dining', 'Shopping'], target: 300,
+    rows,
+    discretionaryCategories: ['Dining', 'Shopping'],
+    target: 300,
     averages: { Dining: 100, Shopping: 100 },
   });
   assert.equal(rows[0].budgeted_amount, 100);
@@ -120,7 +134,9 @@ test('rescaleDiscretionaryRows: Claude proposing $0 everywhere falls back to an 
 test('rescaleDiscretionaryRows: $0 everywhere with a target below the combined floor still respects each floor', () => {
   const rows = [row('Dining', 0), row('Shopping', 0)];
   rescaleDiscretionaryRows({
-    rows, discretionaryCategories: ['Dining', 'Shopping'], target: 30, // even share (15) is below both floors (20)
+    rows,
+    discretionaryCategories: ['Dining', 'Shopping'],
+    target: 30, // even share (15) is below both floors (20)
     averages: { Dining: 100, Shopping: 100 },
   });
   assert.equal(rows[0].budgeted_amount, 20);
@@ -130,8 +146,11 @@ test('rescaleDiscretionaryRows: $0 everywhere with a target below the combined f
 test('rescaleDiscretionaryRows: a custom floorRatio of 0 (the explicit-acceptance path) lets rows drop all the way to $0', () => {
   const rows = [row('Dining', 10), row('Shopping', 10)];
   rescaleDiscretionaryRows({
-    rows, discretionaryCategories: ['Dining', 'Shopping'], target: 5,
-    averages: { Dining: 100, Shopping: 100 }, floorRatio: 0,
+    rows,
+    discretionaryCategories: ['Dining', 'Shopping'],
+    target: 5,
+    averages: { Dining: 100, Shopping: 100 },
+    floorRatio: 0,
   });
   assert.equal(rows[0].budgeted_amount, 2.5);
   assert.equal(rows[1].budgeted_amount, 2.5);
@@ -140,10 +159,12 @@ test('rescaleDiscretionaryRows: a custom floorRatio of 0 (the explicit-acceptanc
 test('rescaleDiscretionaryRows: non-discretionary rows (essential/Other) are never touched', () => {
   const rows = [row('Dining', 300), row('Groceries', 500), row('Other', 20)];
   rescaleDiscretionaryRows({
-    rows, discretionaryCategories: ['Dining'], target: 100,
+    rows,
+    discretionaryCategories: ['Dining'],
+    target: 100,
     averages: { Dining: 120 }, // floor (84) and ceiling (120) both sit clear
-                                // of the scaled result (100), so neither
-                                // interferes - the scaled value governs
+    // of the scaled result (100), so neither
+    // interferes - the scaled value governs
   });
   assert.equal(rows[0].budgeted_amount, 100);
   assert.equal(rows[1].budgeted_amount, 500);
@@ -152,6 +173,11 @@ test('rescaleDiscretionaryRows: non-discretionary rows (essential/Other) are nev
 
 test('rescaleDiscretionaryRows: no discretionary categories in scope is a safe no-op', () => {
   const rows = [row('Groceries', 500)];
-  rescaleDiscretionaryRows({ rows, discretionaryCategories: [], target: 100, averages: {} });
+  rescaleDiscretionaryRows({
+    rows,
+    discretionaryCategories: [],
+    target: 100,
+    averages: {},
+  });
   assert.equal(rows[0].budgeted_amount, 500);
 });

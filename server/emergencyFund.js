@@ -142,11 +142,14 @@ function computeEmergencyFundProgress({ config, accounts }) {
     return { enabled: false };
   }
 
-  return { enabled: true, ...computeBalanceProgress({
-    targetAmount: config.target_amount,
-    accountIds: config.account_ids,
-    accounts,
-  }) };
+  return {
+    enabled: true,
+    ...computeBalanceProgress({
+      targetAmount: config.target_amount,
+      accountIds: config.account_ids,
+      accounts,
+    }),
+  };
 }
 
 // DB-touching wrapper - all I/O lives here, no business logic. Returns the
@@ -159,16 +162,30 @@ function computeEmergencyFundProgress({ config, accounts }) {
 async function getEmergencyFundStatus(userId) {
   const [{ data: config, error: configError }, { data: accounts, error: accountsError }, estimate] =
     await Promise.all([
-      supabaseAdmin.from('emergency_funds').select('enabled, target_amount, account_ids').eq('user_id', userId).maybeSingle(),
-      supabaseAdmin.from('accounts').select('id, available_balance, current_balance').eq('user_id', userId),
+      supabaseAdmin
+        .from('emergency_funds')
+        .select('enabled, target_amount, account_ids')
+        .eq('user_id', userId)
+        .maybeSingle(),
+      supabaseAdmin
+        .from('accounts')
+        .select('id, available_balance, current_balance')
+        .eq('user_id', userId),
       getEssentialExpenseEstimate(userId),
     ]);
   if (configError) throw configError;
   if (accountsError) throw accountsError;
 
-  const resolvedConfig = config || { enabled: false, target_amount: null, account_ids: [] };
+  const resolvedConfig = config || {
+    enabled: false,
+    target_amount: null,
+    account_ids: [],
+  };
   return {
-    ...computeEmergencyFundProgress({ config: resolvedConfig, accounts: accounts || [] }),
+    ...computeEmergencyFundProgress({
+      config: resolvedConfig,
+      accounts: accounts || [],
+    }),
     essential_expense_estimate: estimate,
   };
 }

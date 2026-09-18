@@ -11,10 +11,12 @@ const {
 } = require('../recommendationEvents');
 
 test('VALID_TYPES matches the four real propose-then-apply surfaces confirmed in the client code', () => {
-  assert.deepEqual(
-    [...VALID_TYPES].sort(),
-    ['budget_insight_cuts', 'budget_rebalance', 'emergency_fund_target', 'goal_timeframe_extend']
-  );
+  assert.deepEqual([...VALID_TYPES].sort(), [
+    'budget_insight_cuts',
+    'budget_rebalance',
+    'emergency_fund_target',
+    'goal_timeframe_extend',
+  ]);
 });
 
 test('logRecommendationEvent rejects an unknown recommendation_type before touching the DB', async () => {
@@ -45,7 +47,10 @@ test('logRecommendationEvent rejects an unknown status before touching the DB', 
 
 test('clearRecommendationHistory rejects an unknown type before touching the DB', async () => {
   await assert.rejects(
-    () => clearRecommendationHistory('not-a-real-user', { type: 'fund_source_split' }),
+    () =>
+      clearRecommendationHistory('not-a-real-user', {
+        type: 'fund_source_split',
+      }),
     /Unknown recommendation_type/
   );
 });

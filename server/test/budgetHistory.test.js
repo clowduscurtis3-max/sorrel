@@ -24,8 +24,14 @@ test('monthRange(0, now) matches currentMonthRange(now) exactly', () => {
 
 test('monthRange counts back across a calendar year boundary', () => {
   const now = new Date('2026-02-14T12:00:00Z');
-  assert.deepEqual(monthRange(2, now), { period_start: '2025-12-01', period_end: '2025-12-31' });
-  assert.deepEqual(monthRange(1, now), { period_start: '2026-01-01', period_end: '2026-01-31' });
+  assert.deepEqual(monthRange(2, now), {
+    period_start: '2025-12-01',
+    period_end: '2025-12-31',
+  });
+  assert.deepEqual(monthRange(1, now), {
+    period_start: '2026-01-01',
+    period_end: '2026-01-31',
+  });
 });
 
 test('computeBudgetTrend: fewer than MIN_TREND_STREAK periods returns nothing', () => {
@@ -82,10 +88,7 @@ test('computeBudgetTrend: a flat/unchanging series is never flagged', () => {
 });
 
 test('computeBudgetTrend: a streak exactly one period below the threshold is not flagged', () => {
-  const periods = [
-    period('2026-06-01', 'Dining', 100),
-    period('2026-07-01', 'Dining', 150),
-  ];
+  const periods = [period('2026-06-01', 'Dining', 100), period('2026-07-01', 'Dining', 150)];
   assert.deepEqual(computeBudgetTrend(periods), []);
 });
 

@@ -34,17 +34,28 @@ test('plaidCategorization splits gas out from the rest of Transportation', () =>
 });
 
 test('plaidCategorization falls through to the primary label when detailed is missing', () => {
-  const result = plaidCategorization({ primary: 'TRANSPORTATION', confidence_level: 'HIGH' });
+  const result = plaidCategorization({
+    primary: 'TRANSPORTATION',
+    confidence_level: 'HIGH',
+  });
   assert.equal(result.category, 'Transportation');
 });
 
 test('plaidCategorization returns null for a low-confidence result, regardless of category', () => {
   assert.equal(
-    plaidCategorization({ primary: 'TRANSPORTATION', detailed: 'TRANSPORTATION_GAS', confidence_level: 'LOW' }),
+    plaidCategorization({
+      primary: 'TRANSPORTATION',
+      detailed: 'TRANSPORTATION_GAS',
+      confidence_level: 'LOW',
+    }),
     null
   );
   assert.equal(
-    plaidCategorization({ primary: 'TRANSPORTATION', detailed: 'TRANSPORTATION_GAS', confidence_level: 'UNKNOWN' }),
+    plaidCategorization({
+      primary: 'TRANSPORTATION',
+      detailed: 'TRANSPORTATION_GAS',
+      confidence_level: 'UNKNOWN',
+    }),
     null
   );
 });
@@ -80,8 +91,16 @@ test('plaidCategorization still treats every other loan payment as a real bill',
     'LOAN_PAYMENTS_STUDENT_LOAN_PAYMENT',
     'LOAN_PAYMENTS_OTHER_PAYMENT',
   ]) {
-    const result = plaidCategorization({ primary: 'LOAN_PAYMENTS', detailed, confidence_level: 'VERY_HIGH' });
-    assert.equal(result.category, 'Bills & Utilities', `expected ${detailed} to stay Bills & Utilities`);
+    const result = plaidCategorization({
+      primary: 'LOAN_PAYMENTS',
+      detailed,
+      confidence_level: 'VERY_HIGH',
+    });
+    assert.equal(
+      result.category,
+      'Bills & Utilities',
+      `expected ${detailed} to stay Bills & Utilities`
+    );
   }
 });
 
@@ -95,14 +114,28 @@ test('guardAiCategoryAgainstAmountSign reroutes a negative-amount AI guess out o
   // incoming P2P payment (a person's name, no merchant identity - Plaid
   // itself returns OTHER/OTHER_OTHER at LOW confidence for these) had
   // been AI-guessed into "Other", silently counting as spend.
-  const result = guardAiCategoryAgainstAmountSign('Other', 'Person name, unclear transaction purpose', 'low', -50);
+  const result = guardAiCategoryAgainstAmountSign(
+    'Other',
+    'Person name, unclear transaction purpose',
+    'low',
+    -50
+  );
   assert.equal(result.category, 'Transfers');
   assert.equal(result.confidence, 'high');
 });
 
 test('guardAiCategoryAgainstAmountSign leaves a positive-amount (real spend) category untouched', () => {
-  const result = guardAiCategoryAgainstAmountSign('Shopping', 'Looks like a retail purchase', 'medium', 42.5);
-  assert.deepEqual(result, { category: 'Shopping', reasoning: 'Looks like a retail purchase', confidence: 'medium' });
+  const result = guardAiCategoryAgainstAmountSign(
+    'Shopping',
+    'Looks like a retail purchase',
+    'medium',
+    42.5
+  );
+  assert.deepEqual(result, {
+    category: 'Shopping',
+    reasoning: 'Looks like a retail purchase',
+    confidence: 'medium',
+  });
 });
 
 test('guardAiCategoryAgainstAmountSign leaves Income/Transfers untouched regardless of sign', () => {
@@ -110,7 +143,12 @@ test('guardAiCategoryAgainstAmountSign leaves Income/Transfers untouched regardl
   // guarded against, not FLOW_CATEGORIES.
   const income = guardAiCategoryAgainstAmountSign('Income', 'A paycheck', 'high', -1200);
   assert.equal(income.category, 'Income');
-  const transfers = guardAiCategoryAgainstAmountSign('Transfers', 'Moved between accounts', 'high', 500);
+  const transfers = guardAiCategoryAgainstAmountSign(
+    'Transfers',
+    'Moved between accounts',
+    'high',
+    500
+  );
   assert.equal(transfers.category, 'Transfers');
 });
 

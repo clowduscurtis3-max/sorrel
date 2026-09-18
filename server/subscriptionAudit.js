@@ -225,7 +225,9 @@ function computeSubscriptionAudit({
   // otherwise net a negative "subscription" into total_monthly_equivalent,
   // silently understating it. The same isValidAmount guard already used for
   // price-creep is applied here too.
-  const spendSeries = series.filter((s) => !FLOW_CATEGORIES.includes(s.category) && isValidAmount(s.typical_amount));
+  const spendSeries = series.filter(
+    (s) => !FLOW_CATEGORIES.includes(s.category) && isValidAmount(s.typical_amount)
+  );
 
   const activeById = new Map();
   const lapsedById = new Map();
@@ -254,7 +256,9 @@ function computeSubscriptionAudit({
     const interval = intervalFor(s.interval);
     if (!interval) continue; // shouldn't happen - every stored series has a valid interval name
 
-    const daysSinceExpected = Math.floor((nowMs - utcDateOnlyMs(s.next_expected_date)) / MS_PER_DAY);
+    const daysSinceExpected = Math.floor(
+      (nowMs - utcDateOnlyMs(s.next_expected_date)) / MS_PER_DAY
+    );
     const isLapsed = daysSinceExpected > interval.tolerance;
 
     if (isLapsed) {
@@ -465,7 +469,9 @@ async function getSubscriptionAudit(userId, { now } = {}) {
   // unset (never opened Settings) reads as 'medium', the exact same
   // PRICE_CREEP_MIN_RATIO every caller got before this setting existed.
   const { recurring_settings: recurringSettings } = await getSettings(userId);
-  const priceCreepMinRatio = priceCreepRatioForSensitivity(recurringSettings?.price_creep_sensitivity);
+  const priceCreepMinRatio = priceCreepRatioForSensitivity(
+    recurringSettings?.price_creep_sensitivity
+  );
 
   const resolvedNow = now || new Date();
   const audit = computeSubscriptionAudit({
@@ -480,7 +486,9 @@ async function getSubscriptionAudit(userId, { now } = {}) {
   // secondary post-sync computation in this app: a failure here shouldn't
   // take down the whole audit response over one extra stat.
   try {
-    audit.month_comparison = await getRecurringMonthComparison(userId, { now: resolvedNow });
+    audit.month_comparison = await getRecurringMonthComparison(userId, {
+      now: resolvedNow,
+    });
   } catch (err) {
     console.error(err);
     audit.month_comparison = { available: false, reason: 'error' };
@@ -502,7 +510,10 @@ async function getSubscriptionAudit(userId, { now } = {}) {
 // can call this without a second recurring_series query when they
 // already have one in hand.
 function computeKnownRecurringBillsTotal(series, now = new Date()) {
-  const { recurring_bills } = computeSubscriptionAudit({ series: series || [], now });
+  const { recurring_bills } = computeSubscriptionAudit({
+    series: series || [],
+    now,
+  });
   return round2(recurring_bills.reduce((sum, s) => sum + s.monthly_equivalent_amount, 0));
 }
 

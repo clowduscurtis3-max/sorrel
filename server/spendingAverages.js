@@ -116,7 +116,11 @@ function summarizeSpending(transactions, anchorDate = new Date()) {
     SPEND_CATEGORIES.map((c) => [c, round2(totals[c] / monthCount)])
   );
 
-  return { averages, averageMonthlyIncome: round2(totalIncome / monthCount), monthCount };
+  return {
+    averages,
+    averageMonthlyIncome: round2(totalIncome / monthCount),
+    monthCount,
+  };
 }
 
 module.exports = {

@@ -127,7 +127,14 @@ function reconcileOverspendEvents({ existingEvents, activeAlerts, periodStart })
       // "never tell me about this category/account again."
       toUpdate.push({
         id: existing.id,
-        patch: { status: 'pending', title, body, data, resolved_at: null, dismissed_at: null },
+        patch: {
+          status: 'pending',
+          title,
+          body,
+          data,
+          resolved_at: null,
+          dismissed_at: null,
+        },
       });
     } else if (existing.status === 'pending') {
       // Still queued, not sent yet - keep its snapshot current since the
@@ -185,7 +192,11 @@ function reconcileLowBalanceEvents({ existingEvents, accounts, thresholds }) {
     const accountLabel = account.name || 'An account';
     const title = `${accountLabel} balance is low`;
     const body = `${accountLabel} is at $${balance.toFixed(2)}, below your $${threshold.toFixed(2)} threshold.`;
-    const data = { account_id: account.plaid_account_id, balance: round2(balance), threshold: round2(threshold) };
+    const data = {
+      account_id: account.plaid_account_id,
+      balance: round2(balance),
+      threshold: round2(threshold),
+    };
 
     if (!existing) {
       toInsert.push({
@@ -207,7 +218,14 @@ function reconcileLowBalanceEvents({ existingEvents, accounts, thresholds }) {
       // "never tell me about this category/account again."
       toUpdate.push({
         id: existing.id,
-        patch: { status: 'pending', title, body, data, resolved_at: null, dismissed_at: null },
+        patch: {
+          status: 'pending',
+          title,
+          body,
+          data,
+          resolved_at: null,
+          dismissed_at: null,
+        },
       });
     } else if (existing.status === 'pending') {
       toUpdate.push({ id: existing.id, patch: { title, body, data } });
@@ -346,20 +364,24 @@ function reconcileSavingsReminderEvents({
 async function recomputeNotificationEvents(userId) {
   const { period_start } = currentMonthRange();
 
-  const [{ data: activeAlerts, error: alertsError }, { data: existingOverspend, error: existingError }] =
-    await Promise.all([
-      supabaseAdmin
-        .from('budget_alerts')
-        .select('category, budgeted_amount, actual_amount, projected_amount, message, suggested_action')
-        .eq('user_id', userId)
-        .eq('period_start', period_start),
-      supabaseAdmin
-        .from('notification_events')
-        .select('id, category, status')
-        .eq('user_id', userId)
-        .eq('event_type', 'overspend_pace')
-        .eq('period_start', period_start),
-    ]);
+  const [
+    { data: activeAlerts, error: alertsError },
+    { data: existingOverspend, error: existingError },
+  ] = await Promise.all([
+    supabaseAdmin
+      .from('budget_alerts')
+      .select(
+        'category, budgeted_amount, actual_amount, projected_amount, message, suggested_action'
+      )
+      .eq('user_id', userId)
+      .eq('period_start', period_start),
+    supabaseAdmin
+      .from('notification_events')
+      .select('id, category, status')
+      .eq('user_id', userId)
+      .eq('event_type', 'overspend_pace')
+      .eq('period_start', period_start),
+  ]);
   if (alertsError) throw alertsError;
   if (existingError) throw existingError;
 
@@ -425,18 +447,20 @@ async function recomputeNotificationEvents(userId) {
     // reconcile call in this function - reconcileLowBalanceEvents
     // itself already no-ops cheaply per-account when a given account
     // has no configured threshold.
-    const [{ data: accounts, error: accountsError }, { data: existingLowBalance, error: lowBalanceError }] =
-      await Promise.all([
-        supabaseAdmin
-          .from('accounts')
-          .select('plaid_account_id, name, available_balance, current_balance')
-          .eq('user_id', userId),
-        supabaseAdmin
-          .from('notification_events')
-          .select('id, category, status')
-          .eq('user_id', userId)
-          .eq('event_type', 'low_balance'),
-      ]);
+    const [
+      { data: accounts, error: accountsError },
+      { data: existingLowBalance, error: lowBalanceError },
+    ] = await Promise.all([
+      supabaseAdmin
+        .from('accounts')
+        .select('plaid_account_id, name, available_balance, current_balance')
+        .eq('user_id', userId),
+      supabaseAdmin
+        .from('notification_events')
+        .select('id, category, status')
+        .eq('user_id', userId)
+        .eq('event_type', 'low_balance'),
+    ]);
     if (accountsError) throw accountsError;
     if (lowBalanceError) throw lowBalanceError;
 

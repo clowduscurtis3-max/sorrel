@@ -2,7 +2,12 @@ import { useMemo, useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { useSharedValue, useAnimatedStyle, runOnJS, clamp } from 'react-native-reanimated';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  runOnJS,
+  clamp,
+} from 'react-native-reanimated';
 import { useTheme } from '../_lib/theme';
 import { hslToHex, hexToHsl } from '../_lib/color';
 
@@ -124,45 +129,45 @@ export default function HomeCardColorPicker({ value, onChange }) {
 // via useMemo inside the component (keyed on colors).
 function buildPickerStyles(colors) {
   return StyleSheet.create({
-  container: {
-    gap: 10,
-  },
-  swatchRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  swatch: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.sage,
-  },
-  swatchSelected: {
-    borderWidth: 2,
-    borderColor: colors.darkest,
-  },
-  sliderTrack: {
-    height: SLIDER_HEIGHT,
-    borderRadius: SLIDER_HEIGHT / 2,
-    overflow: 'hidden',
-    justifyContent: 'center',
-  },
-  gradient: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: SLIDER_HEIGHT / 2,
-  },
-  thumb: {
-    width: THUMB_SIZE,
-    height: THUMB_SIZE,
-    borderRadius: THUMB_SIZE / 2,
-    backgroundColor: colors.background,
-    borderWidth: 2,
-    borderColor: colors.darkest,
-  },
-  hint: {
-    fontSize: 11,
-    color: colors.muted,
-  },
+    container: {
+      gap: 10,
+    },
+    swatchRow: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    swatch: {
+      width: 28,
+      height: 28,
+      borderRadius: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.sage,
+    },
+    swatchSelected: {
+      borderWidth: 2,
+      borderColor: colors.darkest,
+    },
+    sliderTrack: {
+      height: SLIDER_HEIGHT,
+      borderRadius: SLIDER_HEIGHT / 2,
+      overflow: 'hidden',
+      justifyContent: 'center',
+    },
+    gradient: {
+      ...StyleSheet.absoluteFillObject,
+      borderRadius: SLIDER_HEIGHT / 2,
+    },
+    thumb: {
+      width: THUMB_SIZE,
+      height: THUMB_SIZE,
+      borderRadius: THUMB_SIZE / 2,
+      backgroundColor: colors.background,
+      borderWidth: 2,
+      borderColor: colors.darkest,
+    },
+    hint: {
+      fontSize: 11,
+      color: colors.muted,
+    },
   });
 }

@@ -39,10 +39,7 @@ function encrypt(plaintext) {
 
   const iv = crypto.randomBytes(IV_LENGTH);
   const cipher = crypto.createCipheriv(ALGORITHM, getKey(), iv);
-  const ciphertext = Buffer.concat([
-    cipher.update(String(plaintext), 'utf8'),
-    cipher.final(),
-  ]);
+  const ciphertext = Buffer.concat([cipher.update(String(plaintext), 'utf8'), cipher.final()]);
   const authTag = cipher.getAuthTag();
 
   return [iv, authTag, ciphertext].map((b) => b.toString('base64')).join(':');
@@ -60,11 +57,7 @@ function decrypt(payload) {
   }
 
   try {
-    const decipher = crypto.createDecipheriv(
-      ALGORITHM,
-      getKey(),
-      Buffer.from(ivB64, 'base64')
-    );
+    const decipher = crypto.createDecipheriv(ALGORITHM, getKey(), Buffer.from(ivB64, 'base64'));
     decipher.setAuthTag(Buffer.from(authTagB64, 'base64'));
 
     const plaintext = Buffer.concat([

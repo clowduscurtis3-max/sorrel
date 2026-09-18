@@ -41,7 +41,12 @@ export default function GoalCheckError({ onRetry, onSignOut }) {
         continue. Check your connection and try again.
       </Text>
 
-      <Pressable onPress={onRetry} accessibilityRole="button" accessibilityLabel="Retry" style={styles.ctaButton}>
+      <Pressable
+        onPress={onRetry}
+        accessibilityRole="button"
+        accessibilityLabel="Retry"
+        style={styles.ctaButton}
+      >
         <MaterialIcons name="refresh" size={20} color={colors.background} />
         <Text style={styles.ctaText}>Retry</Text>
       </Pressable>

@@ -91,7 +91,10 @@ async function loadScenarioContext(userId, now = new Date()) {
   const accountPaces = await getAccountPaces(userId, allAccountIds, now);
   const goals = goalsProgress.map((g) => ({
     ...g,
-    realized_pace: computeGoalRealizedPace({ accountIds: g.account_ids, accountPaces }),
+    realized_pace: computeGoalRealizedPace({
+      accountIds: g.account_ids,
+      accountPaces,
+    }),
   }));
 
   return {

@@ -1,7 +1,13 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const supabaseAdmin = require('./supabaseAdmin');
 const { SPEND_CATEGORIES, ESSENTIAL_CATEGORIES } = require('./categorize');
-const { currentMonthRange, summarizeSpending, computeBudgetStatus, extractJson, HISTORY_DAYS } = require('./budget');
+const {
+  currentMonthRange,
+  summarizeSpending,
+  computeBudgetStatus,
+  extractJson,
+  HISTORY_DAYS,
+} = require('./budget');
 const { getSubscriptionAudit } = require('./subscriptionAudit');
 const { explainOverspend } = require('./budgetInsightExplain');
 const { logError } = require('./safeLog');
@@ -84,7 +90,8 @@ function computeBudgetInsight({ budgetStatus, budgets, alerts, subscriptionAudit
   // the same condition here means the button is never shown promising
   // room that the very next call would say doesn't exist.
   const hasRoomToCut = (budgets || []).some(
-    (b) => !ESSENTIAL_CATEGORIES.includes(b.category) && (b.budgeted_amount || 0) > 0 && !b.is_user_set
+    (b) =>
+      !ESSENTIAL_CATEGORIES.includes(b.category) && (b.budgeted_amount || 0) > 0 && !b.is_user_set
   );
 
   let type;
@@ -112,7 +119,8 @@ function computeBudgetInsight({ budgetStatus, budgets, alerts, subscriptionAudit
   } else {
     type = 'on_track';
     pillText = 'Your budget looks on track';
-    headline = "Nothing stands out right now — your spending is tracking close to what you've budgeted.";
+    headline =
+      "Nothing stands out right now — your spending is tracking close to what you've budgeted.";
   }
 
   // A real, already-computed number for "Show me where I can cut" to send
@@ -152,7 +160,7 @@ function computeBudgetInsight({ budgetStatus, budgets, alerts, subscriptionAudit
 // needs to persist or be deduplicated (that's the notification_events
 // model's job, not this one).
 async function getBudgetInsight(userId) {
-  const { period_start, period_end } = currentMonthRange();
+  const { period_start } = currentMonthRange();
 
   const [budgetsRes, actualsRes, alertsRes] = await Promise.all([
     supabaseAdmin
@@ -167,7 +175,9 @@ async function getBudgetInsight(userId) {
       .eq('period_start', period_start),
     supabaseAdmin
       .from('budget_alerts')
-      .select('category, budgeted_amount, actual_amount, projected_amount, message, suggested_action')
+      .select(
+        'category, budgeted_amount, actual_amount, projected_amount, message, suggested_action'
+      )
       .eq('user_id', userId)
       .eq('period_start', period_start),
   ]);
@@ -175,7 +185,10 @@ async function getBudgetInsight(userId) {
   if (actualsRes.error) throw actualsRes.error;
   if (alertsRes.error) throw alertsRes.error;
 
-  const budgetStatus = computeBudgetStatus({ budgets: budgetsRes.data || [], actuals: actualsRes.data || [] });
+  const budgetStatus = computeBudgetStatus({
+    budgets: budgetsRes.data || [],
+    actuals: actualsRes.data || [],
+  });
   const subscriptionAudit = await getSubscriptionAudit(userId);
 
   // Bounded to the same HISTORY_DAYS window summarizeSpending itself
@@ -184,7 +197,9 @@ async function getBudgetInsight(userId) {
   // user's entire unbounded transaction history on a route that can be
   // hit routinely (every Budget tab visit), not just on demand.
   const now = new Date();
-  const cutoff = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - HISTORY_DAYS));
+  const cutoff = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - HISTORY_DAYS)
+  );
   const { data: transactions, error: txError } = await supabaseAdmin
     .from('transactions')
     .select('date, amount, category, personal_finance_category')
@@ -297,7 +312,10 @@ async function proposeCuts(userId, targetAmount) {
     (c) => !budgets?.find((b) => b.category === c)?.is_user_set
   );
   const candidateBudgets = Object.fromEntries(
-    candidateCategories.map((c) => [c, budgets?.find((b) => b.category === c)?.budgeted_amount ?? 0])
+    candidateCategories.map((c) => [
+      c,
+      budgets?.find((b) => b.category === c)?.budgeted_amount ?? 0,
+    ])
   );
 
   if (candidateCategories.length === 0 || Object.values(candidateBudgets).every((v) => v === 0)) {
@@ -351,7 +369,10 @@ async function proposeCuts(userId, targetAmount) {
     ],
   });
 
-  const text = message.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
+  const text = message.content
+    .filter((b) => b.type === 'text')
+    .map((b) => b.text)
+    .join('');
   const cleaned = extractJson(text);
 
   let parsed;
@@ -359,7 +380,7 @@ async function proposeCuts(userId, targetAmount) {
     parsed = JSON.parse(cleaned);
   } catch (err) {
     logError('Failed to parse Claude propose-cuts response:', err);
-    throw new Error('AI cut proposal failed - could not parse a valid response.');
+    throw new Error('AI cut proposal failed - could not parse a valid response.', { cause: err });
   }
 
   const rawAdjustments = Array.isArray(parsed.adjustments) ? parsed.adjustments : [];

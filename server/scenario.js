@@ -230,7 +230,11 @@ function computeCashPosition({ context, normalized }) {
   // fall back to the end of the budget period, which at least bounds the
   // question rather than leaving it open-ended.
   const windowEnd = income ? income.date : context.period.period_end;
-  const obligations = upcomingObligations({ series, from: today, to: windowEnd });
+  const obligations = upcomingObligations({
+    series,
+    from: today,
+    to: windowEnd,
+  });
 
   // The purchase competes with these bills only if it happens before the
   // money arrives. Strictly before, when an income date is known: a purchase
@@ -257,8 +261,7 @@ function computeCashPosition({ context, normalized }) {
     : 0;
   const committed = round2(obligations.total + normalized.amount * purchaseOccurrences);
 
-  const pressureRatio =
-    income && income.amount > 0 ? round2(committed / income.amount) : null;
+  const pressureRatio = income && income.amount > 0 ? round2(committed / income.amount) : null;
 
   return {
     balance_available: false,
@@ -331,8 +334,7 @@ function computeBudgetImpact({ context, normalized }) {
     charge_this_period: round2(chargeThisPeriod),
     total_remaining_before: totalRemaining,
     total_remaining_after: round2(totalRemaining - chargeThisPeriod),
-    share_of_total_remaining:
-      totalRemaining > 0 ? round2(chargeThisPeriod / totalRemaining) : null,
+    share_of_total_remaining: totalRemaining > 0 ? round2(chargeThisPeriod / totalRemaining) : null,
   };
 
   // Mapping alone silently drops the charge when budget_actuals has no row
@@ -344,7 +346,10 @@ function computeBudgetImpact({ context, normalized }) {
     normalized.category !== null && actuals.some((a) => a.category === normalized.category);
   const scenarioActuals = actuals.map((a) =>
     a.category === normalized.category
-      ? { ...a, actual_amount: round2(Number(a.actual_amount) + chargeThisPeriod) }
+      ? {
+          ...a,
+          actual_amount: round2(Number(a.actual_amount) + chargeThisPeriod),
+        }
       : a
   );
   if (normalized.category !== null && !hasActualRow) {
@@ -523,7 +528,12 @@ function computeSingleGoalImpact({ goal, normalized, now }) {
   // observed, server/goalPace.js) is held fixed and only the balance moves.
   const pace = goal.realized_pace.monthly_pace;
 
-  const dateBefore = projectFinishDate({ saved: savedBefore, target: goal.target_amount, monthlyPace: pace, now });
+  const dateBefore = projectFinishDate({
+    saved: savedBefore,
+    target: goal.target_amount,
+    monthlyPace: pace,
+    now,
+  });
   const projectedBefore = toDateOnlyOrNull(dateBefore);
 
   if (!projectedBefore) {
@@ -541,7 +551,12 @@ function computeSingleGoalImpact({ goal, normalized, now }) {
     };
   }
 
-  const dateAfter = projectFinishDate({ saved: savedAfter, target: goal.target_amount, monthlyPace: pace, now });
+  const dateAfter = projectFinishDate({
+    saved: savedAfter,
+    target: goal.target_amount,
+    monthlyPace: pace,
+    now,
+  });
   // Null covers both "no pace left to project from" and "the projection ran
   // off the end of the representable calendar" - see toDateOnlyOrNull.
   const projectedAfter = toDateOnlyOrNull(dateAfter);
@@ -590,7 +605,9 @@ function computeGoalImpact({ context, normalized }) {
     };
   }
 
-  const perGoal = goals.map((goal) => computeSingleGoalImpact({ goal, normalized, now: context.now }));
+  const perGoal = goals.map((goal) =>
+    computeSingleGoalImpact({ goal, normalized, now: context.now })
+  );
 
   let primary = perGoal[0];
   let bestScore = goalImpactSeverityScore(primary);
@@ -636,7 +653,8 @@ function determineStatus({ cash, budgetImpact, goalImpact, confidence }) {
       budgetImpact.share_of_total_remaining !== null &&
       budgetImpact.share_of_total_remaining > MATERIAL_BUDGET_SHARE,
     goalImpact.available && goalImpact.stalls_goal,
-    goalImpact.available && goalImpact.delay_days !== null &&
+    goalImpact.available &&
+      goalImpact.delay_days !== null &&
       goalImpact.delay_days >= MATERIAL_GOAL_DELAY_DAYS,
     // A purchase that pushes an already-met goal back under its target is a
     // real consequence even though there's no finish date left to move.
@@ -836,8 +854,8 @@ function buildSuggestions({ context, normalized, budgetImpact }) {
   const shortfall = budgetImpact.pushes_category_over
     ? round2(-budgetImpact.category_remaining_after)
     : budgetImpact.total_remaining_after < 0
-    ? round2(-budgetImpact.total_remaining_after)
-    : 0;
+      ? round2(-budgetImpact.total_remaining_after)
+      : 0;
   if (shortfall <= 0) return [];
 
   const status = context.budgetStatus || [];
@@ -927,7 +945,12 @@ function evaluateScenario({ context, scenario }) {
   const goalImpact = computeGoalImpact({ context, normalized });
 
   const confidence = determineConfidence({ cash, budgetImpact, goalImpact });
-  const status = determineStatus({ cash, budgetImpact, goalImpact, confidence });
+  const status = determineStatus({
+    cash,
+    budgetImpact,
+    goalImpact,
+    confidence,
+  });
 
   return {
     scenario: normalized,
@@ -1008,10 +1031,6 @@ function compareBuyNowVsWait({ context, scenario }) {
 // ---------------------------------------------------------------------------
 
 const CENTS_PER_DOLLAR = 100;
-
-function toCents(dollars) {
-  return Math.round(dollars * CENTS_PER_DOLLAR);
-}
 
 function fromCents(cents) {
   return cents / CENTS_PER_DOLLAR;
@@ -1155,7 +1174,11 @@ function findMaxComfortableAmount({ context, category = null, date = null, recur
 // enough history yet" rather than guessing a single one. Per-goal shape
 // mirrors computeSingleGoalImpact's own structure for consistency.
 function projectAffordableDateForGoal({ goal, target, now }) {
-  const base = { goal_id: goal.id, goal_type: goal.goal_type, notes: goal.notes };
+  const base = {
+    goal_id: goal.id,
+    goal_type: goal.goal_type,
+    notes: goal.notes,
+  };
 
   if (goal.no_accounts_linked) {
     return {
@@ -1184,7 +1207,8 @@ function projectAffordableDateForGoal({ goal, target, now }) {
       ...base,
       available: false,
       reason: 'insufficient_history',
-      detail: 'Not enough real transaction history yet on this goal\'s linked account(s) to project a rate.',
+      detail:
+        "Not enough real transaction history yet on this goal's linked account(s) to project a rate.",
     };
   }
 
@@ -1197,7 +1221,8 @@ function projectAffordableDateForGoal({ goal, target, now }) {
       ...base,
       available: false,
       reason: 'no_projectable_date',
-      detail: 'The observed saving rate does not support a realistic projected date for this amount.',
+      detail:
+        'The observed saving rate does not support a realistic projected date for this amount.',
     };
   }
 
@@ -1229,7 +1254,9 @@ function projectAffordableDate({ context, targetAmount }) {
     };
   }
 
-  const perGoal = goals.map((goal) => projectAffordableDateForGoal({ goal, target, now: context.now }));
+  const perGoal = goals.map((goal) =>
+    projectAffordableDateForGoal({ goal, target, now: context.now })
+  );
   return { available: perGoal.some((g) => g.available), goals: perGoal };
 }
 
@@ -1258,7 +1285,9 @@ function calculateGoalPace({ goalProgress, hypotheticalMonthlyAmount, now = new 
     !Number.isFinite(hypotheticalMonthlyAmount) ||
     hypotheticalMonthlyAmount <= 0
   ) {
-    throw new ScenarioValidationError('hypotheticalMonthlyAmount must be a finite number greater than zero');
+    throw new ScenarioValidationError(
+      'hypotheticalMonthlyAmount must be a finite number greater than zero'
+    );
   }
 
   if (!goalProgress || !goalProgress.has_target) {
@@ -1282,7 +1311,12 @@ function calculateGoalPace({ goalProgress, hypotheticalMonthlyAmount, now = new 
     };
   }
 
-  const projectedDate = projectFinishDate({ saved, target, monthlyPace: hypotheticalMonthlyAmount, now });
+  const projectedDate = projectFinishDate({
+    saved,
+    target,
+    monthlyPace: hypotheticalMonthlyAmount,
+    now,
+  });
   const projectedDateStr = toDateOnlyOrNull(projectedDate);
 
   if (!projectedDateStr) {
@@ -1336,7 +1370,9 @@ function computeGoalMilestones({ goalProgress, hypotheticalMonthlyAmount, now = 
     !Number.isFinite(hypotheticalMonthlyAmount) ||
     hypotheticalMonthlyAmount <= 0
   ) {
-    throw new ScenarioValidationError('hypotheticalMonthlyAmount must be a finite number greater than zero');
+    throw new ScenarioValidationError(
+      'hypotheticalMonthlyAmount must be a finite number greater than zero'
+    );
   }
 
   if (!goalProgress || !goalProgress.has_target) {
@@ -1377,7 +1413,12 @@ function computeGoalMilestones({ goalProgress, hypotheticalMonthlyAmount, now = 
       };
     }
 
-    const projectedDate = projectFinishDate({ saved, target: amount, monthlyPace: hypotheticalMonthlyAmount, now });
+    const projectedDate = projectFinishDate({
+      saved,
+      target: amount,
+      monthlyPace: hypotheticalMonthlyAmount,
+      now,
+    });
     const projectedDateStr = toDateOnlyOrNull(projectedDate);
     if (!projectedDateStr) {
       return {
@@ -1400,7 +1441,12 @@ function computeGoalMilestones({ goalProgress, hypotheticalMonthlyAmount, now = 
     };
   });
 
-  return { available: true, target_amount: target, hypothetical_monthly_amount: round2(hypotheticalMonthlyAmount), milestones };
+  return {
+    available: true,
+    target_amount: target,
+    hypothetical_monthly_amount: round2(hypotheticalMonthlyAmount),
+    milestones,
+  };
 }
 
 module.exports = {

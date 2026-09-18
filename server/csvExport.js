@@ -55,13 +55,17 @@ async function getTransactionsCsv(userId) {
 // tables' own unique constraints), joined here in JS rather than a second
 // SQL query per row.
 async function getBudgetHistoryCsv(userId) {
-  const [{ data: budgets, error: budgetsError }, { data: actuals, error: actualsError }] = await Promise.all([
-    supabaseAdmin
-      .from('budgets')
-      .select('category, period_start, period_end, budgeted_amount')
-      .eq('user_id', userId),
-    supabaseAdmin.from('budget_actuals').select('category, period_start, actual_amount').eq('user_id', userId),
-  ]);
+  const [{ data: budgets, error: budgetsError }, { data: actuals, error: actualsError }] =
+    await Promise.all([
+      supabaseAdmin
+        .from('budgets')
+        .select('category, period_start, period_end, budgeted_amount')
+        .eq('user_id', userId),
+      supabaseAdmin
+        .from('budget_actuals')
+        .select('category, period_start, actual_amount')
+        .eq('user_id', userId),
+    ]);
   if (budgetsError) throw budgetsError;
   if (actualsError) throw actualsError;
 

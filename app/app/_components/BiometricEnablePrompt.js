@@ -36,7 +36,11 @@ export default function BiometricEnablePrompt({ onEnable, onSkip }) {
         {/* Same real contrast bug already found/fixed on BiometricLock.js's
             equivalent badge - colors.primary is a fixed dark green that
             doesn't track the badge's own theme-reactive colors.card fill. */}
-        <MaterialIcons name={biometricIcon} size={44} color={readableTextColor(colors.card, colors)} />
+        <MaterialIcons
+          name={biometricIcon}
+          size={44}
+          color={readableTextColor(colors.card, colors)}
+        />
       </View>
       <Text style={styles.welcome}>Enable {biometricLabel}?</Text>
       <Text style={styles.subtitle}>

@@ -1,5 +1,13 @@
 import { useCallback, useMemo, useState } from 'react';
-import { View, Text, Switch, ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
+import {
+  View,
+  Text,
+  Switch,
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+} from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Picker } from '@react-native-picker/picker';
 import { apiFetch, apiErrorMessage, patchSettings } from '../_lib/api';
@@ -104,14 +112,17 @@ export default function GoalSettings() {
   return (
     <SettingsScreenChrome title="Goal Settings" onBack={() => router.back()}>
       <SettingsFetchGate loaded={settings !== null} error={error} onRetry={fetchSettings}>
-        <ScrollView style={goalSettingsStyles.bodyScroll} contentContainerStyle={goalSettingsStyles.body}>
+        <ScrollView
+          style={goalSettingsStyles.bodyScroll}
+          contentContainerStyle={goalSettingsStyles.body}
+        >
           {error && <Text style={styles.errorText}>{error}</Text>}
 
           <View style={[styles.card, goalSettingsStyles.card]}>
             <Text style={styles.cardTitle}>Emergency Fund</Text>
             <Text style={[styles.smallText, goalSettingsStyles.description]}>
-              Which accounts count toward it and its target amount are edited right on
-              the Goal tab, where you can see live progress while you change them.
+              Which accounts count toward it and its target amount are edited right on the Goal tab,
+              where you can see live progress while you change them.
             </Text>
             <Pressable
               onPress={() => router.push('/goal')}
@@ -148,8 +159,8 @@ export default function GoalSettings() {
               <View style={goalSettingsStyles.toggleTextCol}>
                 <Text style={goalSettingsStyles.toggleLabel}>Round-Ups</Text>
                 <Text style={[styles.smallText, goalSettingsStyles.description]}>
-                  Estimate what rounding up your purchases would add up to. Simulation
-                  only - nothing is actually moved.
+                  Estimate what rounding up your purchases would add up to. Simulation only -
+                  nothing is actually moved.
                 </Text>
               </View>
               {saving ? (
@@ -165,7 +176,11 @@ export default function GoalSettings() {
             {roundUpsEnabled && (
               <>
                 <Text
-                  style={[styles.smallText, goalSettingsStyles.description, goalSettingsStyles.pickerLabel]}
+                  style={[
+                    styles.smallText,
+                    goalSettingsStyles.description,
+                    goalSettingsStyles.pickerLabel,
+                  ]}
                 >
                   Which account
                 </Text>

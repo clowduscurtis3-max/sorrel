@@ -90,7 +90,9 @@ const MIN_INCOME_AMOUNT = 50;
 // fund anything, but it would still win "soonest" and shorten the window.
 function isIncomeSeries(series) {
   if (isTransferSeries(series)) return false;
-  return series.category === 'Income' && Math.abs(Number(series.typical_amount)) >= MIN_INCOME_AMOUNT;
+  return (
+    series.category === 'Income' && Math.abs(Number(series.typical_amount)) >= MIN_INCOME_AMOUNT
+  );
 }
 
 // A bill the user is expected to owe: money out, not a transfer between their
@@ -159,7 +161,11 @@ function upcomingObligations({ series, from, to }) {
 
   for (const s of series || []) {
     if (!isObligationSeries(s)) continue;
-    const { occurrences: found, stale } = expandOccurrences({ series: s, from, to });
+    const { occurrences: found, stale } = expandOccurrences({
+      series: s,
+      from,
+      to,
+    });
     if (stale) {
       staleSeries.push({ display_name: s.display_name, interval: s.interval });
       continue;

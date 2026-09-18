@@ -4,7 +4,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { computeRecurringGlance } = require('../subscriptionAudit');
-const { computeRecurringSpendDelta, computeComparisonWindow } = require('../recurringMonthComparison');
+const {
+  computeRecurringSpendDelta,
+  computeComparisonWindow,
+} = require('../recurringMonthComparison');
 
 const NOW = new Date('2026-08-25T12:00:00Z'); // 6 days left in August
 
@@ -96,7 +99,10 @@ test('computeRecurringGlance: a quarterly price increase is converted to its rea
     Math.abs(glance.potential_savings_total - 5.02) < 0.05,
     `expected ~$5.02, got $${glance.potential_savings_total}`
   );
-  assert.ok(glance.potential_savings_total < 15, 'must not report the raw quarterly delta as a monthly figure');
+  assert.ok(
+    glance.potential_savings_total < 15,
+    'must not report the raw quarterly delta as a monthly figure'
+  );
 });
 
 test('computeRecurringGlance: an annual price increase is converted to its real monthly-equivalent', () => {
@@ -137,7 +143,10 @@ test('computeRecurringGlance: zero findings is a real $0/0, never a fabricated e
 });
 
 test('computeRecurringSpendDelta: a real decrease reports the correct dollar and percent delta', () => {
-  const result = computeRecurringSpendDelta({ currentTotal: 100, priorTotal: 125.4 });
+  const result = computeRecurringSpendDelta({
+    currentTotal: 100,
+    priorTotal: 125.4,
+  });
   assert.equal(result.current_total, 100);
   assert.equal(result.prior_total, 125.4);
   assert.equal(result.delta, -25.4);
@@ -145,13 +154,19 @@ test('computeRecurringSpendDelta: a real decrease reports the correct dollar and
 });
 
 test('computeRecurringSpendDelta: a real increase reports a positive delta', () => {
-  const result = computeRecurringSpendDelta({ currentTotal: 150, priorTotal: 100 });
+  const result = computeRecurringSpendDelta({
+    currentTotal: 150,
+    priorTotal: 100,
+  });
   assert.equal(result.delta, 50);
   assert.equal(result.delta_percent, 50);
 });
 
 test('computeRecurringSpendDelta: no prior spend gives a null percent, never a fabricated ratio', () => {
-  const result = computeRecurringSpendDelta({ currentTotal: 40, priorTotal: 0 });
+  const result = computeRecurringSpendDelta({
+    currentTotal: 40,
+    priorTotal: 0,
+  });
   assert.equal(result.delta, 40);
   assert.equal(result.delta_percent, null);
 });
@@ -195,7 +210,9 @@ test('computeComparisonWindow: March 31 (31-day month) vs February (28 days, non
 });
 
 test('computeComparisonWindow: January 31 vs December (31 days) - same length, no clamping needed', () => {
-  const { priorPeriodStart, priorPeriodEnd } = computeComparisonWindow(new Date('2026-01-31T12:00:00Z'));
+  const { priorPeriodStart, priorPeriodEnd } = computeComparisonWindow(
+    new Date('2026-01-31T12:00:00Z')
+  );
   assert.equal(iso(priorPeriodStart), '2025-12-01');
   assert.equal(iso(priorPeriodEnd), '2025-12-31');
 });

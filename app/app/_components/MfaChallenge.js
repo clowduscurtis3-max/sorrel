@@ -90,7 +90,11 @@ export default function MfaChallenge({ onVerified, onSignOut }) {
             equivalent badge - colors.primary is a fixed dark green that
             doesn't track the badge's own theme-reactive colors.card fill.
             readableTextColor computes the correct color for either mode. */}
-        <MaterialIcons name="verified-user" size={44} color={readableTextColor(colors.card, colors)} />
+        <MaterialIcons
+          name="verified-user"
+          size={44}
+          color={readableTextColor(colors.card, colors)}
+        />
       </View>
 
       <Text style={styles.welcome}>Verify it's you.</Text>

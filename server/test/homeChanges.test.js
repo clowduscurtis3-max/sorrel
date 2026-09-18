@@ -5,8 +5,22 @@ const assert = require('node:assert/strict');
 
 const { buildChangeItems, netWorthDeltaSince } = require('../homeChanges');
 
-function event({ event_type = 'overspend_pace', category = 'Dining', title, body, created_at, resolved_at = null }) {
-  return { event_type, category, title: title || `${event_type} title`, body: body || `${event_type} body`, created_at, resolved_at };
+function event({
+  event_type = 'overspend_pace',
+  category = 'Dining',
+  title,
+  body,
+  created_at,
+  resolved_at = null,
+}) {
+  return {
+    event_type,
+    category,
+    title: title || `${event_type} title`,
+    body: body || `${event_type} body`,
+    created_at,
+    resolved_at,
+  };
 }
 
 test('buildChangeItems: an event created after the check-in is "new"', () => {
@@ -24,7 +38,10 @@ test('buildChangeItems: an event created before the check-in and never resolved 
 
 test('buildChangeItems: an old event resolved after the check-in is "resolved", not "new"', () => {
   const events = [
-    event({ created_at: '2026-08-01T00:00:00Z', resolved_at: '2026-08-27T12:00:00Z' }),
+    event({
+      created_at: '2026-08-01T00:00:00Z',
+      resolved_at: '2026-08-27T12:00:00Z',
+    }),
   ];
   const items = buildChangeItems(events, '2026-08-27T10:00:00Z');
   assert.equal(items.length, 1);
@@ -36,7 +53,10 @@ test('buildChangeItems: created after AND resolved after check-in counts once, a
   // takes priority since that's the more informative half of its story
   // (the resolved branch is only reached via `continue`-skipped `new` rows).
   const events = [
-    event({ created_at: '2026-08-27T09:00:00Z', resolved_at: '2026-08-27T13:00:00Z' }),
+    event({
+      created_at: '2026-08-27T09:00:00Z',
+      resolved_at: '2026-08-27T13:00:00Z',
+    }),
   ];
   const items = buildChangeItems(events, '2026-08-27T08:00:00Z');
   assert.equal(items.length, 1);
@@ -46,7 +66,11 @@ test('buildChangeItems: created after AND resolved after check-in counts once, a
 test('buildChangeItems: sorts most-recent-first across a mix of new and resolved', () => {
   const events = [
     event({ category: 'Older new', created_at: '2026-08-27T09:00:00Z' }),
-    event({ category: 'Newer resolved', created_at: '2026-08-01T00:00:00Z', resolved_at: '2026-08-27T14:00:00Z' }),
+    event({
+      category: 'Newer resolved',
+      created_at: '2026-08-01T00:00:00Z',
+      resolved_at: '2026-08-27T14:00:00Z',
+    }),
     event({ category: 'Newest new', created_at: '2026-08-27T15:00:00Z' }),
   ];
   const items = buildChangeItems(events, '2026-08-27T08:00:00Z');
@@ -87,8 +111,16 @@ test('buildChangeItems: a goal target/timeframe edit re-triggering savings_remin
 
 test('buildChangeItems: two different categories both overspending are both kept, not collapsed', () => {
   const events = [
-    event({ event_type: 'overspend_pace', category: 'Dining', created_at: '2026-08-27T09:00:00Z' }),
-    event({ event_type: 'overspend_pace', category: 'Transportation', created_at: '2026-08-27T10:00:00Z' }),
+    event({
+      event_type: 'overspend_pace',
+      category: 'Dining',
+      created_at: '2026-08-27T09:00:00Z',
+    }),
+    event({
+      event_type: 'overspend_pace',
+      category: 'Transportation',
+      created_at: '2026-08-27T10:00:00Z',
+    }),
   ];
   const items = buildChangeItems(events, '2026-08-27T08:00:00Z');
   assert.equal(items.length, 2);

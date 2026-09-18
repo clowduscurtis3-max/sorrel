@@ -5,7 +5,13 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { apiFetch, apiErrorMessage, patchSettings } from '../_lib/api';
 import { isValidHexColor, readableTextColor } from '../_lib/styles';
 import { useTheme } from '../_lib/theme';
-import { HOME_CARD_GROUP_BEFORE_STATS, HOME_CARD_GROUP_AFTER_STATS, HOME_CARD_KEYS, HOME_CARD_TITLES, orderCardGroup } from '../_lib/homeCards';
+import {
+  HOME_CARD_GROUP_BEFORE_STATS,
+  HOME_CARD_GROUP_AFTER_STATS,
+  HOME_CARD_KEYS,
+  HOME_CARD_TITLES,
+  orderCardGroup,
+} from '../_lib/homeCards';
 import SettingsScreenChrome from '../_components/SettingsScreenChrome';
 import SettingsFetchGate from '../_components/SettingsFetchGate';
 import DraggableCardList from '../_components/DraggableCardList';
@@ -131,10 +137,13 @@ export default function HomeSettings() {
   // pattern - the OK button below) so a stray tap can't silently overwrite
   // several cards' colors at once.
   const matchableKeys = HOME_CARD_KEYS.filter((k) => k !== expandedKey);
-  const allMatchTargetsSelected = matchableKeys.length > 0 && matchTargets.length === matchableKeys.length;
+  const allMatchTargetsSelected =
+    matchableKeys.length > 0 && matchTargets.length === matchableKeys.length;
 
   function toggleMatchTarget(key) {
-    setMatchTargets((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+    setMatchTargets((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
   }
 
   function toggleSelectAllMatchTargets() {
@@ -166,23 +175,28 @@ export default function HomeSettings() {
 
     return (
       <Pressable
-        style={[styles.card, homeSettingsStyles.cardRow, isSelected && homeSettingsStyles.cardRowSelected]}
+        style={[
+          styles.card,
+          homeSettingsStyles.cardRow,
+          isSelected && homeSettingsStyles.cardRowSelected,
+        ]}
         onPress={() => !editing && (isSelected ? closeColorPanel() : openColorPanel(key))}
         accessibilityRole="button"
         accessibilityLabel={`Edit ${HOME_CARD_TITLES[key]} color`}
       >
         <MaterialIcons name="drag-indicator" size={20} color={colors.sage} />
         <View
-          style={[
-            homeSettingsStyles.colorSwatch,
-            { backgroundColor: currentColor || colors.card },
-          ]}
+          style={[homeSettingsStyles.colorSwatch, { backgroundColor: currentColor || colors.card }]}
         >
           <Text style={[homeSettingsStyles.colorSwatchText, { color: previewTextColor }]}>Aa</Text>
         </View>
         <Text style={homeSettingsStyles.cardName}>{HOME_CARD_TITLES[key]}</Text>
         {!editing && (
-          <MaterialIcons name="palette" size={20} color={isSelected ? colors.primary : colors.dark} />
+          <MaterialIcons
+            name="palette"
+            size={20}
+            color={isSelected ? colors.primary : colors.dark}
+          />
         )}
       </Pressable>
     );
@@ -202,7 +216,11 @@ export default function HomeSettings() {
         />
         <View style={homeSettingsStyles.colorPanelFooter}>
           {hasSourceColor ? (
-            <Pressable onPress={() => resetCardColor(expandedKey)} accessibilityRole="button" accessibilityLabel="Reset to default color">
+            <Pressable
+              onPress={() => resetCardColor(expandedKey)}
+              accessibilityRole="button"
+              accessibilityLabel="Reset to default color"
+            >
               <Text style={homeSettingsStyles.resetLink}>Reset to default</Text>
             </Pressable>
           ) : (
@@ -262,7 +280,10 @@ export default function HomeSettings() {
               );
             })}
             <Pressable
-              style={[homeSettingsStyles.matchApplyButton, matchTargets.length === 0 && homeSettingsStyles.matchApplyButtonDisabled]}
+              style={[
+                homeSettingsStyles.matchApplyButton,
+                matchTargets.length === 0 && homeSettingsStyles.matchApplyButtonDisabled,
+              ]}
               onPress={applyMatch}
               disabled={matchTargets.length === 0}
               accessibilityRole="button"
@@ -367,155 +388,155 @@ function buildHomeSettingsStyles(colors) {
   // elsewhere this session. readableTextColor computes the correct color.
   const okButtonTextColor = readableTextColor(colors.primary, colors);
   return StyleSheet.create({
-  body: {
-    flex: 1,
-  },
-  bodyContent: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 40,
-  },
-  toolbar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    minHeight: 24,
-    marginBottom: 4,
-  },
-  cardRow: {
-    height: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  cardRowSelected: {
-    borderWidth: 1.5,
-    borderColor: colors.primary,
-  },
-  colorSwatch: {
-    width: 32,
-    height: 32,
-    borderRadius: 9,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.sage,
-  },
-  colorSwatchText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  cardName: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-  colorPanel: {
-    marginTop: 8,
-    marginBottom: 12,
-    gap: 10,
-  },
-  colorPanelFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  resetLink: {
-    fontSize: 12,
-    color: colors.muted,
-    fontWeight: '600',
-  },
-  okButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 16,
-    paddingVertical: 6,
-    paddingHorizontal: 20,
-  },
-  okButtonText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: okButtonTextColor,
-  },
-  groupDivider: {
-    height: 12,
-  },
-  hiddenSection: {
-    marginTop: 12,
-    gap: 4,
-  },
-  hiddenTitle: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    color: colors.muted,
-    marginBottom: 4,
-  },
-  hiddenRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    paddingHorizontal: 4,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.sage,
-  },
-  hiddenRowText: {
-    fontSize: 14,
-    color: colors.dark,
-  },
-  // Match-to-other-cards section (direct user request, 2026-09-11) - a
-  // divider-separated block under the picker, same card, not a second
-  // popup/modal.
-  matchSection: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.sage,
-    marginTop: 4,
-    paddingTop: 10,
-    gap: 2,
-  },
-  matchHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  matchTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.dark,
-    flexShrink: 1,
-    paddingRight: 8,
-  },
-  matchSelectAllLink: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  matchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 6,
-  },
-  matchRowText: {
-    fontSize: 13,
-    color: colors.darkest,
-  },
-  matchApplyButton: {
-    alignSelf: 'flex-start',
-    backgroundColor: colors.primary,
-    borderRadius: 16,
-    paddingVertical: 6,
-    paddingHorizontal: 16,
-    marginTop: 8,
-  },
-  matchApplyButtonDisabled: {
-    opacity: 0.4,
-  },
-  matchApplyButtonText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: okButtonTextColor,
-  },
+    body: {
+      flex: 1,
+    },
+    bodyContent: {
+      paddingHorizontal: 16,
+      paddingTop: 8,
+      paddingBottom: 40,
+    },
+    toolbar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      minHeight: 24,
+      marginBottom: 4,
+    },
+    cardRow: {
+      height: '100%',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    cardRowSelected: {
+      borderWidth: 1.5,
+      borderColor: colors.primary,
+    },
+    colorSwatch: {
+      width: 32,
+      height: 32,
+      borderRadius: 9,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.sage,
+    },
+    colorSwatchText: {
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    cardName: {
+      flex: 1,
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+    colorPanel: {
+      marginTop: 8,
+      marginBottom: 12,
+      gap: 10,
+    },
+    colorPanelFooter: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    resetLink: {
+      fontSize: 12,
+      color: colors.muted,
+      fontWeight: '600',
+    },
+    okButton: {
+      backgroundColor: colors.primary,
+      borderRadius: 16,
+      paddingVertical: 6,
+      paddingHorizontal: 20,
+    },
+    okButtonText: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: okButtonTextColor,
+    },
+    groupDivider: {
+      height: 12,
+    },
+    hiddenSection: {
+      marginTop: 12,
+      gap: 4,
+    },
+    hiddenTitle: {
+      fontSize: 11,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+      color: colors.muted,
+      marginBottom: 4,
+    },
+    hiddenRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: 10,
+      paddingHorizontal: 4,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.sage,
+    },
+    hiddenRowText: {
+      fontSize: 14,
+      color: colors.dark,
+    },
+    // Match-to-other-cards section (direct user request, 2026-09-11) - a
+    // divider-separated block under the picker, same card, not a second
+    // popup/modal.
+    matchSection: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.sage,
+      marginTop: 4,
+      paddingTop: 10,
+      gap: 2,
+    },
+    matchHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 4,
+    },
+    matchTitle: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.dark,
+      flexShrink: 1,
+      paddingRight: 8,
+    },
+    matchSelectAllLink: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.primary,
+    },
+    matchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingVertical: 6,
+    },
+    matchRowText: {
+      fontSize: 13,
+      color: colors.darkest,
+    },
+    matchApplyButton: {
+      alignSelf: 'flex-start',
+      backgroundColor: colors.primary,
+      borderRadius: 16,
+      paddingVertical: 6,
+      paddingHorizontal: 16,
+      marginTop: 8,
+    },
+    matchApplyButtonDisabled: {
+      opacity: 0.4,
+    },
+    matchApplyButtonText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: okButtonTextColor,
+    },
   });
 }

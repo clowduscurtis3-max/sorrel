@@ -38,7 +38,9 @@ function renderToolResult({ tool, result }, styles) {
     if (!result.available) return <Text style={styles.smallText}>{result.detail}</Text>;
     return (
       <>
-        <Text style={styles.cardTitle}>Comfortable up to ${formatDecimal(result.max_comfortable_amount)}</Text>
+        <Text style={styles.cardTitle}>
+          Comfortable up to ${formatDecimal(result.max_comfortable_amount)}
+        </Text>
         <ScenarioResult result={result.boundary_result} />
       </>
     );
@@ -91,21 +93,27 @@ function renderToolResult({ tool, result }, styles) {
     // own header note on why they're never folded into one), so both get
     // named here rather than only ever showing one.
     let reductionParts = [];
-    if (hasDownPayment) reductionParts.push(`a $${formatDecimal(result.down_payment)} down payment`);
+    if (hasDownPayment)
+      reductionParts.push(`a $${formatDecimal(result.down_payment)} down payment`);
     if (hasTradeIn) reductionParts.push(`a $${formatDecimal(result.trade_in_value)} trade-in`);
     const hasReduction = reductionParts.length > 0;
     // annual_rate_percent may be undefined on a 0%-promo Shopping default
     // (no explicit rate line needed there) - only shown when it's a real
     // number worth surfacing (a fetched Transportation rate, or any
     // hypothetical rate the user proposed on either category).
-    const showRate = typeof result.annual_rate_percent === 'number' && (result.is_hypothetical_rate || result.annual_rate_percent > 0);
+    const showRate =
+      typeof result.annual_rate_percent === 'number' &&
+      (result.is_hypothetical_rate || result.annual_rate_percent > 0);
     return (
       <Text style={styles.smallText}>
-        Estimated payment: ${formatDecimal(result.estimated_payment)}/month over {result.term_months} months
+        Estimated payment: ${formatDecimal(result.estimated_payment)}/month over{' '}
+        {result.term_months} months
         {hasReduction
           ? ` financing $${formatDecimal(result.financed_amount)} (the $${formatDecimal(result.total_price)} price minus ${reductionParts.join(' and ')})`
           : ` on $${formatDecimal(result.total_price)}`}
-        {showRate ? ` at ${result.annual_rate_percent}%${result.is_hypothetical_rate ? ' (hypothetical)' : ''}.` : '.'}
+        {showRate
+          ? ` at ${result.annual_rate_percent}%${result.is_hypothetical_rate ? ' (hypothetical)' : ''}.`
+          : '.'}
       </Text>
     );
   }
@@ -344,7 +352,9 @@ export default function AffordabilityChat({ visible, onClose, anchorResult }) {
                 it - the dispatcher was defined but never actually wired in,
                 so the crash this same session's own adversarial review
                 found and "fixed" was never actually fixed on this line. */}
-            {latestResult && <View style={styles.card}>{renderToolResult(latestResult, styles)}</View>}
+            {latestResult && (
+              <View style={styles.card}>{renderToolResult(latestResult, styles)}</View>
+            )}
 
             {sending && <ActivityIndicator />}
             {error && <Text style={styles.errorText}>{error}</Text>}
@@ -384,7 +394,12 @@ export default function AffordabilityChat({ visible, onClose, anchorResult }) {
                 editable={!sending}
                 onSubmitEditing={sendMessage}
               />
-              <PrimaryButton title="Send" onPress={sendMessage} disabled={!input.trim()} loading={sending} />
+              <PrimaryButton
+                title="Send"
+                onPress={sendMessage}
+                disabled={!input.trim()}
+                loading={sending}
+              />
             </View>
           )}
         </KeyboardAvoidingView>

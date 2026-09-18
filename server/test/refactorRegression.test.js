@@ -74,23 +74,98 @@ function originalProjectedDate({ saved, target, monthlyPace, now }) {
 const { SPEND_CATEGORIES } = require('../categorize');
 
 const BUDGET_CASES = [
-  { name: 'typical', budgets: [{ category: 'Dining', budgeted_amount: 300, reasoning: 'why' }], actuals: [{ category: 'Dining', actual_amount: 150 }] },
-  { name: 'a user-set category', budgets: [{ category: 'Dining', budgeted_amount: 300, reasoning: 'why', is_user_set: true }], actuals: [{ category: 'Dining', actual_amount: 150 }] },
-  { name: 'mix of user-set and AI-generated', budgets: [{ category: 'Dining', budgeted_amount: 300, reasoning: 'why', is_user_set: true }, { category: 'Travel', budgeted_amount: 50, reasoning: 'r', is_user_set: false }], actuals: [] },
-  { name: 'no budgets at all', budgets: [], actuals: [{ category: 'Dining', actual_amount: 150 }] },
-  { name: 'no actuals at all', budgets: [{ category: 'Dining', budgeted_amount: 300, reasoning: null }], actuals: [] },
+  {
+    name: 'typical',
+    budgets: [{ category: 'Dining', budgeted_amount: 300, reasoning: 'why' }],
+    actuals: [{ category: 'Dining', actual_amount: 150 }],
+  },
+  {
+    name: 'a user-set category',
+    budgets: [
+      {
+        category: 'Dining',
+        budgeted_amount: 300,
+        reasoning: 'why',
+        is_user_set: true,
+      },
+    ],
+    actuals: [{ category: 'Dining', actual_amount: 150 }],
+  },
+  {
+    name: 'mix of user-set and AI-generated',
+    budgets: [
+      {
+        category: 'Dining',
+        budgeted_amount: 300,
+        reasoning: 'why',
+        is_user_set: true,
+      },
+      {
+        category: 'Travel',
+        budgeted_amount: 50,
+        reasoning: 'r',
+        is_user_set: false,
+      },
+    ],
+    actuals: [],
+  },
+  {
+    name: 'no budgets at all',
+    budgets: [],
+    actuals: [{ category: 'Dining', actual_amount: 150 }],
+  },
+  {
+    name: 'no actuals at all',
+    budgets: [{ category: 'Dining', budgeted_amount: 300, reasoning: null }],
+    actuals: [],
+  },
   { name: 'both empty', budgets: [], actuals: [] },
-  { name: 'budgeted exactly zero', budgets: [{ category: 'Travel', budgeted_amount: 0, reasoning: null }], actuals: [{ category: 'Travel', actual_amount: 25 }] },
-  { name: 'uncategorized with real spend', budgets: [], actuals: [{ category: 'Uncategorized', actual_amount: 12.5 }] },
-  { name: 'uncategorized at exactly zero', budgets: [], actuals: [{ category: 'Uncategorized', actual_amount: 0 }] },
-  { name: 'negative actual (a refund)', budgets: [{ category: 'Shopping', budgeted_amount: 200, reasoning: null }], actuals: [{ category: 'Shopping', actual_amount: -40 }] },
-  { name: 'overspent category', budgets: [{ category: 'Groceries', budgeted_amount: 100, reasoning: null }], actuals: [{ category: 'Groceries', actual_amount: 250.75 }] },
-  { name: 'rounding-sensitive amounts', budgets: [{ category: 'Dining', budgeted_amount: 100.005, reasoning: null }], actuals: [{ category: 'Dining', actual_amount: 33.335 }] },
-  { name: 'category with no matching actual', budgets: [{ category: 'Entertainment', budgeted_amount: 60, reasoning: 'r' }], actuals: [{ category: 'Dining', actual_amount: 10 }] },
+  {
+    name: 'budgeted exactly zero',
+    budgets: [{ category: 'Travel', budgeted_amount: 0, reasoning: null }],
+    actuals: [{ category: 'Travel', actual_amount: 25 }],
+  },
+  {
+    name: 'uncategorized with real spend',
+    budgets: [],
+    actuals: [{ category: 'Uncategorized', actual_amount: 12.5 }],
+  },
+  {
+    name: 'uncategorized at exactly zero',
+    budgets: [],
+    actuals: [{ category: 'Uncategorized', actual_amount: 0 }],
+  },
+  {
+    name: 'negative actual (a refund)',
+    budgets: [{ category: 'Shopping', budgeted_amount: 200, reasoning: null }],
+    actuals: [{ category: 'Shopping', actual_amount: -40 }],
+  },
+  {
+    name: 'overspent category',
+    budgets: [{ category: 'Groceries', budgeted_amount: 100, reasoning: null }],
+    actuals: [{ category: 'Groceries', actual_amount: 250.75 }],
+  },
+  {
+    name: 'rounding-sensitive amounts',
+    budgets: [{ category: 'Dining', budgeted_amount: 100.005, reasoning: null }],
+    actuals: [{ category: 'Dining', actual_amount: 33.335 }],
+  },
+  {
+    name: 'category with no matching actual',
+    budgets: [{ category: 'Entertainment', budgeted_amount: 60, reasoning: 'r' }],
+    actuals: [{ category: 'Dining', actual_amount: 10 }],
+  },
   {
     name: 'every category populated',
-    budgets: SPEND_CATEGORIES.map((c, i) => ({ category: c, budgeted_amount: (i + 1) * 25, reasoning: `r${i}` })),
-    actuals: SPEND_CATEGORIES.map((c, i) => ({ category: c, actual_amount: i * 13.37 })),
+    budgets: SPEND_CATEGORIES.map((c, i) => ({
+      category: c,
+      budgeted_amount: (i + 1) * 25,
+      reasoning: `r${i}`,
+    })),
+    actuals: SPEND_CATEGORIES.map((c, i) => ({
+      category: c,
+      actual_amount: i * 13.37,
+    })),
   },
 ];
 
@@ -100,7 +175,11 @@ test('computeBudgetStatus matches the original /budget/status map exactly', () =
   for (const c of BUDGET_CASES) {
     assert.deepEqual(
       computeBudgetStatus({ budgets: c.budgets, actuals: c.actuals }),
-      originalBudgetStatus({ budgets: c.budgets, actuals: c.actuals, SPEND_CATEGORIES }),
+      originalBudgetStatus({
+        budgets: c.budgets,
+        actuals: c.actuals,
+        SPEND_CATEGORIES,
+      }),
       `diverged on case: ${c.name}`
     );
   }
@@ -109,7 +188,9 @@ test('computeBudgetStatus matches the original /budget/status map exactly', () =
 test('computeBudgetStatus keeps budgeted/remaining null rather than collapsing to 0', () => {
   // "Nothing budgeted" and "budgeted zero" are genuinely different states
   // and the app renders them differently.
-  const none = computeBudgetStatus({ budgets: [], actuals: [] }).find((s) => s.category === 'Dining');
+  const none = computeBudgetStatus({ budgets: [], actuals: [] }).find(
+    (s) => s.category === 'Dining'
+  );
   assert.equal(none.budgeted, null);
   assert.equal(none.remaining, null);
 
@@ -127,7 +208,10 @@ test('computeBudgetStatus stays sorted by category name', () => {
     actuals: [{ category: 'Uncategorized', actual_amount: 5 }],
   });
   const names = status.map((s) => s.category);
-  assert.deepEqual(names, [...names].sort((a, b) => a.localeCompare(b)));
+  assert.deepEqual(
+    names,
+    [...names].sort((a, b) => a.localeCompare(b))
+  );
 });
 
 test('projectFinishDate matches the original inline projection', () => {

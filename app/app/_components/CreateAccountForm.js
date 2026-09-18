@@ -121,7 +121,11 @@ export default function CreateAccountForm({ onBack, onCreated }) {
           <Pressable onPress={continueToEmailStep} style={styles.ctaButton}>
             <Text style={styles.ctaText}>Continue</Text>
           </Pressable>
-          <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel="Back to sign in">
+          <Pressable
+            onPress={onBack}
+            accessibilityRole="button"
+            accessibilityLabel="Back to sign in"
+          >
             <Text style={styles.linkText}>Back to sign in</Text>
           </Pressable>
         </>
@@ -173,58 +177,64 @@ export default function CreateAccountForm({ onBack, onCreated }) {
 // via useMemo inside the component (keyed on colors).
 function buildStyles(colors) {
   return StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.background,
-    padding: 24,
-  },
-  title: { fontSize: 20, fontWeight: '700', color: colors.darkest, marginTop: 18, marginBottom: 24 },
-  subtitle: {
-    fontSize: 14,
-    color: colors.dark,
-    textAlign: 'center',
-    maxWidth: 300,
-    marginBottom: 20,
-  },
-  fieldRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: colors.card,
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    width: '100%',
-    maxWidth: 320,
-    marginBottom: 12,
-  },
-  fieldInput: {
-    flex: 1,
-    fontSize: 15,
-    color: colors.darkest,
-  },
-  errorText: {
-    fontSize: 14,
-    color: colors.error,
-    textAlign: 'center',
-    marginTop: 4,
-    marginBottom: 4,
-    maxWidth: 300,
-  },
-  ctaButton: {
-    backgroundColor: colors.darkest,
-    borderRadius: 28,
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '100%',
-    maxWidth: 320,
-    marginTop: 8,
-  },
-  ctaText: { color: colors.background, fontSize: 16, fontWeight: '600' },
-  linkText: { color: colors.dark, fontSize: 14, marginTop: 18, textDecorationLine: 'underline' },
-  spinner: { marginTop: 16 },
+    container: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.background,
+      padding: 24,
+    },
+    title: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: colors.darkest,
+      marginTop: 18,
+      marginBottom: 24,
+    },
+    subtitle: {
+      fontSize: 14,
+      color: colors.dark,
+      textAlign: 'center',
+      maxWidth: 300,
+      marginBottom: 20,
+    },
+    fieldRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      backgroundColor: colors.card,
+      borderRadius: 14,
+      paddingVertical: 14,
+      paddingHorizontal: 16,
+      width: '100%',
+      maxWidth: 320,
+      marginBottom: 12,
+    },
+    fieldInput: {
+      flex: 1,
+      fontSize: 15,
+      color: colors.darkest,
+    },
+    errorText: {
+      fontSize: 14,
+      color: colors.error,
+      textAlign: 'center',
+      marginTop: 4,
+      marginBottom: 4,
+      maxWidth: 300,
+    },
+    ctaButton: {
+      backgroundColor: colors.darkest,
+      borderRadius: 28,
+      paddingVertical: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '100%',
+      maxWidth: 320,
+      marginTop: 8,
+    },
+    ctaText: { color: colors.background, fontSize: 16, fontWeight: '600' },
+    linkText: { color: colors.dark, fontSize: 14, marginTop: 18, textDecorationLine: 'underline' },
+    spinner: { marginTop: 16 },
   });
 }

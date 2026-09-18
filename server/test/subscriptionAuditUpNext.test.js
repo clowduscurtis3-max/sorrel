@@ -58,7 +58,10 @@ test('up_next picks the bill when it lands before the soonest paycheck', () => {
 
 test('up_next picks the soonest of several bills when no income is detected', () => {
   const audit = computeSubscriptionAudit({
-    series: [bill({ id: 'series-rent', date: '2026-08-24' }), bill({ id: 'series-power', date: '2026-08-15', amount: 90 })],
+    series: [
+      bill({ id: 'series-rent', date: '2026-08-24' }),
+      bill({ id: 'series-power', date: '2026-08-15', amount: 90 }),
+    ],
     transactionsBySeriesId: new Map(),
     now: new Date('2026-08-11T00:00:00Z'),
   });

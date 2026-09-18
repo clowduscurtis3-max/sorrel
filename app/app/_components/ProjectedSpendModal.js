@@ -11,7 +11,14 @@ import { formatWhole } from '../_lib/api';
 // own established precedent) rather than a route this content doesn't
 // need the real estate or "return to exact scroll position" guarantee
 // budget.js's category detail view needed.
-export default function ProjectedSpendModal({ visible, onClose, pace, spendStats, monthProgress, monthName }) {
+export default function ProjectedSpendModal({
+  visible,
+  onClose,
+  pace,
+  spendStats,
+  monthProgress,
+  monthName,
+}) {
   const { colors, styles } = useTheme();
   const localStyles = useMemo(() => buildLocalStyles(colors), [colors]);
   function handleClose() {
@@ -38,12 +45,12 @@ export default function ProjectedSpendModal({ visible, onClose, pace, spendStats
 
           <Text style={localStyles.explainerText}>
             An estimate of what you'll spend by the end of {monthName || 'this month'}, based on
-            your pace so far - not a fixed number, just today's spending rate carried forward
-            across the rest of the month. Bills & Utilities is the one exception: since those are
-            known, mostly-fixed charges that post once rather than repeating, they're counted at
-            their real amount instead of being carried forward the same way. Everywhere else,
-            early in the month one larger-than-usual purchase can still swing this by a lot; it
-            settles down as more of the month's real spending comes in.
+            your pace so far - not a fixed number, just today's spending rate carried forward across
+            the rest of the month. Bills & Utilities is the one exception: since those are known,
+            mostly-fixed charges that post once rather than repeating, they're counted at their real
+            amount instead of being carried forward the same way. Everywhere else, early in the
+            month one larger-than-usual purchase can still swing this by a lot; it settles down as
+            more of the month's real spending comes in.
           </Text>
 
           {pace ? (
@@ -55,7 +62,9 @@ export default function ProjectedSpendModal({ visible, onClose, pace, spendStats
               <View style={localStyles.numberRow}>
                 <Text style={localStyles.numberLabel}>Days elapsed</Text>
                 <Text style={localStyles.numberValue}>
-                  {monthProgress ? `${monthProgress.daysElapsed} of ${monthProgress.daysInMonth}` : '—'}
+                  {monthProgress
+                    ? `${monthProgress.daysElapsed} of ${monthProgress.daysInMonth}`
+                    : '—'}
                 </Text>
               </View>
               <View style={localStyles.divider} />
@@ -81,8 +90,8 @@ export default function ProjectedSpendModal({ visible, onClose, pace, spendStats
             </View>
           ) : (
             <Text style={styles.smallText}>
-              Not enough data yet to project a total - this needs at least one budgeted category
-              and a day or two of real spending this month.
+              Not enough data yet to project a total - this needs at least one budgeted category and
+              a day or two of real spending this month.
             </Text>
           )}
         </ScrollView>
@@ -93,58 +102,58 @@ export default function ProjectedSpendModal({ visible, onClose, pace, spendStats
 
 function buildLocalStyles(colors) {
   return StyleSheet.create({
-  closeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scroll: {
-    flex: 1,
-    paddingHorizontal: 24,
-  },
-  scrollContent: {
-    gap: 16,
-    paddingBottom: 40,
-  },
-  explainerText: {
-    fontSize: 14,
-    color: colors.dark,
-    lineHeight: 20,
-  },
-  numbersCard: {
-    gap: 10,
-  },
-  numberRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  numberLabel: {
-    fontSize: 13,
-    color: colors.dark,
-  },
-  numberValue: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-  numberLabelBold: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  numberValueBold: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.sage,
-    marginVertical: 2,
-  },
+    closeButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: colors.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    scroll: {
+      flex: 1,
+      paddingHorizontal: 24,
+    },
+    scrollContent: {
+      gap: 16,
+      paddingBottom: 40,
+    },
+    explainerText: {
+      fontSize: 14,
+      color: colors.dark,
+      lineHeight: 20,
+    },
+    numbersCard: {
+      gap: 10,
+    },
+    numberRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    numberLabel: {
+      fontSize: 13,
+      color: colors.dark,
+    },
+    numberValue: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+    numberLabelBold: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    numberValueBold: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    divider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: colors.sage,
+      marginVertical: 2,
+    },
   });
 }

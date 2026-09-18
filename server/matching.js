@@ -28,7 +28,10 @@ function matchReceiptsToTransactions(receipts, transactions) {
     );
     if (candidate) {
       usedTransactionIds.add(candidate.transaction_id);
-      matches.push({ receiptId: receipt.id, transactionId: candidate.transaction_id });
+      matches.push({
+        receiptId: receipt.id,
+        transactionId: candidate.transaction_id,
+      });
     }
   }
 

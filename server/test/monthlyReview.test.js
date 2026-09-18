@@ -24,7 +24,10 @@ function period(periodStart, periodEnd, income, categoryActuals) {
 
 test('computeMonthlyReview: income/spend/saved are computed correctly', () => {
   const result = computeMonthlyReview({
-    period: period('2026-07-01', '2026-07-31', 4000, { Dining: 300, Groceries: 200 }),
+    period: period('2026-07-01', '2026-07-31', 4000, {
+      Dining: 300,
+      Groceries: 200,
+    }),
     prior: null,
     goals: [],
   });
@@ -33,12 +36,15 @@ test('computeMonthlyReview: income/spend/saved are computed correctly', () => {
   assert.equal(result.saved, 3500);
 });
 
-test('computeMonthlyReview: passes the period\'s own per-category status through unchanged', () => {
+test("computeMonthlyReview: passes the period's own per-category status through unchanged", () => {
   // Real gap found by code review, 2026-09-03: getPeriodReview already
   // computed this (via computeBudgetStatus) but it was silently dropped
   // before reaching the client - the Home "Monthly Review" detail view
   // needs it for its own per-category breakdown.
-  const p = period('2026-07-01', '2026-07-31', 4000, { Dining: 300, Groceries: 200 });
+  const p = period('2026-07-01', '2026-07-31', 4000, {
+    Dining: 300,
+    Groceries: 200,
+  });
   const result = computeMonthlyReview({ period: p, prior: null, goals: [] });
   assert.deepEqual(result.status, p.status);
 });
@@ -55,8 +61,14 @@ test('computeMonthlyReview: no prior period means no biggest move and no note', 
 
 test('computeMonthlyReview: flags the category with the largest absolute swing, up or down', () => {
   const result = computeMonthlyReview({
-    period: period('2026-07-01', '2026-07-31', 4000, { Dining: 300, Groceries: 150 }),
-    prior: period('2026-06-01', '2026-06-30', 3800, { Dining: 320, Groceries: 400 }),
+    period: period('2026-07-01', '2026-07-31', 4000, {
+      Dining: 300,
+      Groceries: 150,
+    }),
+    prior: period('2026-06-01', '2026-06-30', 3800, {
+      Dining: 320,
+      Groceries: 400,
+    }),
     goals: [],
   });
   assert.equal(result.biggest_move.category, 'Groceries');
@@ -77,7 +89,10 @@ test('computeMonthlyReview: a category with zero actual change is never flagged 
 
 test('computeMonthlyReview: a category present only in the current period counts as a full swing from zero', () => {
   const result = computeMonthlyReview({
-    period: period('2026-07-01', '2026-07-31', 4000, { Dining: 100, Subscriptions: 60 }),
+    period: period('2026-07-01', '2026-07-31', 4000, {
+      Dining: 100,
+      Subscriptions: 60,
+    }),
     prior: period('2026-06-01', '2026-06-30', 3800, { Dining: 90 }),
     goals: [],
   });
@@ -116,8 +131,24 @@ test('computeMonthlyReview: several goals each get their own summary entry, in o
     period: period('2026-07-01', '2026-07-31', 4000, { Dining: 300 }),
     prior: null,
     goals: [
-      { id: 'goal-1', goal_type: 'savings', notes: 'Car', percent_complete: 30, saved_amount: 300, target_amount: 1000, message: 'a' },
-      { id: 'goal-2', goal_type: 'debt', notes: 'Card', percent_complete: 80, saved_amount: 800, target_amount: 1000, message: 'b' },
+      {
+        id: 'goal-1',
+        goal_type: 'savings',
+        notes: 'Car',
+        percent_complete: 30,
+        saved_amount: 300,
+        target_amount: 1000,
+        message: 'a',
+      },
+      {
+        id: 'goal-2',
+        goal_type: 'debt',
+        notes: 'Card',
+        percent_complete: 80,
+        saved_amount: 800,
+        target_amount: 1000,
+        message: 'b',
+      },
     ],
   });
   assert.equal(result.goals.length, 2);

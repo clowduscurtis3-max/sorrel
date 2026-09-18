@@ -147,11 +147,13 @@ function healthReason(bucket, { warnCount, trend, worstAlert }) {
   // its own definition in computeFinancialHealth) - "others" is everyone
   // besides the one category actually being named here.
   const othersCount = Math.max(0, warnCount - 1);
-  const others = othersCount > 0 ? ` (and ${othersCount} other${othersCount === 1 ? '' : 's'})` : '';
+  const others =
+    othersCount > 0 ? ` (and ${othersCount} other${othersCount === 1 ? '' : 's'})` : '';
 
   if (bucket === 'under_pressure' || bucket === 'needs_attention') {
     if (worstAlert) {
-      const overBy = Math.round((worstAlert.projected_amount - worstAlert.budgeted_amount) * 100) / 100;
+      const overBy =
+        Math.round((worstAlert.projected_amount - worstAlert.budgeted_amount) * 100) / 100;
       return `${worstAlert.category}${others} is on pace to run $${overBy.toFixed(2)} over budget this month.`;
     }
     if (bucket === 'needs_attention' && trend === 'declining') {
@@ -211,7 +213,10 @@ export function computeInsight(alerts) {
 
   if (worst) {
     const othersCount = Math.max(0, (alerts || []).length - 1);
-    const others = othersCount > 0 ? ` ${othersCount} other categor${othersCount === 1 ? 'y is' : 'ies are'} also trending over.` : '';
+    const others =
+      othersCount > 0
+        ? ` ${othersCount} other categor${othersCount === 1 ? 'y is' : 'ies are'} also trending over.`
+        : '';
     return { text: `${worst.message}${others}`, detail: null, hasDetail: true };
   }
   return { text: 'Nothing needs your attention right now.', detail: null, hasDetail: false };

@@ -71,7 +71,10 @@ export default function RecurringSettings() {
   return (
     <SettingsScreenChrome title="Recurring Settings" onBack={() => router.back()}>
       <SettingsFetchGate loaded={settings !== null} error={error} onRetry={fetchSettings}>
-        <ScrollView style={recurringSettingsStyles.bodyScroll} contentContainerStyle={recurringSettingsStyles.body}>
+        <ScrollView
+          style={recurringSettingsStyles.bodyScroll}
+          contentContainerStyle={recurringSettingsStyles.body}
+        >
           {error && <Text style={styles.errorText}>{error}</Text>}
 
           <View style={[styles.card, recurringSettingsStyles.card]}>
@@ -85,7 +88,10 @@ export default function RecurringSettings() {
                 return (
                   <Pressable
                     key={opt.value}
-                    style={[recurringSettingsStyles.pill, active && recurringSettingsStyles.pillActive]}
+                    style={[
+                      recurringSettingsStyles.pill,
+                      active && recurringSettingsStyles.pillActive,
+                    ]}
                     onPress={() => patchSetting('default_grouping', opt.value)}
                     disabled={saving}
                     accessibilityRole="button"
@@ -102,16 +108,18 @@ export default function RecurringSettings() {
                   </Pressable>
                 );
               })}
-              {saving && <ActivityIndicator style={recurringSettingsStyles.pillSpinner} size="small" />}
+              {saving && (
+                <ActivityIndicator style={recurringSettingsStyles.pillSpinner} size="small" />
+              )}
             </View>
           </View>
 
           <View style={[styles.card, recurringSettingsStyles.card]}>
             <Text style={styles.cardTitle}>Price-creep alert sensitivity</Text>
             <Text style={[styles.smallText, recurringSettingsStyles.description]}>
-              How much a recurring charge has to quietly increase before it's flagged as a
-              price creep. Doesn't affect a sudden price jump (a bigger, one-time change) -
-              those are always detected the same way.
+              How much a recurring charge has to quietly increase before it's flagged as a price
+              creep. Doesn't affect a sudden price jump (a bigger, one-time change) - those are
+              always detected the same way.
             </Text>
             <View style={[styles.picker, recurringSettingsStyles.picker]}>
               <Picker

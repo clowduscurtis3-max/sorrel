@@ -81,7 +81,7 @@ export function ThemeProvider({ children }) {
 export function useTheme() {
   const ctx = useContext(ThemeContext);
   if (!ctx) {
-    throw new Error('useTheme must be used within the root layout\'s ThemeProvider');
+    throw new Error("useTheme must be used within the root layout's ThemeProvider");
   }
   return ctx;
 }

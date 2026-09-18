@@ -170,7 +170,9 @@ async function getEligibleAccountsForUser(userId, activeItemIds) {
     // never needed a per-account identity, only the aggregate. The new
     // per-account daily balance snapshot below (generateAccountBalanceSnapshots)
     // needs it to know which account each row belongs to.
-    .select('id, type, current_balance, available_balance, persistent_account_id, iso_currency_code')
+    .select(
+      'id, type, current_balance, available_balance, persistent_account_id, iso_currency_code'
+    )
     .eq('user_id', userId)
     .in('plaid_item_id', itemIds);
   if (accountsError) throw accountsError;
@@ -224,7 +226,9 @@ async function getUserTimezone(userId) {
 // routes) never pass this, so they keep doing their own independent
 // lookup - only the batch job needs to prefetch and share it.
 async function generateNetWorthSnapshot(userId, now = new Date(), activeItemIds, precomputed) {
-  const accounts = precomputed ? precomputed.accounts : await getEligibleAccountsForUser(userId, activeItemIds);
+  const accounts = precomputed
+    ? precomputed.accounts
+    : await getEligibleAccountsForUser(userId, activeItemIds);
   if (accounts.length === 0) return null;
 
   // Found by code review: excluded_account_count was computed by
@@ -252,7 +256,13 @@ async function generateNetWorthSnapshot(userId, now = new Date(), activeItemIds,
   );
   if (error) throw error;
 
-  return { snapshot_date: snapshotDate, assets, liabilities, net_worth, excluded_account_count };
+  return {
+    snapshot_date: snapshotDate,
+    assets,
+    liabilities,
+    net_worth,
+    excluded_account_count,
+  };
 }
 
 // Phase 42 (multi-goal tracking, 2026-09-08): v1 foundation only, nothing
@@ -270,8 +280,15 @@ async function generateNetWorthSnapshot(userId, now = new Date(), activeItemIds,
 // twice for the same account/day updates the one row rather than
 // duplicating. `precomputed` - same purpose and same caller contract as
 // generateNetWorthSnapshot's own parameter directly above.
-async function generateAccountBalanceSnapshots(userId, now = new Date(), activeItemIds, precomputed) {
-  const accounts = precomputed ? precomputed.accounts : await getEligibleAccountsForUser(userId, activeItemIds);
+async function generateAccountBalanceSnapshots(
+  userId,
+  now = new Date(),
+  activeItemIds,
+  precomputed
+) {
+  const accounts = precomputed
+    ? precomputed.accounts
+    : await getEligibleAccountsForUser(userId, activeItemIds);
   const depositoryAccounts = accounts.filter((a) => a.type === 'depository');
   if (depositoryAccounts.length === 0) return { snapshot_count: 0 };
 

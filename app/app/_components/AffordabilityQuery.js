@@ -136,7 +136,7 @@ export function describeGoalCallout(goalImpact) {
   }
   if (!goalImpact.available) return null;
   if (goalImpact.stalls_goal) {
-    return "This would stop your goal from advancing at its current pace.";
+    return 'This would stop your goal from advancing at its current pace.';
   }
   if (!goalImpact.delay_days || goalImpact.delay_days <= 0) {
     return "This won't slow your progress toward your goal.";
@@ -161,7 +161,10 @@ export function describeGoalCallouts(goalImpact) {
     .map((g) => {
       const text = describeGoalCallout(g);
       if (!text) return null;
-      return { goalId: g.goal_id, text: goals.length > 1 ? `${g.notes || g.goal_type}: ${text}` : text };
+      return {
+        goalId: g.goal_id,
+        text: goals.length > 1 ? `${g.notes || g.goal_type}: ${text}` : text,
+      };
     })
     .filter(Boolean);
 }
@@ -180,8 +183,8 @@ export function describeSuggestion(suggestions) {
     names.length === 1
       ? names[0]
       : names.length === 2
-      ? `${names[0]} and ${names[1]}`
-      : `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+        ? `${names[0]} and ${names[1]}`
+        : `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
   return `There's real room in ${list} this period (about $${formatWhole(s.combined_available)} combined) that could help cover this.`;
 }
 
@@ -408,7 +411,9 @@ export default function AffordabilityQuery() {
     } catch (err) {
       console.error(err);
       setVoiceError(
-        err.message === 'SERVER_ERROR' ? apiErrorMessage(err) : "Couldn't transcribe that - try again or type it."
+        err.message === 'SERVER_ERROR'
+          ? apiErrorMessage(err)
+          : "Couldn't transcribe that - try again or type it."
       );
     } finally {
       setTranscribing(false);
@@ -643,7 +648,11 @@ export default function AffordabilityQuery() {
               value={text}
               onChangeText={setText}
               placeholder={
-                awaitingFinanceTerm ? 'e.g. 60 months' : pendingContext ? 'e.g. $50' : 'e.g. Can I afford a $50 dinner?'
+                awaitingFinanceTerm
+                  ? 'e.g. 60 months'
+                  : pendingContext
+                    ? 'e.g. $50'
+                    : 'e.g. Can I afford a $50 dinner?'
               }
               placeholderTextColor={colors.placeholder}
               editable={!submitting && !transcribing}
@@ -658,10 +667,16 @@ export default function AffordabilityQuery() {
                 accessibilityLabel={recorderState.isRecording ? 'Stop recording' : 'Ask by voice'}
                 style={[
                   inlineStyles.micButton,
-                  recorderState.isRecording ? inlineStyles.micButtonRecording : inlineStyles.micButtonIdle,
+                  recorderState.isRecording
+                    ? inlineStyles.micButtonRecording
+                    : inlineStyles.micButtonIdle,
                 ]}
               >
-                <MaterialIcons name={recorderState.isRecording ? 'stop' : 'mic'} size={22} color={colors.background} />
+                <MaterialIcons
+                  name={recorderState.isRecording ? 'stop' : 'mic'}
+                  size={22}
+                  color={colors.background}
+                />
               </Pressable>
             )}
           </View>
@@ -681,8 +696,14 @@ export default function AffordabilityQuery() {
       )}
 
       {response && !pendingContext && (
-        <Pressable onPress={startOver} accessibilityRole="button" accessibilityLabel="Ask something else">
-          <Text style={[styles.smallText, { color: colors.primary, textDecorationLine: 'underline' }]}>
+        <Pressable
+          onPress={startOver}
+          accessibilityRole="button"
+          accessibilityLabel="Ask something else"
+        >
+          <Text
+            style={[styles.smallText, { color: colors.primary, textDecorationLine: 'underline' }]}
+          >
             Ask something else
           </Text>
         </Pressable>
@@ -714,19 +735,24 @@ export default function AffordabilityQuery() {
           <View style={styles.card}>
             <View style={styles.comparisonTableRow}>
               <Text style={styles.comparisonTableLabel}>Amount</Text>
-              <Text style={styles.comparisonTableValue}>${formatDecimal(result.scenario.amount)}</Text>
+              <Text style={styles.comparisonTableValue}>
+                ${formatDecimal(result.scenario.amount)}
+              </Text>
             </View>
             <View style={styles.comparisonTableRow}>
               <Text style={styles.comparisonTableLabel}>Recurrence</Text>
               <Text style={styles.comparisonTableValue}>
                 {result.scenario.recurrence === 'once'
                   ? 'One-time'
-                  : result.scenario.recurrence[0].toUpperCase() + result.scenario.recurrence.slice(1)}
+                  : result.scenario.recurrence[0].toUpperCase() +
+                    result.scenario.recurrence.slice(1)}
               </Text>
             </View>
             <View style={[styles.comparisonTableRow, { borderBottomWidth: 0 }]}>
               <Text style={styles.comparisonTableLabel}>Category</Text>
-              <Text style={styles.comparisonTableValue}>{result.scenario.category || 'Not specified'}</Text>
+              <Text style={styles.comparisonTableValue}>
+                {result.scenario.category || 'Not specified'}
+              </Text>
             </View>
           </View>
 
@@ -741,11 +767,13 @@ export default function AffordabilityQuery() {
               <Text style={styles.smallText}>
                 Based on a ${formatDecimal(result.rate_estimate.base_price)} price plus an assumed{' '}
                 {result.rate_estimate.estimated_ttl_rate_percent}% for tax, title, and license ($
-                {formatDecimal(result.rate_estimate.total_price)} total), financed over {result.rate_estimate.term_months}{' '}
-                months at the average new-auto-loan rate of {result.rate_estimate.annual_rate_percent}% APR
-                (published by the Federal Reserve as of {formatDateMDY(result.rate_estimate.as_of_date)}), the estimated payment is
-                ${formatDecimal(result.rate_estimate.estimated_payment)}/month. This is an estimate, not a real quote -
-                your actual rate, tax, and fees depend on your credit, lender, and location.
+                {formatDecimal(result.rate_estimate.total_price)} total), financed over{' '}
+                {result.rate_estimate.term_months} months at the average new-auto-loan rate of{' '}
+                {result.rate_estimate.annual_rate_percent}% APR (published by the Federal Reserve as
+                of {formatDateMDY(result.rate_estimate.as_of_date)}), the estimated payment is $
+                {formatDecimal(result.rate_estimate.estimated_payment)}/month. This is an estimate,
+                not a real quote - your actual rate, tax, and fees depend on your credit, lender,
+                and location.
               </Text>
             </View>
           )}
@@ -760,14 +788,17 @@ export default function AffordabilityQuery() {
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Estimated payment (0% plan)</Text>
               <Text style={styles.smallText}>
-                If this is financed on a 0%-interest plan over {result.promo_plan_estimate.term_months} months, $
+                If this is financed on a 0%-interest plan over{' '}
+                {result.promo_plan_estimate.term_months} months, $
                 {formatDecimal(result.promo_plan_estimate.total_price)} works out to $
                 {formatDecimal(result.promo_plan_estimate.estimated_payment)}/month.
               </Text>
               <Text style={[styles.smallText, { marginTop: 8 }]}>
                 {result.promo_plan_estimate.confirmation_caveat}
               </Text>
-              <Text style={[styles.smallText, { marginTop: 8 }]}>{result.promo_plan_estimate.risk_caveat}</Text>
+              <Text style={[styles.smallText, { marginTop: 8 }]}>
+                {result.promo_plan_estimate.risk_caveat}
+              </Text>
             </View>
           )}
 
@@ -801,7 +832,12 @@ export default function AffordabilityQuery() {
               accessibilityRole="button"
               accessibilityLabel="More details"
             >
-              <Text style={[styles.smallText, { color: colors.primary, textDecorationLine: 'underline' }]}>
+              <Text
+                style={[
+                  styles.smallText,
+                  { color: colors.primary, textDecorationLine: 'underline' },
+                ]}
+              >
                 More details
               </Text>
             </Pressable>
@@ -822,7 +858,12 @@ export default function AffordabilityQuery() {
                 {checkingFundSource ? (
                   <ActivityIndicator />
                 ) : (
-                  <Text style={[styles.smallText, { color: colors.primary, textDecorationLine: 'underline' }]}>
+                  <Text
+                    style={[
+                      styles.smallText,
+                      { color: colors.primary, textDecorationLine: 'underline' },
+                    ]}
+                  >
                     See the exact split
                   </Text>
                 )}
@@ -845,7 +886,9 @@ export default function AffordabilityQuery() {
                   </Text>
                 ))}
                 {fundSourceSplit.summary && (
-                  <Text style={[styles.smallText, { marginTop: 4 }]}>{fundSourceSplit.summary}</Text>
+                  <Text style={[styles.smallText, { marginTop: 4 }]}>
+                    {fundSourceSplit.summary}
+                  </Text>
                 )}
               </View>
             )}
@@ -855,8 +898,8 @@ export default function AffordabilityQuery() {
             <View style={styles.card}>
               <Text style={styles.cardTitle}>After adding this payment</Text>
               <Text style={styles.smallText}>
-                You'd have ${formatDecimal(result.budget_impact.total_remaining_after)} left in your budget this
-                period.
+                You'd have ${formatDecimal(result.budget_impact.total_remaining_after)} left in your
+                budget this period.
               </Text>
             </View>
           )}
@@ -867,7 +910,9 @@ export default function AffordabilityQuery() {
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Your goals</Text>
               {describeGoalCallouts(result.goal_impact).map(({ goalId, text }) => (
-                <Text key={goalId} style={styles.smallText}>{text}</Text>
+                <Text key={goalId} style={styles.smallText}>
+                  {text}
+                </Text>
               ))}
             </View>
           )}
@@ -920,15 +965,30 @@ export default function AffordabilityQuery() {
                             silently dropped status display from these two
                             comparison sides too, with nothing else showing
                             it - restored here, specific to this call site. */}
-                        <Text style={{ color: STATUS_TEXT_COLOR[STATUS_TONE[buyNow.result.status] || 'positive'], fontWeight: '600', fontSize: 13 }}>
+                        <Text
+                          style={{
+                            color:
+                              STATUS_TEXT_COLOR[STATUS_TONE[buyNow.result.status] || 'positive'],
+                            fontWeight: '600',
+                            fontSize: 13,
+                          }}
+                        >
                           {buyNow.result.status_label}
                         </Text>
                         <ScenarioResult result={buyNow.result} />
                       </View>
                       <View style={[styles.card, { flex: 1, alignItems: 'center' }]}>
                         <MountainIllustration size={64} />
-                        <Text style={styles.cardTitle}>Wait until {formatDateMDY(wait.result.scenario.date)}</Text>
-                        <Text style={{ color: STATUS_TEXT_COLOR[STATUS_TONE[wait.result.status] || 'positive'], fontWeight: '600', fontSize: 13 }}>
+                        <Text style={styles.cardTitle}>
+                          Wait until {formatDateMDY(wait.result.scenario.date)}
+                        </Text>
+                        <Text
+                          style={{
+                            color: STATUS_TEXT_COLOR[STATUS_TONE[wait.result.status] || 'positive'],
+                            fontWeight: '600',
+                            fontSize: 13,
+                          }}
+                        >
                           {wait.result.status_label}
                         </Text>
                         <ScenarioResult result={wait.result} />
@@ -945,7 +1005,9 @@ export default function AffordabilityQuery() {
                         restyle's own build notes in CLAUDE.md. */}
                     <View style={styles.card}>
                       <View style={styles.comparisonTableRow}>
-                        <Text style={styles.comparisonTableLabel}>Discretionary spending (buy now)</Text>
+                        <Text style={styles.comparisonTableLabel}>
+                          Discretionary spending (buy now)
+                        </Text>
                         <Text style={styles.comparisonTableValue}>
                           -${formatDecimal(buyNow.result.budget_impact?.charge_this_period) ?? '—'}
                         </Text>
@@ -1000,7 +1062,9 @@ export default function AffordabilityQuery() {
                           <View style={styles.card}>
                             <Text style={styles.cardTitle}>Goal progress</Text>
                             {goalsProgress.map((g) => (
-                              <Text key={g.id} style={styles.smallText}>{g.message}</Text>
+                              <Text key={g.id} style={styles.smallText}>
+                                {g.message}
+                              </Text>
                             ))}
                           </View>
                         )}
@@ -1009,8 +1073,8 @@ export default function AffordabilityQuery() {
                           <View style={styles.card}>
                             <Text style={styles.cardTitle}>Upcoming bills</Text>
                             <Text style={styles.smallText}>
-                              You have ${formatDecimal(upcomingBillsTotal(subscriptionAudit))} in bills
-                              due in the next {UPCOMING_BILLS_CARD_WINDOW_DAYS} days.
+                              You have ${formatDecimal(upcomingBillsTotal(subscriptionAudit))} in
+                              bills due in the next {UPCOMING_BILLS_CARD_WINDOW_DAYS} days.
                             </Text>
                           </View>
                         )}
@@ -1041,7 +1105,9 @@ export default function AffordabilityQuery() {
           <Text
             style={{
               color:
-                STATUS_TEXT_COLOR[STATUS_TONE[response.max_comfortable.boundary_result.status] || 'positive'],
+                STATUS_TEXT_COLOR[
+                  STATUS_TONE[response.max_comfortable.boundary_result.status] || 'positive'
+                ],
               fontWeight: '600',
               fontSize: 13,
             }}
@@ -1089,34 +1155,34 @@ export default function AffordabilityQuery() {
 // via useMemo inside the component (keyed on colors).
 function buildInlineStyles(colors) {
   return StyleSheet.create({
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'center',
-    gap: 8,
-  },
-  input: {
-    width: 220,
-  },
-  // Solid filled circle + a real Material Icons glyph (Google's own icon
-  // set, already ships with Expo - no new native dependency), per direct
-  // user request (2026-08-20): "not some emoji mic... the one Google
-  // uses." Now palette-derived (colors.primary/colors.error) rather than
-  // the original hardcoded #1a73e8/#d93025 - same semantic meaning
-  // (color alone signals idle vs. recording state), restyled as part of
-  // the Budget-tab Sorrel pass.
-  micButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  micButtonIdle: {
-    backgroundColor: colors.primary,
-  },
-  micButtonRecording: {
-    backgroundColor: colors.error,
-  },
+    inputRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'center',
+      gap: 8,
+    },
+    input: {
+      width: 220,
+    },
+    // Solid filled circle + a real Material Icons glyph (Google's own icon
+    // set, already ships with Expo - no new native dependency), per direct
+    // user request (2026-08-20): "not some emoji mic... the one Google
+    // uses." Now palette-derived (colors.primary/colors.error) rather than
+    // the original hardcoded #1a73e8/#d93025 - same semantic meaning
+    // (color alone signals idle vs. recording state), restyled as part of
+    // the Budget-tab Sorrel pass.
+    micButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    micButtonIdle: {
+      backgroundColor: colors.primary,
+    },
+    micButtonRecording: {
+      backgroundColor: colors.error,
+    },
   });
 }

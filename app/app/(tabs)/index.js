@@ -17,7 +17,15 @@ import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { createPlaidLinkSession } from 'react-native-plaid-link-sdk';
 import { MaterialIcons } from '@expo/vector-icons';
-import { apiFetch, apiErrorMessage, formatAmount, formatDecimal, formatWhole, formatShortDate, CATEGORIES } from '../_lib/api';
+import {
+  apiFetch,
+  apiErrorMessage,
+  formatAmount,
+  formatDecimal,
+  formatWhole,
+  formatShortDate,
+  CATEGORIES,
+} from '../_lib/api';
 import { readableTextColor, isValidHexColor } from '../_lib/styles';
 import { useTheme } from '../_lib/theme';
 import { useAppData } from '../_lib/appData';
@@ -36,7 +44,11 @@ import {
   computePace,
 } from '../_lib/homeSummary';
 import { iconForCategory as iconForTxCategory } from '../_lib/categoryIcons';
-import { HOME_CARD_GROUP_BEFORE_STATS, HOME_CARD_GROUP_AFTER_STATS, orderCardGroup } from '../_lib/homeCards';
+import {
+  HOME_CARD_GROUP_BEFORE_STATS,
+  HOME_CARD_GROUP_AFTER_STATS,
+  orderCardGroup,
+} from '../_lib/homeCards';
 import ProjectedSpendModal from '../_components/ProjectedSpendModal';
 import MonthlyReviewModal from '../_components/MonthlyReviewModal';
 import SpentSoFarModal from '../_components/SpentSoFarModal';
@@ -83,7 +95,8 @@ function formatGoalType(goalType) {
 function greeting(session) {
   const hour = new Date().getHours();
   const timeOfDay = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
-  const name = session?.user?.user_metadata?.display_name || session?.user?.user_metadata?.full_name;
+  const name =
+    session?.user?.user_metadata?.display_name || session?.user?.user_metadata?.full_name;
   const firstName = name?.split(' ')[0];
   return firstName ? `Good ${timeOfDay}, ${firstName}.` : `Good ${timeOfDay}.`;
 }
@@ -600,7 +613,9 @@ export default function Home() {
   // accounts.accounts, which already carries both plaid_account_id and
   // institution_name.
   function institutionForAccount(accountId) {
-    return accounts?.accounts.find((a) => a.plaid_account_id === accountId)?.institution_name || null;
+    return (
+      accounts?.accounts.find((a) => a.plaid_account_id === accountId)?.institution_name || null
+    );
   }
 
   // "Upcoming bills" at a glance, requested directly by the user - uses
@@ -769,7 +784,10 @@ export default function Home() {
   const cardOrderBeforeStats = cardOrder.includes('advisor_briefing')
     ? cardOrder
     : ['advisor_briefing', ...cardOrder];
-  const orderedCardsBeforeStats = orderCardGroup(HOME_CARD_GROUP_BEFORE_STATS, cardOrderBeforeStats);
+  const orderedCardsBeforeStats = orderCardGroup(
+    HOME_CARD_GROUP_BEFORE_STATS,
+    cardOrderBeforeStats
+  );
   const orderedCardsAfterStats = orderCardGroup(HOME_CARD_GROUP_AFTER_STATS, cardOrder);
 
   // Financial Advisor Agent (2026-09-16) - now a real, user-movable/
@@ -792,7 +810,9 @@ export default function Home() {
         accessibilityRole="button"
         accessibilityLabel="Sorrel's take - more info"
       >
-        <Text style={[homeStyles.cardEyebrow, textColor && { color: textColor }]}>SORREL'S TAKE</Text>
+        <Text style={[homeStyles.cardEyebrow, textColor && { color: textColor }]}>
+          SORREL'S TAKE
+        </Text>
         {/* numberOfLines is a hard backstop, not just a prompt request -
             real bug found live 2026-09-16: a verbose model response made
             this card grow to fill the entire screen. The prompt now asks
@@ -800,7 +820,10 @@ export default function Home() {
             the model actually returns. The full explanation and
             recommended actions live one tap away, in AdvisorBriefingModal -
             this card is glance-only by design. */}
-        <Text style={[homeStyles.advisorHeadline, textColor && { color: textColor }]} numberOfLines={2}>
+        <Text
+          style={[homeStyles.advisorHeadline, textColor && { color: textColor }]}
+          numberOfLines={2}
+        >
           {advisorBriefing.headline}
         </Text>
         <Text style={homeStyles.advisorMoreInfo}>More info</Text>
@@ -811,22 +834,27 @@ export default function Home() {
   function renderFinancialHealthCard() {
     const textColor = readableTextColor(cardColors.financial_health, colors);
     return (
-      <View style={[styles.card, homeStyles.cardMargin, cardColors.financial_health && { backgroundColor: cardColors.financial_health }]}>
+      <View
+        style={[
+          styles.card,
+          homeStyles.cardMargin,
+          cardColors.financial_health && { backgroundColor: cardColors.financial_health },
+        ]}
+      >
         <View style={homeStyles.healthHeaderRow}>
           <Text style={[homeStyles.cardEyebrow, textColor && { color: textColor }]}>
             {monthName.toUpperCase()} FINANCIAL HEALTH
           </Text>
           <View
-            style={[
-              homeStyles.healthPill,
-              { backgroundColor: HEALTH_PILL_COLOR[health.color] },
-            ]}
+            style={[homeStyles.healthPill, { backgroundColor: HEALTH_PILL_COLOR[health.color] }]}
           >
             <Text style={homeStyles.healthPillText}>{health.label.toUpperCase()}</Text>
           </View>
         </View>
 
-        <Text style={[homeStyles.healthReason, textColor && { color: textColor }]}>{health.reason}</Text>
+        <Text style={[homeStyles.healthReason, textColor && { color: textColor }]}>
+          {health.reason}
+        </Text>
 
         <View style={homeStyles.categoryRow}>
           {categoryTiles.map((tile) => (
@@ -887,10 +915,7 @@ export default function Home() {
             </View>
             <View style={homeStyles.progressTrack}>
               <View
-                style={[
-                  homeStyles.progressFill,
-                  { width: `${monthProgress.percent * 100}%` },
-                ]}
+                style={[homeStyles.progressFill, { width: `${monthProgress.percent * 100}%` }]}
               />
             </View>
             <View>
@@ -918,7 +943,12 @@ export default function Home() {
     const textColor = readableTextColor(cardColors.insight, colors);
     return (
       <Pressable
-        style={[styles.card, homeStyles.cardMargin, homeStyles.insightCard, cardColors.insight && { backgroundColor: cardColors.insight }]}
+        style={[
+          styles.card,
+          homeStyles.cardMargin,
+          homeStyles.insightCard,
+          cardColors.insight && { backgroundColor: cardColors.insight },
+        ]}
         onPress={() => router.push('/budget')}
         accessibilityRole="button"
         accessibilityLabel="View budget details"
@@ -928,7 +958,9 @@ export default function Home() {
         </View>
         <View style={homeStyles.insightBody}>
           <Text style={[homeStyles.cardEyebrow, textColor && { color: textColor }]}>INSIGHT</Text>
-          <Text style={[homeStyles.insightText, textColor && { color: textColor }]}>{insight.text}</Text>
+          <Text style={[homeStyles.insightText, textColor && { color: textColor }]}>
+            {insight.text}
+          </Text>
           {insight.hasDetail && (
             <Text style={homeStyles.insightTapHint}>Tap to see details and recommendations.</Text>
           )}
@@ -939,11 +971,20 @@ export default function Home() {
   }
 
   function renderWhatChangedCard() {
-    if (!(homeChanges?.has_baseline && (homeChanges.items.length > 0 || homeChanges.net_worth))) return null;
+    if (!(homeChanges?.has_baseline && (homeChanges.items.length > 0 || homeChanges.net_worth)))
+      return null;
     const textColor = readableTextColor(cardColors.what_changed, colors);
     return (
-      <View style={[styles.card, homeStyles.cardMargin, cardColors.what_changed && { backgroundColor: cardColors.what_changed }]}>
-        <Text style={[homeStyles.cardEyebrow, textColor && { color: textColor }]}>WHAT CHANGED</Text>
+      <View
+        style={[
+          styles.card,
+          homeStyles.cardMargin,
+          cardColors.what_changed && { backgroundColor: cardColors.what_changed },
+        ]}
+      >
+        <Text style={[homeStyles.cardEyebrow, textColor && { color: textColor }]}>
+          WHAT CHANGED
+        </Text>
         {homeChanges.net_worth && (
           <View style={homeStyles.changeRow}>
             <MaterialIcons
@@ -968,16 +1009,17 @@ export default function Home() {
               size={18}
               color={STATUS_COLOR[item.kind === 'resolved' ? 'ok' : 'warning']}
             />
-            <Text style={[homeStyles.changeText, textColor && { color: textColor }]} numberOfLines={1}>
+            <Text
+              style={[homeStyles.changeText, textColor && { color: textColor }]}
+              numberOfLines={1}
+            >
               {item.kind === 'resolved' ? 'Resolved: ' : ''}
               {item.title}
             </Text>
           </View>
         ))}
         {homeChanges.items.length > 6 && (
-          <Text style={homeStyles.changeMore}>
-            and {homeChanges.items.length - 6} more
-          </Text>
+          <Text style={homeStyles.changeMore}>and {homeChanges.items.length - 6} more</Text>
         )}
       </View>
     );
@@ -992,7 +1034,11 @@ export default function Home() {
       // which adds the full per-category breakdown the card itself has
       // no room for.
       <Pressable
-        style={[styles.card, homeStyles.cardMargin, cardColors.monthly_review && { backgroundColor: cardColors.monthly_review }]}
+        style={[
+          styles.card,
+          homeStyles.cardMargin,
+          cardColors.monthly_review && { backgroundColor: cardColors.monthly_review },
+        ]}
         onPress={() => setShowMonthlyReviewDetail(true)}
         accessibilityRole="button"
         accessibilityLabel="View full monthly review"
@@ -1013,17 +1059,19 @@ export default function Home() {
             <MaterialIcons
               name={monthlyReview.biggest_move.direction === 'up' ? 'trending-up' : 'trending-down'}
               size={18}
-              color={
-                monthlyReview.biggest_move.direction === 'up' ? colors.error : colors.positive
-              }
+              color={monthlyReview.biggest_move.direction === 'up' ? colors.error : colors.positive}
             />
-            <Text style={[homeStyles.changeText, textColor && { color: textColor }]}>{monthlyReview.note}</Text>
+            <Text style={[homeStyles.changeText, textColor && { color: textColor }]}>
+              {monthlyReview.note}
+            </Text>
           </View>
         )}
         {/* Phase 42: a user can have several goals now - one message line
             per goal, same content each already carried individually. */}
         {(monthlyReview.goals || []).map((g) => (
-          <Text key={g.id} style={homeStyles.changeMore}>{g.message}</Text>
+          <Text key={g.id} style={homeStyles.changeMore}>
+            {g.message}
+          </Text>
         ))}
       </Pressable>
     );
@@ -1033,13 +1081,19 @@ export default function Home() {
     if (!subscriptionAudit?.up_next) return null;
     const textColor = readableTextColor(cardColors.up_next, colors);
     return (
-      <View style={[styles.card, homeStyles.cardMargin, cardColors.up_next && { backgroundColor: cardColors.up_next }]}>
+      <View
+        style={[
+          styles.card,
+          homeStyles.cardMargin,
+          cardColors.up_next && { backgroundColor: cardColors.up_next },
+        ]}
+      >
         <Text style={[styles.cardTitle, textColor && { color: textColor }]}>Up next</Text>
         <View style={styles.alertRow}>
           <Text style={[styles.alertText, textColor && { color: textColor }]}>
             {subscriptionAudit.up_next.display_name} —{' '}
-            {subscriptionAudit.up_next.type === 'income' ? 'est. ' : ''}
-            ${formatDecimal(subscriptionAudit.up_next.amount)}
+            {subscriptionAudit.up_next.type === 'income' ? 'est. ' : ''}$
+            {formatDecimal(subscriptionAudit.up_next.amount)}
           </Text>
           <Text style={styles.smallText}>{formatUpNextText(subscriptionAudit.up_next.date)}</Text>
         </View>
@@ -1069,7 +1123,11 @@ export default function Home() {
       // fix's own comment in (tabs)/budget.js). Switching tabs has no
       // such expectation, so a plain router.push is the right tool here.
       <Pressable
-        style={[styles.card, homeStyles.cardMargin, cardColors.goal_progress && { backgroundColor: cardColors.goal_progress }]}
+        style={[
+          styles.card,
+          homeStyles.cardMargin,
+          cardColors.goal_progress && { backgroundColor: cardColors.goal_progress },
+        ]}
         onPress={() => router.push('/goal')}
         accessibilityRole="button"
         accessibilityLabel="View Goal tab"
@@ -1102,8 +1160,16 @@ export default function Home() {
     if (upcomingBills.length === 0) return null;
     const textColor = readableTextColor(cardColors.upcoming_bills, colors);
     return (
-      <View style={[styles.card, homeStyles.cardMargin, cardColors.upcoming_bills && { backgroundColor: cardColors.upcoming_bills }]}>
-        <Text style={[styles.cardTitle, textColor && { color: textColor }]}>Upcoming bills ({upcomingBills.length})</Text>
+      <View
+        style={[
+          styles.card,
+          homeStyles.cardMargin,
+          cardColors.upcoming_bills && { backgroundColor: cardColors.upcoming_bills },
+        ]}
+      >
+        <Text style={[styles.cardTitle, textColor && { color: textColor }]}>
+          Upcoming bills ({upcomingBills.length})
+        </Text>
         {upcomingBills.map((bill) => {
           const institution = institutionForAccount(bill.account_id);
           return (
@@ -1126,7 +1192,13 @@ export default function Home() {
     if (plaidItems.length === 0) return null;
     const textColor = readableTextColor(cardColors.accounts, colors);
     return (
-      <View style={[styles.card, homeStyles.cardMargin, cardColors.accounts && { backgroundColor: cardColors.accounts }]}>
+      <View
+        style={[
+          styles.card,
+          homeStyles.cardMargin,
+          cardColors.accounts && { backgroundColor: cardColors.accounts },
+        ]}
+      >
         <Text style={[homeStyles.cardEyebrow, textColor && { color: textColor }]}>ACCOUNTS</Text>
         <View style={homeStyles.accountsList}>
           {plaidItems.map((i) => {
@@ -1142,7 +1214,10 @@ export default function Home() {
                 <View style={homeStyles.accountIconCircle}>
                   <MaterialIcons name="account-balance" size={18} color={colors.background} />
                 </View>
-                <Text style={[homeStyles.accountName, textColor && { color: textColor }]} numberOfLines={1}>
+                <Text
+                  style={[homeStyles.accountName, textColor && { color: textColor }]}
+                  numberOfLines={1}
+                >
                   {(i.institution_name || 'Linked bank').toUpperCase()}
                 </Text>
                 <Text style={[homeStyles.accountBalance, textColor && { color: textColor }]}>
@@ -1161,7 +1236,13 @@ export default function Home() {
     if (!netWorth?.current) return null;
     const textColor = readableTextColor(cardColors.net_worth, colors);
     return (
-      <View style={[styles.card, homeStyles.cardMargin, cardColors.net_worth && { backgroundColor: cardColors.net_worth }]}>
+      <View
+        style={[
+          styles.card,
+          homeStyles.cardMargin,
+          cardColors.net_worth && { backgroundColor: cardColors.net_worth },
+        ]}
+      >
         <View style={homeStyles.healthHeaderRow}>
           <Text style={[homeStyles.cardEyebrow, textColor && { color: textColor }]}>NET WORTH</Text>
           {netWorth.history.length > 0 && (
@@ -1185,8 +1266,8 @@ export default function Home() {
           })}
         </Text>
         <Text style={[styles.smallText, textColor && { color: textColor }]}>
-          ${formatDecimal(netWorth.current.assets)} assets — ${formatDecimal(netWorth.current.liabilities)}{' '}
-          liabilities
+          ${formatDecimal(netWorth.current.assets)} assets — $
+          {formatDecimal(netWorth.current.liabilities)} liabilities
         </Text>
 
         {showNetWorthHistory && <NetWorthChart history={netWorth.history} />}
@@ -1373,30 +1454,30 @@ export default function Home() {
         // the screen with a hard cut instead of fading into the flat
         // container background behind it.
         <TopEdgeFade height={90}>
-        <ScrollView
-          style={[styles.list, homeStyles.transparentScroll]}
-          contentContainerStyle={{ paddingBottom: 150 }}
-        >
-          {/* Greeting moved off the old fixed header block and into the
+          <ScrollView
+            style={[styles.list, homeStyles.transparentScroll]}
+            contentContainerStyle={{ paddingBottom: 150 }}
+          >
+            {/* Greeting moved off the old fixed header block and into the
               scroll content itself, per the earlier background rework -
               it scrolls away naturally with everything else instead of
               sitting pinned above a hard boundary. */}
-          <View style={homeStyles.greetingBlock}>
-            <Text style={homeStyles.greeting}>{greeting(session)}</Text>
-            <Text style={homeStyles.greetingSubtitle}>
-              Here's your financial snapshot for {monthName}.
-            </Text>
-          </View>
+            <View style={homeStyles.greetingBlock}>
+              <Text style={homeStyles.greeting}>{greeting(session)}</Text>
+              <Text style={homeStyles.greetingSubtitle}>
+                Here's your financial snapshot for {monthName}.
+              </Text>
+            </View>
 
-          {orderedCardsBeforeStats.map(renderHomeCard)}
+            {orderedCardsBeforeStats.map(renderHomeCard)}
 
-          {/* Stat tiles - each already backed by data computed above; a
+            {/* Stat tiles - each already backed by data computed above; a
               restyle/composition over existing numbers, no new math beyond
               simple sums/ratios (see homeSummary.js). Not one of Home
               Settings' manageable cards (Phase 38 Step 3) - always shown,
               always in this exact spot, same as before that step existed. */}
-          <View style={[styles.card, homeStyles.cardMargin, homeStyles.statRow]}>
-            {/* Direct user follow-up request: rather than navigating away
+            <View style={[styles.card, homeStyles.cardMargin, homeStyles.statRow]}>
+              {/* Direct user follow-up request: rather than navigating away
                 to the full Budget tab, open a lighter in-place summary -
                 every category's own spend/budget with a health-colored
                 progress bar, same severity rule Budget's own cards and
@@ -1405,111 +1486,115 @@ export default function Home() {
                 end - tapping a row inside SpentSoFarModal closes it and
                 deep-links into Budget's real category detail (the
                 categoryParam flow built for the Financial Health tiles). */}
-            <Pressable
-              style={homeStyles.statTile}
-              onPress={() => setShowSpentSoFarDetail(true)}
-              accessibilityRole="button"
-              accessibilityLabel="View spend by category"
-            >
-              <MaterialIcons name="account-balance-wallet" size={18} color={colors.dark} />
-              <Text style={homeStyles.statLabel}>SPENT SO FAR</Text>
-              <Text style={homeStyles.statValue}>${formatWhole(spendStats.spent)}</Text>
-              <Text style={homeStyles.statSub}>of ${formatWhole(spendStats.budgeted)}</Text>
-            </Pressable>
-            <View style={homeStyles.statDivider} />
-            {/* Income tile (2026-09-14, direct user request) - same data/
+              <Pressable
+                style={homeStyles.statTile}
+                onPress={() => setShowSpentSoFarDetail(true)}
+                accessibilityRole="button"
+                accessibilityLabel="View spend by category"
+              >
+                <MaterialIcons name="account-balance-wallet" size={18} color={colors.dark} />
+                <Text style={homeStyles.statLabel}>SPENT SO FAR</Text>
+                <Text style={homeStyles.statValue}>${formatWhole(spendStats.spent)}</Text>
+                <Text style={homeStyles.statSub}>of ${formatWhole(spendStats.budgeted)}</Text>
+              </Pressable>
+              <View style={homeStyles.statDivider} />
+              {/* Income tile (2026-09-14, direct user request) - same data/
                 shape as the Budget tab's own equivalent tile
                 (server/incomeSummary.js). */}
-            <Pressable
-              style={homeStyles.statTile}
-              onPress={() => setShowIncomeDetail(true)}
-              accessibilityRole="button"
-              accessibilityLabel="View what's counted as income"
-            >
-              <MaterialIcons name="payments" size={18} color={colors.dark} />
-              <Text style={homeStyles.statLabel}>INCOME</Text>
-              <Text style={homeStyles.statValue}>
-                {incomeSummary ? `$${formatWhole(incomeSummary.actual_income_this_period)}` : '—'}
-              </Text>
-              {incomeSummary && (
-                <Text style={homeStyles.statSub}>
-                  of ${formatWhole(incomeSummary.expected_monthly_income)} expected
-                </Text>
-              )}
-            </Pressable>
-            <View style={homeStyles.statDivider} />
-            <Pressable
-              style={homeStyles.statTile}
-              onPress={() => setShowProjectedSpendDetail(true)}
-              accessibilityRole="button"
-              accessibilityLabel="What is projected spend?"
-            >
-              <MaterialIcons name="show-chart" size={18} color={colors.dark} />
-              <Text style={homeStyles.statLabel}>PROJECTED SPEND</Text>
-              <Text style={homeStyles.statValue}>
-                {pace ? `$${formatWhole(pace.projected)}` : '—'}
-              </Text>
-              <Text
-                style={[
-                  homeStyles.statSub,
-                  pace && { color: pace.isAhead ? colors.positive : colors.error },
-                ]}
+              <Pressable
+                style={homeStyles.statTile}
+                onPress={() => setShowIncomeDetail(true)}
+                accessibilityRole="button"
+                accessibilityLabel="View what's counted as income"
               >
-                {pace
-                  ? `$${formatWhole(pace.aheadBy)} ${pace.isAhead ? 'under' : 'over'} budget`
-                  : 'not enough data'}
-              </Text>
-            </Pressable>
-            {/* Days Left tile removed 2026-09-15, direct user request
+                <MaterialIcons name="payments" size={18} color={colors.dark} />
+                <Text style={homeStyles.statLabel}>INCOME</Text>
+                <Text style={homeStyles.statValue}>
+                  {incomeSummary ? `$${formatWhole(incomeSummary.actual_income_this_period)}` : '—'}
+                </Text>
+                {incomeSummary && (
+                  <Text style={homeStyles.statSub}>
+                    of ${formatWhole(incomeSummary.expected_monthly_income)} expected
+                  </Text>
+                )}
+              </Pressable>
+              <View style={homeStyles.statDivider} />
+              <Pressable
+                style={homeStyles.statTile}
+                onPress={() => setShowProjectedSpendDetail(true)}
+                accessibilityRole="button"
+                accessibilityLabel="What is projected spend?"
+              >
+                <MaterialIcons name="show-chart" size={18} color={colors.dark} />
+                <Text style={homeStyles.statLabel}>PROJECTED SPEND</Text>
+                <Text style={homeStyles.statValue}>
+                  {pace ? `$${formatWhole(pace.projected)}` : '—'}
+                </Text>
+                <Text
+                  style={[
+                    homeStyles.statSub,
+                    pace && { color: pace.isAhead ? colors.positive : colors.error },
+                  ]}
+                >
+                  {pace
+                    ? `$${formatWhole(pace.aheadBy)} ${pace.isAhead ? 'under' : 'over'} budget`
+                    : 'not enough data'}
+                </Text>
+              </Pressable>
+              {/* Days Left tile removed 2026-09-15, direct user request
                 ("a bit redundant, not necessary") - also brings this
                 row back down to 4 tiles instead of 5, avoiding the
                 crowding that prompted this same request. */}
-            <View style={homeStyles.statDivider} />
-            {/* Same destination as the "Goal progress" card further down
+              <View style={homeStyles.statDivider} />
+              {/* Same destination as the "Goal progress" card further down
                 (already interactive) - consistent behavior for the same
                 underlying data shown twice on this screen. */}
-            <Pressable
-              style={homeStyles.statTile}
-              onPress={() => router.push('/goal')}
-              accessibilityRole="button"
-              accessibilityLabel="View Goal tab"
-            >
-              <MaterialIcons name="track-changes" size={18} color={colors.dark} />
-              <Text style={homeStyles.statLabel}>GOAL PROGRESS</Text>
-              {/* Phase 42: a single blended percent across differently-sized
+              <Pressable
+                style={homeStyles.statTile}
+                onPress={() => router.push('/goal')}
+                accessibilityRole="button"
+                accessibilityLabel="View Goal tab"
+              >
+                <MaterialIcons name="track-changes" size={18} color={colors.dark} />
+                <Text style={homeStyles.statLabel}>GOAL PROGRESS</Text>
+                {/* Phase 42: a single blended percent across differently-sized
                   goals would be a fabricated number - shown only when
                   there's exactly one real goal to summarize; the count
                   otherwise, never an averaged figure. */}
-              {(() => {
-                const goalsWithTarget = (goalsProgress || []).filter((g) => g.has_target);
-                if (goalsWithTarget.length === 1) {
+                {(() => {
+                  const goalsWithTarget = (goalsProgress || []).filter((g) => g.has_target);
+                  if (goalsWithTarget.length === 1) {
+                    return (
+                      <>
+                        <Text style={homeStyles.statValue}>
+                          {Math.round(goalsWithTarget[0].percent_complete)}%
+                        </Text>
+                        <Text style={homeStyles.statSub}>
+                          {formatGoalType(goalsWithTarget[0].goal_type)}
+                        </Text>
+                      </>
+                    );
+                  }
+                  if (goalsWithTarget.length > 1) {
+                    return (
+                      <>
+                        <Text style={homeStyles.statValue}>{goalsWithTarget.length}</Text>
+                        <Text style={homeStyles.statSub}>goals in progress</Text>
+                      </>
+                    );
+                  }
                   return (
                     <>
-                      <Text style={homeStyles.statValue}>{Math.round(goalsWithTarget[0].percent_complete)}%</Text>
-                      <Text style={homeStyles.statSub}>{formatGoalType(goalsWithTarget[0].goal_type)}</Text>
+                      <Text style={homeStyles.statValue}>—</Text>
+                      <Text style={homeStyles.statSub}>No goal yet</Text>
                     </>
                   );
-                }
-                if (goalsWithTarget.length > 1) {
-                  return (
-                    <>
-                      <Text style={homeStyles.statValue}>{goalsWithTarget.length}</Text>
-                      <Text style={homeStyles.statSub}>goals in progress</Text>
-                    </>
-                  );
-                }
-                return (
-                  <>
-                    <Text style={homeStyles.statValue}>—</Text>
-                    <Text style={homeStyles.statSub}>No goal yet</Text>
-                  </>
-                );
-              })()}
-            </Pressable>
-          </View>
+                })()}
+              </Pressable>
+            </View>
 
-          {orderedCardsAfterStats.map(renderHomeCard)}
-        </ScrollView>
+            {orderedCardsAfterStats.map(renderHomeCard)}
+          </ScrollView>
         </TopEdgeFade>
       )}
 
@@ -1578,446 +1663,446 @@ export default function Home() {
 // active theme changing.
 function buildHomeStyles(colors) {
   return StyleSheet.create({
-  // A small, always-visible, non-scrolling strip - kept minimal (just the
-  // wordmark + notification bell) so branding stays consistent across
-  // every Home state (loading/not-linked/loaded), while the greeting
-  // itself moves into the scroll content below (greetingBlock) rather
-  // than staying pinned here.
-  wordmarkStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 24,
-    paddingTop: 8,
-    paddingBottom: 8,
-  },
-  // Theme redesign: no longer needs to be transparent for any artwork
-  // layer to show through - kept as its own key since the outer
-  // container already carries the real theme background and this
-  // ScrollView should never paint its own separate opaque one over it.
-  transparentScroll: {
-    backgroundColor: 'transparent',
-  },
-  // First child of the Overview ScrollView - the greeting now scrolls
-  // away with everything else instead of sitting in a fixed header.
-  // paddingTop matches every other tab's own first-scroll-item value
-  // (2026-08-27, direct user feedback - all five tabs should start their
-  // content at the same height) - was 100 here specifically to clear the
-  // sun/glow's busiest art, now 110 like everywhere else, which still
-  // comfortably clears it.
-  greetingBlock: {
-    paddingHorizontal: 24,
-    paddingTop: 110,
-    paddingBottom: 24,
-    gap: 4,
-  },
-  greeting: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  greetingSubtitle: {
-    fontSize: 13,
-    color: colors.dark,
-  },
-  cardMargin: {
-    marginHorizontal: 16,
-    marginBottom: 12,
-  },
-  cardEyebrow: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    color: colors.dark,
-  },
-  healthHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  healthPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 12,
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-  },
-  healthPillText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.background,
-  },
-  healthReason: {
-    fontSize: 13,
-    color: colors.muted,
-    marginTop: 6,
-  },
-  changeRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    marginTop: 10,
-  },
-  changeText: {
-    flex: 1,
-    fontSize: 13,
-    color: colors.dark,
-    lineHeight: 18,
-  },
-  changeMore: {
-    fontSize: 12,
-    color: colors.muted,
-    marginTop: 8,
-    marginLeft: 26,
-  },
-  categoryRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    marginTop: 8,
-  },
-  categoryTile: {
-    alignItems: 'center',
-    width: '16%',
-    minWidth: 52,
-    gap: 4,
-  },
-  categoryIconCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  categoryLabel: {
-    fontSize: 10,
-    color: colors.dark,
-    textAlign: 'center',
-  },
-  neutralDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.sage,
-  },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.sage,
-    marginVertical: 8,
-  },
-  monthLabelsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  smallLabel: {
-    fontSize: 11,
-    color: colors.muted,
-  },
-  // Phase 42: spacing between per-goal blocks on the multi-goal summary
-  // card - only applied from the second row on, so the first goal sits
-  // flush under the card title like every other card's own first row.
-  goalProgressRow: {
-    marginTop: 12,
-  },
-  progressTrack: {
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.sage,
-    marginTop: 6,
-    marginBottom: 8,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.darkest,
-  },
-  progressCaption: {
-    fontSize: 13,
-    color: colors.darkest,
-    fontWeight: '600',
-  },
-  advisorCard: {
-    gap: 6,
-  },
-  advisorHeadline: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  advisorMoreInfo: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  insightCard: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-  },
-  insightIconCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  insightBody: {
-    flex: 1,
-    gap: 4,
-  },
-  insightText: {
-    fontSize: 15,
-    color: colors.darkest,
-  },
-  insightTapHint: {
-    fontSize: 12,
-    color: colors.muted,
-  },
-  statRow: {
-    flexDirection: 'row',
-  },
-  statTile: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 2,
-  },
-  statDivider: {
-    width: StyleSheet.hairlineWidth,
-    backgroundColor: colors.sage,
-    marginHorizontal: 4,
-  },
-  statLabel: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: colors.muted,
-    letterSpacing: 0.3,
-    marginTop: 2,
-    textAlign: 'center',
-  },
-  statValue: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  statSub: {
-    fontSize: 10,
-    color: colors.dark,
-    textAlign: 'center',
-  },
-  accountsList: {
-    gap: 8,
-    marginTop: 8,
-  },
-  accountRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: colors.background,
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-  },
-  accountIconCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.darkest,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  accountName: {
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-  accountBalance: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.darkest,
-    marginRight: 2,
-  },
-  historyChip: {
-    backgroundColor: colors.background,
-    borderRadius: 8,
-    paddingVertical: 5,
-    paddingHorizontal: 10,
-  },
-  historyChipText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.primary,
-  },
-  netWorthValue: {
-    fontSize: 26,
-    fontWeight: '700',
-    color: colors.darkest,
-    marginTop: 4,
-  },
-  // Per-institution drill-down screen (redesigned 2026-08-24).
-  bankTopBar: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: colors.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bankHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 16,
-  },
-  bankHeaderText: {
-    flex: 1,
-    gap: 4,
-  },
-  bankName: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.primary,
-    marginBottom: 6,
-  },
-  bankTotal: {
-    fontSize: 26,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  bankTotalSuffix: {
-    fontSize: 15,
-    fontWeight: '400',
-    color: colors.dark,
-  },
-  bankLogo: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.background,
-  },
-  bankLogoFallback: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.darkest,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  txSectionHeader: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: 14,
-    borderTopRightRadius: 14,
-    marginHorizontal: 16,
-    marginTop: 12,
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 6,
-  },
-  txRow: {
-    backgroundColor: colors.card,
-    marginHorizontal: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  txRowLast: {
-    borderBottomLeftRadius: 14,
-    borderBottomRightRadius: 14,
-    paddingBottom: 14,
-  },
-  txTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  txIconCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  txMain: {
-    flex: 1,
-  },
-  txMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 2,
-  },
-  txDate: {
-    fontSize: 11,
-    color: colors.muted,
-  },
-  txRecurringTag: {
-    marginTop: 0,
-    marginLeft: 8,
-  },
-  editCategoryButton: {
-    width: 28,
-    height: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  reviewSpacing: {
-    marginTop: 8,
-  },
-  categoryChipsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
-  categoryChip: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.sage,
-    backgroundColor: colors.background,
-    borderRadius: 16,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-  },
-  categoryChipText: {
-    fontSize: 12,
-    color: colors.darkest,
-  },
-  cancelChip: {
-    backgroundColor: colors.background,
-    borderRadius: 16,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-  },
-  cancelChipText: {
-    fontSize: 12,
-    color: colors.muted,
-    fontWeight: '600',
-  },
-  reviewTextRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-  },
-  reviewIconCircle: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 1,
-  },
-  reviewText: {
-    flex: 1,
-    fontSize: 13,
-    color: colors.dark,
-    lineHeight: 18,
-  },
+    // A small, always-visible, non-scrolling strip - kept minimal (just the
+    // wordmark + notification bell) so branding stays consistent across
+    // every Home state (loading/not-linked/loaded), while the greeting
+    // itself moves into the scroll content below (greetingBlock) rather
+    // than staying pinned here.
+    wordmarkStrip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 24,
+      paddingTop: 8,
+      paddingBottom: 8,
+    },
+    // Theme redesign: no longer needs to be transparent for any artwork
+    // layer to show through - kept as its own key since the outer
+    // container already carries the real theme background and this
+    // ScrollView should never paint its own separate opaque one over it.
+    transparentScroll: {
+      backgroundColor: 'transparent',
+    },
+    // First child of the Overview ScrollView - the greeting now scrolls
+    // away with everything else instead of sitting in a fixed header.
+    // paddingTop matches every other tab's own first-scroll-item value
+    // (2026-08-27, direct user feedback - all five tabs should start their
+    // content at the same height) - was 100 here specifically to clear the
+    // sun/glow's busiest art, now 110 like everywhere else, which still
+    // comfortably clears it.
+    greetingBlock: {
+      paddingHorizontal: 24,
+      paddingTop: 110,
+      paddingBottom: 24,
+      gap: 4,
+    },
+    greeting: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    greetingSubtitle: {
+      fontSize: 13,
+      color: colors.dark,
+    },
+    cardMargin: {
+      marginHorizontal: 16,
+      marginBottom: 12,
+    },
+    cardEyebrow: {
+      fontSize: 11,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+      color: colors.dark,
+    },
+    healthHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    healthPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderRadius: 12,
+      paddingVertical: 4,
+      paddingHorizontal: 10,
+    },
+    healthPillText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: colors.background,
+    },
+    healthReason: {
+      fontSize: 13,
+      color: colors.muted,
+      marginTop: 6,
+    },
+    changeRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 8,
+      marginTop: 10,
+    },
+    changeText: {
+      flex: 1,
+      fontSize: 13,
+      color: colors.dark,
+      lineHeight: 18,
+    },
+    changeMore: {
+      fontSize: 12,
+      color: colors.muted,
+      marginTop: 8,
+      marginLeft: 26,
+    },
+    categoryRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'space-between',
+      marginTop: 8,
+    },
+    categoryTile: {
+      alignItems: 'center',
+      width: '16%',
+      minWidth: 52,
+      gap: 4,
+    },
+    categoryIconCircle: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    categoryLabel: {
+      fontSize: 10,
+      color: colors.dark,
+      textAlign: 'center',
+    },
+    neutralDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: colors.sage,
+    },
+    divider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: colors.sage,
+      marginVertical: 8,
+    },
+    monthLabelsRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+    },
+    smallLabel: {
+      fontSize: 11,
+      color: colors.muted,
+    },
+    // Phase 42: spacing between per-goal blocks on the multi-goal summary
+    // card - only applied from the second row on, so the first goal sits
+    // flush under the card title like every other card's own first row.
+    goalProgressRow: {
+      marginTop: 12,
+    },
+    progressTrack: {
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: colors.sage,
+      marginTop: 6,
+      marginBottom: 8,
+      overflow: 'hidden',
+    },
+    progressFill: {
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: colors.darkest,
+    },
+    progressCaption: {
+      fontSize: 13,
+      color: colors.darkest,
+      fontWeight: '600',
+    },
+    advisorCard: {
+      gap: 6,
+    },
+    advisorHeadline: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    advisorMoreInfo: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.primary,
+    },
+    insightCard: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+    },
+    insightIconCircle: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    insightBody: {
+      flex: 1,
+      gap: 4,
+    },
+    insightText: {
+      fontSize: 15,
+      color: colors.darkest,
+    },
+    insightTapHint: {
+      fontSize: 12,
+      color: colors.muted,
+    },
+    statRow: {
+      flexDirection: 'row',
+    },
+    statTile: {
+      flex: 1,
+      alignItems: 'center',
+      gap: 2,
+    },
+    statDivider: {
+      width: StyleSheet.hairlineWidth,
+      backgroundColor: colors.sage,
+      marginHorizontal: 4,
+    },
+    statLabel: {
+      fontSize: 9,
+      fontWeight: '700',
+      color: colors.muted,
+      letterSpacing: 0.3,
+      marginTop: 2,
+      textAlign: 'center',
+    },
+    statValue: {
+      fontSize: 17,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    statSub: {
+      fontSize: 10,
+      color: colors.dark,
+      textAlign: 'center',
+    },
+    accountsList: {
+      gap: 8,
+      marginTop: 8,
+    },
+    accountRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      backgroundColor: colors.background,
+      borderRadius: 10,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+    },
+    accountIconCircle: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: colors.darkest,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    accountName: {
+      flex: 1,
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+    accountBalance: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.darkest,
+      marginRight: 2,
+    },
+    historyChip: {
+      backgroundColor: colors.background,
+      borderRadius: 8,
+      paddingVertical: 5,
+      paddingHorizontal: 10,
+    },
+    historyChipText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: colors.primary,
+    },
+    netWorthValue: {
+      fontSize: 26,
+      fontWeight: '700',
+      color: colors.darkest,
+      marginTop: 4,
+    },
+    // Per-institution drill-down screen (redesigned 2026-08-24).
+    bankTopBar: {
+      paddingHorizontal: 16,
+      paddingTop: 8,
+    },
+    backButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 10,
+      backgroundColor: colors.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    bankHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingTop: 12,
+      paddingBottom: 16,
+    },
+    bankHeaderText: {
+      flex: 1,
+      gap: 4,
+    },
+    bankName: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: colors.primary,
+      marginBottom: 6,
+    },
+    bankTotal: {
+      fontSize: 26,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    bankTotalSuffix: {
+      fontSize: 15,
+      fontWeight: '400',
+      color: colors.dark,
+    },
+    bankLogo: {
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: colors.background,
+    },
+    bankLogoFallback: {
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: colors.darkest,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    txSectionHeader: {
+      backgroundColor: colors.card,
+      borderTopLeftRadius: 14,
+      borderTopRightRadius: 14,
+      marginHorizontal: 16,
+      marginTop: 12,
+      paddingHorizontal: 16,
+      paddingTop: 12,
+      paddingBottom: 6,
+    },
+    txRow: {
+      backgroundColor: colors.card,
+      marginHorizontal: 16,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+    },
+    txRowLast: {
+      borderBottomLeftRadius: 14,
+      borderBottomRightRadius: 14,
+      paddingBottom: 14,
+    },
+    txTopRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    txIconCircle: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    txMain: {
+      flex: 1,
+    },
+    txMetaRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 2,
+    },
+    txDate: {
+      fontSize: 11,
+      color: colors.muted,
+    },
+    txRecurringTag: {
+      marginTop: 0,
+      marginLeft: 8,
+    },
+    editCategoryButton: {
+      width: 28,
+      height: 28,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    reviewSpacing: {
+      marginTop: 8,
+    },
+    categoryChipsRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+    },
+    categoryChip: {
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.sage,
+      backgroundColor: colors.background,
+      borderRadius: 16,
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+    },
+    categoryChipText: {
+      fontSize: 12,
+      color: colors.darkest,
+    },
+    cancelChip: {
+      backgroundColor: colors.background,
+      borderRadius: 16,
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+    },
+    cancelChipText: {
+      fontSize: 12,
+      color: colors.muted,
+      fontWeight: '600',
+    },
+    reviewTextRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 8,
+    },
+    reviewIconCircle: {
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 1,
+    },
+    reviewText: {
+      flex: 1,
+      fontSize: 13,
+      color: colors.dark,
+      lineHeight: 18,
+    },
   });
 }

@@ -60,8 +60,10 @@ function computeDiscretionaryCapacity({
       // silently inflates capacity beyond what income minus real spend
       // actually supports.
       const avg = Math.max(0, averages[c] || 0);
-      const essentialAmount = c === 'Bills & Utilities' ? Math.max(avg, knownRecurringBillsTotal) : avg;
-      minSpendByCategory[c] = ESSENTIAL_CATEGORIES.includes(c) || c === 'Other' ? essentialAmount : avg * floorRatio;
+      const essentialAmount =
+        c === 'Bills & Utilities' ? Math.max(avg, knownRecurringBillsTotal) : avg;
+      minSpendByCategory[c] =
+        ESSENTIAL_CATEGORIES.includes(c) || c === 'Other' ? essentialAmount : avg * floorRatio;
     }
   }
   const totalMinSpend = Object.values(minSpendByCategory).reduce((sum, v) => sum + v, 0);
@@ -75,7 +77,11 @@ function computeDiscretionaryCapacity({
   // spendable room.
   const rawCapacity = round2(averageMonthlyIncome - totalMinSpend);
   const capacity = Math.max(0, rawCapacity);
-  return { capacity, raw_capacity: rawCapacity, min_spend_by_category: minSpendByCategory };
+  return {
+    capacity,
+    raw_capacity: rawCapacity,
+    min_spend_by_category: minSpendByCategory,
+  };
 }
 
 // Pure. The actual dollar total discretionary categories are allowed to
@@ -142,14 +148,21 @@ async function getDiscretionaryCapacity(userId, { simulateEdit } = {}) {
     .eq('is_user_set', true);
   if (userSetError) throw userSetError;
 
-  const userSetByCategory = Object.fromEntries((userSetRows || []).map((r) => [r.category, r.budgeted_amount]));
+  const userSetByCategory = Object.fromEntries(
+    (userSetRows || []).map((r) => [r.category, r.budgeted_amount])
+  );
   if (simulateEdit) {
     userSetByCategory[simulateEdit.category] = simulateEdit.budgeted_amount;
   }
 
   const knownRecurringBillsTotal = await getKnownRecurringBillsTotal(userId);
 
-  return computeDiscretionaryCapacity({ averages, averageMonthlyIncome, userSetByCategory, knownRecurringBillsTotal });
+  return computeDiscretionaryCapacity({
+    averages,
+    averageMonthlyIncome,
+    userSetByCategory,
+    knownRecurringBillsTotal,
+  });
 }
 
 // Pure. `goals` pre-filtered by the caller to has_target &&
@@ -177,7 +190,12 @@ function allocateGoalFunding({ goals, capacity, now = new Date() }) {
     let noCapacityAvailable = false;
     if (!isRealistic) {
       if (funded > 0) {
-        realisticDate = projectFinishDate({ saved: goal.saved_amount, target: goal.target_amount, monthlyPace: funded, now });
+        realisticDate = projectFinishDate({
+          saved: goal.saved_amount,
+          target: goal.target_amount,
+          monthlyPace: funded,
+          now,
+        });
       } else {
         // Never fabricate a date at $0/mo - projectFinishDate already
         // returns null for a non-positive pace, this just names the case
@@ -223,7 +241,10 @@ async function getGoalFundingPlan(userId, { simulateEdit } = {}) {
   ]);
 
   const deadlineHavingGoals = allGoals.filter((g) => g.has_target && g.target_timeframe_months);
-  const ordered = orderGoalsByPriority(deadlineHavingGoals, settings.goal_settings?.goal_priority_order);
+  const ordered = orderGoalsByPriority(
+    deadlineHavingGoals,
+    settings.goal_settings?.goal_priority_order
+  );
 
   return { ...allocateGoalFunding({ goals: ordered, capacity }), raw_capacity };
 }
@@ -236,7 +257,9 @@ async function getGoalFundingPlan(userId, { simulateEdit } = {}) {
 async function computeBudgetEditFundingImpact(userId, category, newAmount) {
   const [before, after] = await Promise.all([
     getGoalFundingPlan(userId),
-    getGoalFundingPlan(userId, { simulateEdit: { category, budgeted_amount: newAmount } }),
+    getGoalFundingPlan(userId, {
+      simulateEdit: { category, budgeted_amount: newAmount },
+    }),
   ]);
 
   if (before.allocations.length === 0) return null;
@@ -258,7 +281,12 @@ async function computeBudgetEditFundingImpact(userId, category, newAmount) {
     };
   });
 
-  return { capacity_before: before.capacity, capacity_after: after.capacity, capacity_delta: capacityDelta, goals };
+  return {
+    capacity_before: before.capacity,
+    capacity_after: after.capacity,
+    capacity_delta: capacityDelta,
+    goals,
+  };
 }
 
 module.exports = {

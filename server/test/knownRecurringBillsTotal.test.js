@@ -15,7 +15,13 @@ const { applyKnownBillsFloor } = require('../budget');
 // close that gap: computeKnownRecurringBillsTotal (the real sum) and
 // applyKnownBillsFloor (enforcing it on a generated budget row).
 
-function bill({ id = 'series-1', category = 'Bills & Utilities', amount = 100, interval = 'monthly', date = '2026-09-20' } = {}) {
+function bill({
+  id = 'series-1',
+  category = 'Bills & Utilities',
+  amount = 100,
+  interval = 'monthly',
+  date = '2026-09-20',
+} = {}) {
   return {
     id,
     merchant_key: `${id}:0`,
@@ -59,7 +65,10 @@ test('computeKnownRecurringBillsTotal: excludes a lapsed (likely-cancelled) bill
 });
 
 test('computeKnownRecurringBillsTotal: no Bills & Utilities series returns 0', () => {
-  const total = computeKnownRecurringBillsTotal([bill({ category: 'Dining' })], new Date('2026-09-15'));
+  const total = computeKnownRecurringBillsTotal(
+    [bill({ category: 'Dining' })],
+    new Date('2026-09-15')
+  );
   assert.equal(total, 0);
 });
 

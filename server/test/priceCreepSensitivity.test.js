@@ -25,7 +25,7 @@ test('priceCreepRatioForSensitivity: unset/unrecognized falls back to the pre-ex
 // the two more-sensitive settings and silently ignored at the least-
 // sensitive one. Proves the setting actually changes real detection
 // behavior, not just that a parameter is threaded through unused.
-function seriesWithCreep({ id = 'series-1', earliest = 20, latest = 21.6 } = {}) {
+function seriesWithCreep({ id = 'series-1', latest = 21.6 } = {}) {
   return {
     id,
     merchant_key: `${id}:0`,

@@ -88,16 +88,15 @@ export default function TransactionRulesSettings() {
           contentContainerStyle={transactionRulesStyles.body}
         >
           <Text style={[styles.smallText, transactionRulesStyles.description]}>
-            Every merchant you've manually corrected the category for - future purchases
-            from these merchants use these categories automatically. Editing or removing a
-            rule here also updates your already-synced transactions from that merchant
-            (unless you corrected one of them separately on purpose).
+            Every merchant you've manually corrected the category for - future purchases from these
+            merchants use these categories automatically. Editing or removing a rule here also
+            updates your already-synced transactions from that merchant (unless you corrected one of
+            them separately on purpose).
           </Text>
           {error && <Text style={styles.errorText}>{error}</Text>}
           {rules && rules.length === 0 ? (
             <Text style={[styles.smallText, transactionRulesStyles.description]}>
-              No rules yet - correct a transaction's category from the Home tab to create
-              one.
+              No rules yet - correct a transaction's category from the Home tab to create one.
             </Text>
           ) : (
             (rules || []).map((rule, index) => (
@@ -158,47 +157,47 @@ export default function TransactionRulesSettings() {
 // via useMemo inside the component (keyed on colors).
 function buildTransactionRulesStyles(colors) {
   return StyleSheet.create({
-  bodyScroll: {
-    flex: 1,
-  },
-  body: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 32,
-    gap: 8,
-  },
-  description: {
-    textAlign: 'left',
-    marginBottom: 4,
-  },
-  ruleCard: {
-    gap: 8,
-  },
-  ruleCardMargin: {
-    marginTop: 10,
-  },
-  ruleHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  ruleName: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-  picker: {
-    marginTop: 0,
-  },
-  pickerControl: {
-    color: colors.darkest,
-    backgroundColor: colors.background,
-  },
-  pickerItem: {
-    color: colors.darkest,
-    backgroundColor: colors.background,
-  },
+    bodyScroll: {
+      flex: 1,
+    },
+    body: {
+      paddingHorizontal: 16,
+      paddingTop: 8,
+      paddingBottom: 32,
+      gap: 8,
+    },
+    description: {
+      textAlign: 'left',
+      marginBottom: 4,
+    },
+    ruleCard: {
+      gap: 8,
+    },
+    ruleCardMargin: {
+      marginTop: 10,
+    },
+    ruleHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+    },
+    ruleName: {
+      flex: 1,
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+    picker: {
+      marginTop: 0,
+    },
+    pickerControl: {
+      color: colors.darkest,
+      backgroundColor: colors.background,
+    },
+    pickerItem: {
+      color: colors.darkest,
+      backgroundColor: colors.background,
+    },
   });
 }

@@ -108,7 +108,10 @@ function computeTopCategory(audit) {
   for (const [category, total] of totals) {
     if (!top || total > top.total) top = { category, total };
   }
-  const percent = audit.total_monthly_equivalent > 0 ? Math.round((top.total / audit.total_monthly_equivalent) * 100) : 0;
+  const percent =
+    audit.total_monthly_equivalent > 0
+      ? Math.round((top.total / audit.total_monthly_equivalent) * 100)
+      : 0;
   return { ...top, percent };
 }
 
@@ -159,7 +162,7 @@ const INTERVAL_FILTERS = [
 // threading colors/recurringStyles down through props at every one of
 // their several call sites.
 function GlanceTile({ icon, label, value, sub, isLast, onPress, accessibilityLabel }) {
-  const { colors, isNight } = useTheme();
+  const { colors } = useTheme();
   const recurringStyles = useMemo(() => buildRecurringStyles(colors), [colors]);
   return (
     <Pressable
@@ -189,7 +192,8 @@ function RecurringRow({ entry }) {
       <View style={recurringStyles.entryBody}>
         <Text style={recurringStyles.entryName}>{entry.display_name}</Text>
         <Text style={styles.smallText}>
-          ${formatDecimal(entry.typical_amount)} / {entry.interval} (${formatDecimal(entry.monthly_equivalent_amount)}/mo)
+          ${formatDecimal(entry.typical_amount)} / {entry.interval} ($
+          {formatDecimal(entry.monthly_equivalent_amount)}/mo)
         </Text>
       </View>
       <Text style={recurringStyles.entryNext}>Next: {formatDateMDY(entry.next_expected_date)}</Text>
@@ -220,10 +224,18 @@ function GroupCard({ group, query, intervalFilter, expanded, onToggle }) {
         </View>
         <View style={recurringStyles.groupHeaderText}>
           <Text style={recurringStyles.groupLabel}>{group.label}</Text>
-          <Text style={styles.smallText}>{filtered.length} charge{filtered.length === 1 ? '' : 's'}</Text>
+          <Text style={styles.smallText}>
+            {filtered.length} charge{filtered.length === 1 ? '' : 's'}
+          </Text>
         </View>
-        <Text style={recurringStyles.groupTotal}>${formatDecimal(groupTotal(filtered))} / month</Text>
-        <MaterialIcons name={expanded ? 'expand-less' : 'expand-more'} size={22} color={colors.dark} />
+        <Text style={recurringStyles.groupTotal}>
+          ${formatDecimal(groupTotal(filtered))} / month
+        </Text>
+        <MaterialIcons
+          name={expanded ? 'expand-less' : 'expand-more'}
+          size={22}
+          color={colors.dark}
+        />
       </Pressable>
       {expanded && (
         <View style={recurringStyles.groupBody}>
@@ -292,9 +304,14 @@ export default function Recurring() {
     [groups, query, intervalFilter]
   );
   const topCategory = useMemo(() => computeTopCategory(subscriptionAudit), [subscriptionAudit]);
-  const delta = useMemo(() => formatDelta(subscriptionAudit?.month_comparison), [subscriptionAudit]);
+  const delta = useMemo(
+    () => formatDelta(subscriptionAudit?.month_comparison),
+    [subscriptionAudit]
+  );
   const totalCount = subscriptionAudit
-    ? subscriptionAudit.subscriptions.length + subscriptionAudit.recurring_bills.length + subscriptionAudit.other_recurring.length
+    ? subscriptionAudit.subscriptions.length +
+      subscriptionAudit.recurring_bills.length +
+      subscriptionAudit.other_recurring.length
     : 0;
 
   // Measured on layout, used only to scroll the glance tiles to the
@@ -324,7 +341,9 @@ export default function Recurring() {
     scrollRef.current?.scrollTo({ y: savingsY.current, animated: true });
   }
 
-  const findings = subscriptionAudit ? [...subscriptionAudit.gradual_increases, ...subscriptionAudit.price_jumps] : [];
+  const findings = subscriptionAudit
+    ? [...subscriptionAudit.gradual_increases, ...subscriptionAudit.price_jumps]
+    : [];
 
   return (
     // Theme redesign: styles.container already carries a theme-reactive
@@ -344,207 +363,226 @@ export default function Recurring() {
       </View>
 
       <TopEdgeFade height={90}>
-      <ScrollView
-        ref={scrollRef}
-        style={[styles.list, recurringStyles.transparentScroll]}
-        contentContainerStyle={{ paddingBottom: 150 }}
-      >
-        <View style={recurringStyles.titleBlock}>
-          <View style={recurringStyles.titleRow}>
-            <Text style={recurringStyles.title}>Recurring</Text>
-            {/* Direct user request, 2026-09-03: "there should be an option
+        <ScrollView
+          ref={scrollRef}
+          style={[styles.list, recurringStyles.transparentScroll]}
+          contentContainerStyle={{ paddingBottom: 150 }}
+        >
+          <View style={recurringStyles.titleBlock}>
+            <View style={recurringStyles.titleRow}>
+              <Text style={recurringStyles.title}>Recurring</Text>
+              {/* Direct user request, 2026-09-03: "there should be an option
                 to edit recurring charges, or maybe add or remove recurring
                 charges" - a real mortgage payment that Plaid/Claude
                 couldn't confidently categorize had no way to be corrected
                 as a bill, or added at all if detection ever misses one. */}
-            <Pressable
-              style={recurringStyles.manageLink}
-              onPress={() => router.push('/recurring-manage')}
-              accessibilityRole="button"
-              accessibilityLabel="Manage recurring charges"
-            >
-              <MaterialIcons name="tune" size={16} color={colors.primary} />
-              <Text style={recurringStyles.manageLinkText}>Manage</Text>
-            </Pressable>
+              <Pressable
+                style={recurringStyles.manageLink}
+                onPress={() => router.push('/recurring-manage')}
+                accessibilityRole="button"
+                accessibilityLabel="Manage recurring charges"
+              >
+                <MaterialIcons name="tune" size={16} color={colors.primary} />
+                <Text style={recurringStyles.manageLinkText}>Manage</Text>
+              </Pressable>
+            </View>
+            <Text style={recurringStyles.subtitle}>
+              See all your recurring charges, upcoming payments, and opportunities to save.
+            </Text>
           </View>
-          <Text style={recurringStyles.subtitle}>
-            See all your recurring charges, upcoming payments, and opportunities to save.
-          </Text>
-        </View>
 
-        {!subscriptionAudit ? (
-          <Text style={[styles.smallText, recurringStyles.cardMargin]}>Loading recurring charges…</Text>
-        ) : totalCount === 0 ? (
-          <Text style={[styles.smallText, recurringStyles.cardMargin]}>No recurring charges detected yet.</Text>
-        ) : (
-          <>
-            <View style={[styles.card, recurringStyles.cardMargin, recurringStyles.summaryRow]}>
-              <View style={recurringStyles.summaryHalf}>
-                <Text style={recurringStyles.cardEyebrow}>ESTIMATED MONTHLY TOTAL</Text>
-                <Text style={recurringStyles.summaryTotal}>
-                  ${formatDecimal(subscriptionAudit.total_monthly_equivalent)}
-                  <Text style={recurringStyles.summaryTotalUnit}> / month</Text>
-                </Text>
-                <Text style={styles.smallText}>
-                  across {totalCount} recurring charge{totalCount === 1 ? '' : 's'}
-                </Text>
+          {!subscriptionAudit ? (
+            <Text style={[styles.smallText, recurringStyles.cardMargin]}>
+              Loading recurring charges…
+            </Text>
+          ) : totalCount === 0 ? (
+            <Text style={[styles.smallText, recurringStyles.cardMargin]}>
+              No recurring charges detected yet.
+            </Text>
+          ) : (
+            <>
+              <View style={[styles.card, recurringStyles.cardMargin, recurringStyles.summaryRow]}>
+                <View style={recurringStyles.summaryHalf}>
+                  <Text style={recurringStyles.cardEyebrow}>ESTIMATED MONTHLY TOTAL</Text>
+                  <Text style={recurringStyles.summaryTotal}>
+                    ${formatDecimal(subscriptionAudit.total_monthly_equivalent)}
+                    <Text style={recurringStyles.summaryTotalUnit}> / month</Text>
+                  </Text>
+                  <Text style={styles.smallText}>
+                    across {totalCount} recurring charge{totalCount === 1 ? '' : 's'}
+                  </Text>
+                </View>
+                {topCategory && (
+                  <View style={[recurringStyles.summaryHalf, recurringStyles.summaryDivider]}>
+                    <Text style={recurringStyles.cardEyebrow}>TOP CATEGORY</Text>
+                    <View style={recurringStyles.topCategoryRow}>
+                      <View style={recurringStyles.groupIconCircle}>
+                        <MaterialIcons
+                          name={iconForCategory(topCategory.category)}
+                          size={18}
+                          color={colors.dark}
+                        />
+                      </View>
+                      <View>
+                        <Text style={recurringStyles.groupLabel}>{topCategory.category}</Text>
+                        <Text style={styles.smallText}>
+                          ${formatDecimal(topCategory.total)} ({topCategory.percent}%)
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                )}
               </View>
-              {topCategory && (
-                <View style={[recurringStyles.summaryHalf, recurringStyles.summaryDivider]}>
-                  <Text style={recurringStyles.cardEyebrow}>TOP CATEGORY</Text>
-                  <View style={recurringStyles.topCategoryRow}>
-                    <View style={recurringStyles.groupIconCircle}>
-                      <MaterialIcons name={iconForCategory(topCategory.category)} size={18} color={colors.dark} />
-                    </View>
-                    <View>
-                      <Text style={recurringStyles.groupLabel}>{topCategory.category}</Text>
-                      <Text style={styles.smallText}>
-                        ${formatDecimal(topCategory.total)} ({topCategory.percent}%)
+
+              <View style={[styles.card, recurringStyles.cardMargin]}>
+                <Text style={recurringStyles.cardEyebrow}>THIS MONTH AT A GLANCE</Text>
+                <View style={recurringStyles.glanceRow}>
+                  <GlanceTile
+                    icon="event"
+                    label="UPCOMING"
+                    value={subscriptionAudit.glance.upcoming_count}
+                    sub="Payments"
+                    onPress={scrollToGroups}
+                    accessibilityLabel="Upcoming payments - view all recurring charges"
+                  />
+                  <GlanceTile
+                    icon="attach-money"
+                    label="DUE SOON"
+                    value={`$${formatDecimal(subscriptionAudit.glance.due_soon_total)}`}
+                    sub={`in next ${subscriptionAudit.glance.due_soon_days} days`}
+                    onPress={scrollToGroups}
+                    accessibilityLabel="Due soon - view all recurring charges"
+                  />
+                  <GlanceTile
+                    icon="trending-up"
+                    label="VS LAST MONTH"
+                    value={delta ? delta.text : 'N/A'}
+                    sub={delta ? delta.direction : 'not enough history'}
+                    onPress={scrollToSavings}
+                    accessibilityLabel="Vs last month - view savings details"
+                  />
+                  <GlanceTile
+                    icon="local-offer"
+                    label="POTENTIAL SAVINGS"
+                    value={`$${formatDecimal(subscriptionAudit.glance.potential_savings_total)}`}
+                    sub="/ month"
+                    isLast
+                    onPress={scrollToSavings}
+                    accessibilityLabel="Potential savings - view savings details"
+                  />
+                </View>
+              </View>
+
+              <View style={[recurringStyles.searchRow, recurringStyles.cardMargin]}>
+                <View style={recurringStyles.searchBox}>
+                  <MaterialIcons name="search" size={18} color={colors.muted} />
+                  <TextInput
+                    style={recurringStyles.searchInput}
+                    value={query}
+                    onChangeText={setQuery}
+                    placeholder="Search recurring charges"
+                    placeholderTextColor={colors.placeholder}
+                  />
+                </View>
+                <Pressable
+                  style={recurringStyles.filtersButton}
+                  onPress={() => setShowFilters((v) => !v)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Filters"
+                >
+                  <MaterialIcons name="tune" size={16} color={colors.dark} />
+                  <Text style={recurringStyles.filtersButtonText}>FILTERS</Text>
+                </Pressable>
+              </View>
+
+              {showFilters && (
+                <View style={[recurringStyles.filterPillRow, recurringStyles.cardMargin]}>
+                  {INTERVAL_FILTERS.map((f) => (
+                    <Pressable
+                      key={f.key}
+                      onPress={() => setIntervalFilter(f.key)}
+                      style={[
+                        recurringStyles.filterPill,
+                        intervalFilter === f.key && recurringStyles.filterPillActive,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          recurringStyles.filterPillText,
+                          intervalFilter === f.key && recurringStyles.filterPillTextActive,
+                        ]}
+                      >
+                        {f.label}
                       </Text>
-                    </View>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+
+              <View
+                onLayout={(e) => {
+                  groupsY.current = e.nativeEvent.layout.y;
+                }}
+              >
+                {hasAnyMatch ? (
+                  groups.map((g) => (
+                    <GroupCard
+                      key={g.key}
+                      group={g}
+                      query={query}
+                      intervalFilter={intervalFilter}
+                      expanded={!!expandedGroups[g.key]}
+                      onToggle={() => toggleGroup(g.key)}
+                    />
+                  ))
+                ) : (
+                  <Text style={[styles.smallText, recurringStyles.cardMargin]}>
+                    No recurring charges match your search or filter.
+                  </Text>
+                )}
+              </View>
+
+              {subscriptionAudit.glance.potential_savings_total > 0 && (
+                <View
+                  onLayout={(e) => {
+                    savingsY.current = e.nativeEvent.layout.y;
+                  }}
+                  style={[styles.card, recurringStyles.cardMargin, recurringStyles.savingsCard]}
+                >
+                  <View style={recurringStyles.insightIconCircle}>
+                    <MaterialIcons name="eco" size={18} color={colors.dark} />
+                  </View>
+                  <View style={recurringStyles.savingsBody}>
+                    <Text style={recurringStyles.groupLabel}>
+                      You could save $
+                      {formatDecimal(subscriptionAudit.glance.potential_savings_total)} per month
+                    </Text>
+                    <Text style={styles.smallText}>
+                      Detected price increases across{' '}
+                      {subscriptionAudit.glance.potential_savings_count} recurring charge
+                      {subscriptionAudit.glance.potential_savings_count === 1 ? '' : 's'} -
+                      reviewing these could recover real money.
+                    </Text>
+                    <Pressable onPress={() => setShowSavings((v) => !v)} accessibilityRole="button">
+                      <Text style={recurringStyles.viewSavingsLink}>
+                        {showSavings ? 'Hide details' : 'View savings'}
+                      </Text>
+                    </Pressable>
+                    {showSavings && (
+                      <View style={recurringStyles.findingsList}>
+                        {findings.map((f, i) => (
+                          <Text key={i} style={[styles.smallText, recurringStyles.findingLine]}>
+                            {describeFinding(f)}
+                          </Text>
+                        ))}
+                      </View>
+                    )}
                   </View>
                 </View>
               )}
-            </View>
-
-            <View style={[styles.card, recurringStyles.cardMargin]}>
-              <Text style={recurringStyles.cardEyebrow}>THIS MONTH AT A GLANCE</Text>
-              <View style={recurringStyles.glanceRow}>
-                <GlanceTile
-                  icon="event"
-                  label="UPCOMING"
-                  value={subscriptionAudit.glance.upcoming_count}
-                  sub="Payments"
-                  onPress={scrollToGroups}
-                  accessibilityLabel="Upcoming payments - view all recurring charges"
-                />
-                <GlanceTile
-                  icon="attach-money"
-                  label="DUE SOON"
-                  value={`$${formatDecimal(subscriptionAudit.glance.due_soon_total)}`}
-                  sub={`in next ${subscriptionAudit.glance.due_soon_days} days`}
-                  onPress={scrollToGroups}
-                  accessibilityLabel="Due soon - view all recurring charges"
-                />
-                <GlanceTile
-                  icon="trending-up"
-                  label="VS LAST MONTH"
-                  value={delta ? delta.text : 'N/A'}
-                  sub={delta ? delta.direction : 'not enough history'}
-                  onPress={scrollToSavings}
-                  accessibilityLabel="Vs last month - view savings details"
-                />
-                <GlanceTile
-                  icon="local-offer"
-                  label="POTENTIAL SAVINGS"
-                  value={`$${formatDecimal(subscriptionAudit.glance.potential_savings_total)}`}
-                  sub="/ month"
-                  isLast
-                  onPress={scrollToSavings}
-                  accessibilityLabel="Potential savings - view savings details"
-                />
-              </View>
-            </View>
-
-            <View style={[recurringStyles.searchRow, recurringStyles.cardMargin]}>
-              <View style={recurringStyles.searchBox}>
-                <MaterialIcons name="search" size={18} color={colors.muted} />
-                <TextInput
-                  style={recurringStyles.searchInput}
-                  value={query}
-                  onChangeText={setQuery}
-                  placeholder="Search recurring charges"
-                  placeholderTextColor={colors.placeholder}
-                />
-              </View>
-              <Pressable
-                style={recurringStyles.filtersButton}
-                onPress={() => setShowFilters((v) => !v)}
-                accessibilityRole="button"
-                accessibilityLabel="Filters"
-              >
-                <MaterialIcons name="tune" size={16} color={colors.dark} />
-                <Text style={recurringStyles.filtersButtonText}>FILTERS</Text>
-              </Pressable>
-            </View>
-
-            {showFilters && (
-              <View style={[recurringStyles.filterPillRow, recurringStyles.cardMargin]}>
-                {INTERVAL_FILTERS.map((f) => (
-                  <Pressable
-                    key={f.key}
-                    onPress={() => setIntervalFilter(f.key)}
-                    style={[recurringStyles.filterPill, intervalFilter === f.key && recurringStyles.filterPillActive]}
-                  >
-                    <Text
-                      style={[
-                        recurringStyles.filterPillText,
-                        intervalFilter === f.key && recurringStyles.filterPillTextActive,
-                      ]}
-                    >
-                      {f.label}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            )}
-
-            <View onLayout={(e) => { groupsY.current = e.nativeEvent.layout.y; }}>
-              {hasAnyMatch ? (
-                groups.map((g) => (
-                  <GroupCard
-                    key={g.key}
-                    group={g}
-                    query={query}
-                    intervalFilter={intervalFilter}
-                    expanded={!!expandedGroups[g.key]}
-                    onToggle={() => toggleGroup(g.key)}
-                  />
-                ))
-              ) : (
-                <Text style={[styles.smallText, recurringStyles.cardMargin]}>
-                  No recurring charges match your search or filter.
-                </Text>
-              )}
-            </View>
-
-            {subscriptionAudit.glance.potential_savings_total > 0 && (
-              <View
-                onLayout={(e) => { savingsY.current = e.nativeEvent.layout.y; }}
-                style={[styles.card, recurringStyles.cardMargin, recurringStyles.savingsCard]}
-              >
-                <View style={recurringStyles.insightIconCircle}>
-                  <MaterialIcons name="eco" size={18} color={colors.dark} />
-                </View>
-                <View style={recurringStyles.savingsBody}>
-                  <Text style={recurringStyles.groupLabel}>
-                    You could save ${formatDecimal(subscriptionAudit.glance.potential_savings_total)} per month
-                  </Text>
-                  <Text style={styles.smallText}>
-                    Detected price increases across {subscriptionAudit.glance.potential_savings_count} recurring
-                    charge{subscriptionAudit.glance.potential_savings_count === 1 ? '' : 's'} - reviewing these could
-                    recover real money.
-                  </Text>
-                  <Pressable onPress={() => setShowSavings((v) => !v)} accessibilityRole="button">
-                    <Text style={recurringStyles.viewSavingsLink}>
-                      {showSavings ? 'Hide details' : 'View savings'}
-                    </Text>
-                  </Pressable>
-                  {showSavings && (
-                    <View style={recurringStyles.findingsList}>
-                      {findings.map((f, i) => (
-                        <Text key={i} style={[styles.smallText, recurringStyles.findingLine]}>
-                          {describeFinding(f)}
-                        </Text>
-                      ))}
-                    </View>
-                  )}
-                </View>
-              </View>
-            )}
-          </>
-        )}
-      </ScrollView>
+            </>
+          )}
+        </ScrollView>
       </TopEdgeFade>
 
       <NotificationCenter
@@ -566,290 +604,290 @@ export default function Recurring() {
 // sub-components above, each keyed on colors).
 function buildRecurringStyles(colors) {
   return StyleSheet.create({
-  // Same values as every other tab's wordmarkStrip (2026-08-27, direct user
-  // feedback - all five tabs should share one identical header, not five
-  // slightly different ones; this one had drifted to its own paddingHorizontal/
-  // paddingTop/paddingBottom before this pass).
-  wordmarkStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 24,
-    paddingTop: 8,
-    paddingBottom: 8,
-  },
-  transparentScroll: {
-    backgroundColor: 'transparent',
-  },
-  titleBlock: {
-    paddingHorizontal: 20,
-    paddingTop: 110,
-    paddingBottom: 16,
-    gap: 4,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  manageLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: 6,
-    paddingHorizontal: 4,
-  },
-  manageLinkText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.primary,
-  },
-  subtitle: {
-    fontSize: 13,
-    color: colors.dark,
-  },
-  cardMargin: {
-    marginHorizontal: 16,
-    marginBottom: 12,
-  },
-  cardEyebrow: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    color: colors.dark,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-  },
-  summaryHalf: {
-    flex: 1,
-    gap: 4,
-  },
-  summaryDivider: {
-    borderLeftWidth: StyleSheet.hairlineWidth,
-    borderLeftColor: colors.sage,
-    paddingLeft: 16,
-    marginLeft: 4,
-  },
-  summaryTotal: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  summaryTotalUnit: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: colors.dark,
-  },
-  topCategoryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 4,
-  },
-  groupIconCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  groupLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-  glanceRow: {
-    flexDirection: 'row',
-    marginTop: 8,
-  },
-  glanceTile: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 2,
-  },
-  glanceTileDivider: {
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderRightColor: colors.sage,
-  },
-  glanceIconCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 2,
-  },
-  glanceLabel: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: colors.muted,
-    letterSpacing: 0.3,
-    textAlign: 'center',
-  },
-  glanceValue: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.darkest,
-    textAlign: 'center',
-  },
-  glanceSub: {
-    fontSize: 10,
-    color: colors.dark,
-    textAlign: 'center',
-  },
-  searchRow: {
-    flexDirection: 'row',
-    gap: 8,
-    alignItems: 'center',
-  },
-  searchBox: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: colors.card,
-    borderRadius: 22,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 14,
-    color: colors.darkest,
-  },
-  filtersButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.sage,
-    borderRadius: 22,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  filtersButtonText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.dark,
-    letterSpacing: 0.3,
-  },
-  filterPillRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  filterPill: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.sage,
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: colors.card,
-  },
-  filterPillActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  filterPillText: {
-    fontSize: 12,
-    color: colors.dark,
-  },
-  // Real contrast bug found (2026-09-11, theme redesign): this used to
-  // hardcode color: colors.background - correct by coincidence in the old
-  // static-day-only palette, but colors.primary (this pill's fixed fill)
-  // never changes at night while colors.background flips dark, dropping
-  // to 2.80:1 contrast. readableTextColor computes the actually-correct
-  // text color for this fixed fill in both modes.
-  filterPillTextActive: {
-    color: readableTextColor(colors.primary, colors),
-    fontWeight: '700',
-  },
-  groupHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  groupHeaderText: {
-    flex: 1,
-    gap: 2,
-  },
-  groupTotal: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.darkest,
-    marginRight: 4,
-  },
-  groupBody: {
-    marginTop: 10,
-    gap: 4,
-  },
-  entryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.sage,
-  },
-  entryIconCircle: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  entryBody: {
-    flex: 1,
-    gap: 2,
-  },
-  entryName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-  entryNext: {
-    fontSize: 11,
-    color: colors.dark,
-    flexShrink: 0,
-  },
-  savingsCard: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-  },
-  insightIconCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  savingsBody: {
-    flex: 1,
-    gap: 4,
-  },
-  viewSavingsLink: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.primary,
-    marginTop: 4,
-  },
-  findingsList: {
-    marginTop: 6,
-    gap: 4,
-  },
-  findingLine: {
-    flexShrink: 1,
-  },
+    // Same values as every other tab's wordmarkStrip (2026-08-27, direct user
+    // feedback - all five tabs should share one identical header, not five
+    // slightly different ones; this one had drifted to its own paddingHorizontal/
+    // paddingTop/paddingBottom before this pass).
+    wordmarkStrip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 24,
+      paddingTop: 8,
+      paddingBottom: 8,
+    },
+    transparentScroll: {
+      backgroundColor: 'transparent',
+    },
+    titleBlock: {
+      paddingHorizontal: 20,
+      paddingTop: 110,
+      paddingBottom: 16,
+      gap: 4,
+    },
+    titleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    title: {
+      fontSize: 26,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    manageLink: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingVertical: 6,
+      paddingHorizontal: 4,
+    },
+    manageLinkText: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.primary,
+    },
+    subtitle: {
+      fontSize: 13,
+      color: colors.dark,
+    },
+    cardMargin: {
+      marginHorizontal: 16,
+      marginBottom: 12,
+    },
+    cardEyebrow: {
+      fontSize: 11,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+      color: colors.dark,
+    },
+    summaryRow: {
+      flexDirection: 'row',
+    },
+    summaryHalf: {
+      flex: 1,
+      gap: 4,
+    },
+    summaryDivider: {
+      borderLeftWidth: StyleSheet.hairlineWidth,
+      borderLeftColor: colors.sage,
+      paddingLeft: 16,
+      marginLeft: 4,
+    },
+    summaryTotal: {
+      fontSize: 22,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    summaryTotalUnit: {
+      fontSize: 13,
+      fontWeight: '400',
+      color: colors.dark,
+    },
+    topCategoryRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: 4,
+    },
+    groupIconCircle: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    groupLabel: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+    glanceRow: {
+      flexDirection: 'row',
+      marginTop: 8,
+    },
+    glanceTile: {
+      flex: 1,
+      alignItems: 'center',
+      gap: 2,
+    },
+    glanceTileDivider: {
+      borderRightWidth: StyleSheet.hairlineWidth,
+      borderRightColor: colors.sage,
+    },
+    glanceIconCircle: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor: colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 2,
+    },
+    glanceLabel: {
+      fontSize: 9,
+      fontWeight: '700',
+      color: colors.muted,
+      letterSpacing: 0.3,
+      textAlign: 'center',
+    },
+    glanceValue: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: colors.darkest,
+      textAlign: 'center',
+    },
+    glanceSub: {
+      fontSize: 10,
+      color: colors.dark,
+      textAlign: 'center',
+    },
+    searchRow: {
+      flexDirection: 'row',
+      gap: 8,
+      alignItems: 'center',
+    },
+    searchBox: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      backgroundColor: colors.card,
+      borderRadius: 22,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+    },
+    searchInput: {
+      flex: 1,
+      fontSize: 14,
+      color: colors.darkest,
+    },
+    filtersButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.sage,
+      borderRadius: 22,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+    },
+    filtersButtonText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.dark,
+      letterSpacing: 0.3,
+    },
+    filterPillRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    filterPill: {
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.sage,
+      borderRadius: 16,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      backgroundColor: colors.card,
+    },
+    filterPillActive: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    filterPillText: {
+      fontSize: 12,
+      color: colors.dark,
+    },
+    // Real contrast bug found (2026-09-11, theme redesign): this used to
+    // hardcode color: colors.background - correct by coincidence in the old
+    // static-day-only palette, but colors.primary (this pill's fixed fill)
+    // never changes at night while colors.background flips dark, dropping
+    // to 2.80:1 contrast. readableTextColor computes the actually-correct
+    // text color for this fixed fill in both modes.
+    filterPillTextActive: {
+      color: readableTextColor(colors.primary, colors),
+      fontWeight: '700',
+    },
+    groupHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    groupHeaderText: {
+      flex: 1,
+      gap: 2,
+    },
+    groupTotal: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.darkest,
+      marginRight: 4,
+    },
+    groupBody: {
+      marginTop: 10,
+      gap: 4,
+    },
+    entryRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingVertical: 8,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.sage,
+    },
+    entryIconCircle: {
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    entryBody: {
+      flex: 1,
+      gap: 2,
+    },
+    entryName: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+    entryNext: {
+      fontSize: 11,
+      color: colors.dark,
+      flexShrink: 0,
+    },
+    savingsCard: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+    },
+    insightIconCircle: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    savingsBody: {
+      flex: 1,
+      gap: 4,
+    },
+    viewSavingsLink: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.primary,
+      marginTop: 4,
+    },
+    findingsList: {
+      marginTop: 6,
+      gap: 4,
+    },
+    findingLine: {
+      flexShrink: 1,
+    },
   });
 }

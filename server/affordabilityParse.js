@@ -187,7 +187,9 @@ function extractCandidateAmounts(rawText) {
   // mid-string offset match instead of a prefix (e.g. "1500 dollars"
   // matched starting at its second digit, producing 500) - still the same
   // underlying defect, still fixed the same way.
-  for (const m of text.matchAll(/(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s?(dollars|bucks)\b/gi)) {
+  for (const m of text.matchAll(
+    /(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s?(dollars|bucks)\b/gi
+  )) {
     addSpecific(parseFloat(m[1].replace(/,/g, '')), m.index, m.index + m[0].length);
   }
   // "50 cents" (bare, no $ sign)
@@ -241,7 +243,10 @@ function getPayloadSigningKey() {
   // a distinct label (domain separation, same technique googleOAuth.js
   // already uses for its own state-signing key) so this is cryptographically
   // a different key, not a reuse of the AES key for a second purpose.
-  return crypto.createHmac('sha256', Buffer.from(b64, 'base64')).update('affordability-signed-payload-v1').digest();
+  return crypto
+    .createHmac('sha256', Buffer.from(b64, 'base64'))
+    .update('affordability-signed-payload-v1')
+    .digest();
 }
 
 // `payload` can be any JSON-serializable value. Returns a signed token
@@ -274,7 +279,8 @@ function verifyPayload(userId, token) {
 
   const sigBuf = Buffer.from(sig);
   const expectedBuf = Buffer.from(expectedSig);
-  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
+  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf))
+    return null;
 
   const expiresAt = Number(expiresAtStr);
   if (!Number.isFinite(expiresAt) || Date.now() > expiresAt) return null;
@@ -363,7 +369,8 @@ function verifyObjectIntegrity(userId, obj) {
 
   const sigBuf = Buffer.from(sig);
   const expectedBuf = Buffer.from(expectedSig);
-  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) return false;
+  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf))
+    return false;
 
   const expiresAt = Number(expiresAtStr);
   if (!Number.isFinite(expiresAt) || Date.now() > expiresAt) return false;
@@ -424,14 +431,18 @@ function sanitizeParsedOutput(raw, rawText) {
   const intent = PARSER_INTENTS.includes(raw?.intent) ? raw.intent : 'unsupported';
 
   const category =
-    typeof raw?.category === 'string' && SPEND_CATEGORIES.includes(raw.category) ? raw.category : null;
+    typeof raw?.category === 'string' && SPEND_CATEGORIES.includes(raw.category)
+      ? raw.category
+      : null;
 
   const recurrence = RECURRENCE_STATES.includes(raw?.recurrence) ? raw.recurrence : 'unknown';
 
   const wantsTimeline = raw?.wants_timeline === true;
 
   let amountStated =
-    typeof raw?.amount_stated === 'number' && Number.isFinite(raw.amount_stated) && raw.amount_stated > 0
+    typeof raw?.amount_stated === 'number' &&
+    Number.isFinite(raw.amount_stated) &&
+    raw.amount_stated > 0
       ? Math.round(raw.amount_stated * 100) / 100
       : null;
 
@@ -451,7 +462,10 @@ function sanitizeParsedOutput(raw, rawText) {
       : null;
 
   let totalPriceDiscarded = false;
-  if (totalPriceStated !== null && !validateStatedAmountAgainstRawInput(rawText, totalPriceStated)) {
+  if (
+    totalPriceStated !== null &&
+    !validateStatedAmountAgainstRawInput(rawText, totalPriceStated)
+  ) {
     totalPriceDiscarded = true;
     totalPriceStated = null;
   }

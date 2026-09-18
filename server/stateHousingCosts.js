@@ -140,14 +140,18 @@ const HOME_INSURANCE_ANNUAL_BY_STATE = {
 const propertyTaxStates = Object.keys(PROPERTY_TAX_RATE_BY_STATE).sort();
 const insuranceStates = Object.keys(HOME_INSURANCE_ANNUAL_BY_STATE).sort();
 if (JSON.stringify(propertyTaxStates) !== JSON.stringify(insuranceStates)) {
-  throw new Error('stateHousingCosts: PROPERTY_TAX_RATE_BY_STATE and HOME_INSURANCE_ANNUAL_BY_STATE cover different states');
+  throw new Error(
+    'stateHousingCosts: PROPERTY_TAX_RATE_BY_STATE and HOME_INSURANCE_ANNUAL_BY_STATE cover different states'
+  );
 }
 
 // Returns null (never a guess) for a state code not in the table, so the
 // caller can present an honest "we don't have this state yet" rather than
 // silently falling back to a made-up number.
 function getStateHousingCosts(stateCode) {
-  const code = String(stateCode || '').trim().toUpperCase();
+  const code = String(stateCode || '')
+    .trim()
+    .toUpperCase();
   const propertyTaxRate = PROPERTY_TAX_RATE_BY_STATE[code];
   const annualInsurance = HOME_INSURANCE_ANNUAL_BY_STATE[code];
   if (propertyTaxRate === undefined || annualInsurance === undefined) return null;

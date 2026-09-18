@@ -14,7 +14,14 @@ import {
 import { useRouter, useFocusEffect } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { apiFetch, apiErrorMessage, formatDecimal, formatDateMDY, parseDollarAmount, CATEGORIES } from './_lib/api';
+import {
+  apiFetch,
+  apiErrorMessage,
+  formatDecimal,
+  formatDateMDY,
+  parseDollarAmount,
+  CATEGORIES,
+} from './_lib/api';
 import { useTheme } from './_lib/theme';
 import SettingsScreenChrome from './_components/SettingsScreenChrome';
 import SettingsFetchGate from './_components/SettingsFetchGate';
@@ -160,7 +167,9 @@ export default function RecurringManage() {
   const autoSeries = series.filter((s) => !s.merchant_key.startsWith('manual:'));
 
   const activeSeries = autoSeries.filter((s) => !overrideByMerchantKey[s.merchant_key]?.dismissed);
-  const dismissedSeries = autoSeries.filter((s) => overrideByMerchantKey[s.merchant_key]?.dismissed);
+  const dismissedSeries = autoSeries.filter(
+    (s) => overrideByMerchantKey[s.merchant_key]?.dismissed
+  );
 
   // `editingKey` identifies which row is being edited: an auto-detected
   // series by its own merchant_key, or a manual entry by
@@ -336,7 +345,9 @@ export default function RecurringManage() {
             accessibilityRole="button"
             accessibilityLabel={c}
           >
-            <Text style={[manageStyles.chipText, value === c && manageStyles.chipTextSelected]}>{c}</Text>
+            <Text style={[manageStyles.chipText, value === c && manageStyles.chipTextSelected]}>
+              {c}
+            </Text>
           </Pressable>
         ))}
       </View>
@@ -358,16 +369,24 @@ export default function RecurringManage() {
             <Text style={manageStyles.seriesMeta}>
               {category} · {INTERVAL_LABELS[interval]} · ${formatDecimal(amount)}
             </Text>
-            {override && !isEditing && (
-              <Text style={manageStyles.editedBadge}>Edited</Text>
-            )}
+            {override && !isEditing && <Text style={manageStyles.editedBadge}>Edited</Text>}
           </View>
           {!isEditing && (
             <View style={manageStyles.seriesActions}>
-              <Pressable onPress={() => openSeriesEditor(s)} accessibilityRole="button" accessibilityLabel={`Edit ${s.display_name}`} hitSlop={8}>
+              <Pressable
+                onPress={() => openSeriesEditor(s)}
+                accessibilityRole="button"
+                accessibilityLabel={`Edit ${s.display_name}`}
+                hitSlop={8}
+              >
                 <MaterialIcons name="edit" size={20} color={colors.dark} />
               </Pressable>
-              <Pressable onPress={() => confirmDismiss(s)} accessibilityRole="button" accessibilityLabel={`Remove ${s.display_name} from recurring`} hitSlop={8}>
+              <Pressable
+                onPress={() => confirmDismiss(s)}
+                accessibilityRole="button"
+                accessibilityLabel={`Remove ${s.display_name} from recurring`}
+                hitSlop={8}
+              >
                 <MaterialIcons name="close" size={20} color={colors.error} />
               </Pressable>
             </View>
@@ -377,9 +396,13 @@ export default function RecurringManage() {
         {isEditing && (
           <View style={manageStyles.editSection}>
             <Text style={manageStyles.fieldLabel}>Category</Text>
-            {renderCategoryPicker(editForm.category, (v) => setEditForm((p) => ({ ...p, category: v })))}
+            {renderCategoryPicker(editForm.category, (v) =>
+              setEditForm((p) => ({ ...p, category: v }))
+            )}
             <Text style={manageStyles.fieldLabel}>How often</Text>
-            {renderIntervalPicker(editForm.interval, (v) => setEditForm((p) => ({ ...p, interval: v })))}
+            {renderIntervalPicker(editForm.interval, (v) =>
+              setEditForm((p) => ({ ...p, interval: v }))
+            )}
             <Text style={manageStyles.fieldLabel}>Typical amount</Text>
             <TextInput
               style={styles.input}
@@ -393,14 +416,22 @@ export default function RecurringManage() {
               <ActivityIndicator style={manageStyles.editButtonsSpacing} />
             ) : (
               <View style={[manageStyles.editButtonsRow, manageStyles.editButtonsSpacing]}>
-                <Pressable style={manageStyles.saveButton} onPress={saveEdit} accessibilityRole="button" accessibilityLabel="Save changes">
+                <Pressable
+                  style={manageStyles.saveButton}
+                  onPress={saveEdit}
+                  accessibilityRole="button"
+                  accessibilityLabel="Save changes"
+                >
                   <Text style={manageStyles.saveButtonText}>Save</Text>
                 </Pressable>
                 <Pressable onPress={closeEditor} accessibilityRole="button">
                   <Text style={manageStyles.cancelLink}>Cancel</Text>
                 </Pressable>
                 {override && (
-                  <Pressable onPress={() => deleteOverride(override.id).then(closeEditor)} accessibilityRole="button">
+                  <Pressable
+                    onPress={() => deleteOverride(override.id).then(closeEditor)}
+                    accessibilityRole="button"
+                  >
                     <Text style={manageStyles.revertLink}>Revert to detected</Text>
                   </Pressable>
                 )}
@@ -433,10 +464,20 @@ export default function RecurringManage() {
           </View>
           {!isEditing && (
             <View style={manageStyles.seriesActions}>
-              <Pressable onPress={() => openManualEditor(o)} accessibilityRole="button" accessibilityLabel={`Edit ${o.override_display_name}`} hitSlop={8}>
+              <Pressable
+                onPress={() => openManualEditor(o)}
+                accessibilityRole="button"
+                accessibilityLabel={`Edit ${o.override_display_name}`}
+                hitSlop={8}
+              >
                 <MaterialIcons name="edit" size={20} color={colors.dark} />
               </Pressable>
-              <Pressable onPress={() => confirmRemoveManual(o)} accessibilityRole="button" accessibilityLabel={`Delete ${o.override_display_name}`} hitSlop={8}>
+              <Pressable
+                onPress={() => confirmRemoveManual(o)}
+                accessibilityRole="button"
+                accessibilityLabel={`Delete ${o.override_display_name}`}
+                hitSlop={8}
+              >
                 <MaterialIcons name="close" size={20} color={colors.error} />
               </Pressable>
             </View>
@@ -446,9 +487,13 @@ export default function RecurringManage() {
         {isEditing && (
           <View style={manageStyles.editSection}>
             <Text style={manageStyles.fieldLabel}>Category</Text>
-            {renderCategoryPicker(editForm.category, (v) => setEditForm((p) => ({ ...p, category: v })))}
+            {renderCategoryPicker(editForm.category, (v) =>
+              setEditForm((p) => ({ ...p, category: v }))
+            )}
             <Text style={manageStyles.fieldLabel}>How often</Text>
-            {renderIntervalPicker(editForm.interval, (v) => setEditForm((p) => ({ ...p, interval: v })))}
+            {renderIntervalPicker(editForm.interval, (v) =>
+              setEditForm((p) => ({ ...p, interval: v }))
+            )}
             <Text style={manageStyles.fieldLabel}>Typical amount</Text>
             <TextInput
               style={styles.input}
@@ -462,7 +507,12 @@ export default function RecurringManage() {
               <ActivityIndicator style={manageStyles.editButtonsSpacing} />
             ) : (
               <View style={[manageStyles.editButtonsRow, manageStyles.editButtonsSpacing]}>
-                <Pressable style={manageStyles.saveButton} onPress={saveEdit} accessibilityRole="button" accessibilityLabel="Save changes">
+                <Pressable
+                  style={manageStyles.saveButton}
+                  onPress={saveEdit}
+                  accessibilityRole="button"
+                  accessibilityLabel="Save changes"
+                >
                   <Text style={manageStyles.saveButtonText}>Save</Text>
                 </Pressable>
                 <Pressable onPress={closeEditor} accessibilityRole="button">
@@ -491,161 +541,189 @@ export default function RecurringManage() {
             gap under the keyboard on some devices/Android versions;
             "height" reliably shrinks the content area instead. iOS keeps
             "padding", the standard choice there. */}
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <ScrollView
-          style={manageStyles.body}
-          contentContainerStyle={manageStyles.bodyContent}
-          keyboardShouldPersistTaps="handled"
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
-          {error && <Text style={styles.errorText}>{error}</Text>}
+          <ScrollView
+            style={manageStyles.body}
+            contentContainerStyle={manageStyles.bodyContent}
+            keyboardShouldPersistTaps="handled"
+          >
+            {error && <Text style={styles.errorText}>{error}</Text>}
 
-          {activeSeries.length === 0 && manualOverrides.length === 0 ? (
-            <Text style={styles.smallText}>No recurring charges detected yet.</Text>
-          ) : (
-            <>
-              {activeSeries.map(renderSeriesRow)}
-              {manualOverrides.map(renderManualRow)}
-            </>
-          )}
+            {activeSeries.length === 0 && manualOverrides.length === 0 ? (
+              <Text style={styles.smallText}>No recurring charges detected yet.</Text>
+            ) : (
+              <>
+                {activeSeries.map(renderSeriesRow)}
+                {manualOverrides.map(renderManualRow)}
+              </>
+            )}
 
-          {!showAddForm ? (
-            <Pressable style={manageStyles.addButton} onPress={openAddForm} accessibilityRole="button" accessibilityLabel="Add a recurring charge">
-              <MaterialIcons name="add-circle-outline" size={20} color={colors.primary} />
-              <Text style={manageStyles.addButtonText}>Add a recurring charge</Text>
-            </Pressable>
-          ) : (
-            <View style={[styles.card, manageStyles.seriesCard]}>
-              <Text style={styles.cardTitle}>Add a recurring charge</Text>
+            {!showAddForm ? (
+              <Pressable
+                style={manageStyles.addButton}
+                onPress={openAddForm}
+                accessibilityRole="button"
+                accessibilityLabel="Add a recurring charge"
+              >
+                <MaterialIcons name="add-circle-outline" size={20} color={colors.primary} />
+                <Text style={manageStyles.addButtonText}>Add a recurring charge</Text>
+              </Pressable>
+            ) : (
+              <View style={[styles.card, manageStyles.seriesCard]}>
+                <Text style={styles.cardTitle}>Add a recurring charge</Text>
 
-              {merchantPickerOpen ? (
-                <View style={manageStyles.merchantPicker}>
-                  <Text style={manageStyles.fieldLabel}>Search your transactions</Text>
-                  {/* Real gap found live, 2026-09-03: autoFocus here
+                {merchantPickerOpen ? (
+                  <View style={manageStyles.merchantPicker}>
+                    <Text style={manageStyles.fieldLabel}>Search your transactions</Text>
+                    {/* Real gap found live, 2026-09-03: autoFocus here
                       popped the keyboard the instant the add form opened,
                       before the user had even seen the form - on a
                       screen this dense, that keyboard covered enough of
                       the layout to read as "completely blocks
                       everything." Waits for a real tap now, same as
                       every other text field on this screen. */}
-                  <TextInput
-                    style={styles.input}
-                    placeholder="e.g. Mortgage, Netflix..."
-                    placeholderTextColor={colors.placeholder}
-                    value={merchantQuery}
-                    onChangeText={setMerchantQuery}
-                  />
-                  {merchantsError && <Text style={styles.errorText}>{merchantsError}</Text>}
-                  {merchants === null && !merchantsError ? (
-                    <ActivityIndicator style={manageStyles.editButtonsSpacing} />
-                  ) : merchantQuery.trim().length > 0 ? (
-                    filteredMerchants.length === 0 ? (
-                      <Text style={manageStyles.merchantEmptyText}>
-                        No matching transactions. You can still enter it manually below.
-                      </Text>
-                    ) : (
-                      filteredMerchants.map((m) => (
-                        <Pressable
-                          key={m.display_name}
-                          style={manageStyles.merchantRow}
-                          onPress={() => pickMerchant(m)}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Use ${m.display_name}`}
-                        >
-                          <View style={manageStyles.merchantRowText}>
-                            <Text style={manageStyles.merchantRowName}>{m.display_name}</Text>
-                            <Text style={manageStyles.merchantRowMeta}>
-                              {m.category} · last ${formatDecimal(m.typical_amount)} on{' '}
-                              {formatDateMDY(m.last_date)}
-                            </Text>
-                          </View>
-                          <MaterialIcons name="chevron-right" size={20} color={colors.dark} />
-                        </Pressable>
-                      ))
-                    )
-                  ) : null}
-                  <Pressable onPress={() => setMerchantPickerOpen(false)} accessibilityRole="button">
-                    <Text style={manageStyles.cancelLink}>Enter manually instead</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="e.g. Mortgage, Netflix..."
+                      placeholderTextColor={colors.placeholder}
+                      value={merchantQuery}
+                      onChangeText={setMerchantQuery}
+                    />
+                    {merchantsError && <Text style={styles.errorText}>{merchantsError}</Text>}
+                    {merchants === null && !merchantsError ? (
+                      <ActivityIndicator style={manageStyles.editButtonsSpacing} />
+                    ) : merchantQuery.trim().length > 0 ? (
+                      filteredMerchants.length === 0 ? (
+                        <Text style={manageStyles.merchantEmptyText}>
+                          No matching transactions. You can still enter it manually below.
+                        </Text>
+                      ) : (
+                        filteredMerchants.map((m) => (
+                          <Pressable
+                            key={m.display_name}
+                            style={manageStyles.merchantRow}
+                            onPress={() => pickMerchant(m)}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Use ${m.display_name}`}
+                          >
+                            <View style={manageStyles.merchantRowText}>
+                              <Text style={manageStyles.merchantRowName}>{m.display_name}</Text>
+                              <Text style={manageStyles.merchantRowMeta}>
+                                {m.category} · last ${formatDecimal(m.typical_amount)} on{' '}
+                                {formatDateMDY(m.last_date)}
+                              </Text>
+                            </View>
+                            <MaterialIcons name="chevron-right" size={20} color={colors.dark} />
+                          </Pressable>
+                        ))
+                      )
+                    ) : null}
+                    <Pressable
+                      onPress={() => setMerchantPickerOpen(false)}
+                      accessibilityRole="button"
+                    >
+                      <Text style={manageStyles.cancelLink}>Enter manually instead</Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <Pressable onPress={() => setMerchantPickerOpen(true)} accessibilityRole="button">
+                    <Text style={manageStyles.searchAgainLink}>Search transactions instead</Text>
                   </Pressable>
-                </View>
-              ) : (
-                <Pressable onPress={() => setMerchantPickerOpen(true)} accessibilityRole="button">
-                  <Text style={manageStyles.searchAgainLink}>Search transactions instead</Text>
-                </Pressable>
-              )}
+                )}
 
-              <Text style={manageStyles.fieldLabel}>Name</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="e.g. Mortgage"
-                placeholderTextColor={colors.placeholder}
-                value={addForm.displayName}
-                onChangeText={(t) => setAddForm((p) => ({ ...p, displayName: t }))}
-              />
-              <Text style={manageStyles.fieldLabel}>Category</Text>
-              {renderCategoryPicker(addForm.category, (v) => setAddForm((p) => ({ ...p, category: v })))}
-              <Text style={manageStyles.fieldLabel}>How often</Text>
-              {renderIntervalPicker(addForm.interval, (v) => setAddForm((p) => ({ ...p, interval: v })))}
-              <Text style={manageStyles.fieldLabel}>Typical amount</Text>
-              <TextInput
-                style={styles.input}
-                keyboardType="numeric"
-                placeholder="$0.00"
-                placeholderTextColor={colors.placeholder}
-                value={addForm.amountText}
-                onChangeText={(t) => setAddForm((p) => ({ ...p, amountText: t }))}
-              />
-              <Text style={manageStyles.fieldLabel}>Next expected date</Text>
-              <Pressable
-                style={manageStyles.dateButton}
-                onPress={() => setShowDatePicker(true)}
-                accessibilityRole="button"
-              >
-                <Text style={manageStyles.dateButtonText}>{formatDateMDY(toDateOnly(addForm.nextExpectedDate))}</Text>
-              </Pressable>
-              {showDatePicker && (
-                <DateTimePicker
-                  value={addForm.nextExpectedDate}
-                  mode="date"
-                  onChange={(event, selectedDate) => {
-                    setShowDatePicker(false);
-                    if (event.type === 'dismissed' || !selectedDate) return;
-                    setAddForm((p) => ({ ...p, nextExpectedDate: selectedDate }));
-                  }}
+                <Text style={manageStyles.fieldLabel}>Name</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g. Mortgage"
+                  placeholderTextColor={colors.placeholder}
+                  value={addForm.displayName}
+                  onChangeText={(t) => setAddForm((p) => ({ ...p, displayName: t }))}
                 />
-              )}
-              {saving ? (
-                <ActivityIndicator style={manageStyles.editButtonsSpacing} />
-              ) : (
-                <View style={[manageStyles.editButtonsRow, manageStyles.editButtonsSpacing]}>
-                  <Pressable style={manageStyles.saveButton} onPress={saveAdd} accessibilityRole="button" accessibilityLabel="Add recurring charge">
-                    <Text style={manageStyles.saveButtonText}>Add</Text>
-                  </Pressable>
-                  <Pressable onPress={() => { setShowAddForm(false); setAddForm(null); }} accessibilityRole="button">
-                    <Text style={manageStyles.cancelLink}>Cancel</Text>
-                  </Pressable>
-                </View>
-              )}
-            </View>
-          )}
-
-          {dismissedSeries.length > 0 && (
-            <View style={manageStyles.hiddenSection}>
-              <Text style={manageStyles.hiddenTitle}>REMOVED FROM RECURRING</Text>
-              {dismissedSeries.map((s) => (
+                <Text style={manageStyles.fieldLabel}>Category</Text>
+                {renderCategoryPicker(addForm.category, (v) =>
+                  setAddForm((p) => ({ ...p, category: v }))
+                )}
+                <Text style={manageStyles.fieldLabel}>How often</Text>
+                {renderIntervalPicker(addForm.interval, (v) =>
+                  setAddForm((p) => ({ ...p, interval: v }))
+                )}
+                <Text style={manageStyles.fieldLabel}>Typical amount</Text>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="numeric"
+                  placeholder="$0.00"
+                  placeholderTextColor={colors.placeholder}
+                  value={addForm.amountText}
+                  onChangeText={(t) => setAddForm((p) => ({ ...p, amountText: t }))}
+                />
+                <Text style={manageStyles.fieldLabel}>Next expected date</Text>
                 <Pressable
-                  key={s.merchant_key}
-                  style={manageStyles.hiddenRow}
-                  onPress={() => restoreDismissed(s)}
+                  style={manageStyles.dateButton}
+                  onPress={() => setShowDatePicker(true)}
                   accessibilityRole="button"
-                  accessibilityLabel={`Add ${s.display_name} back to recurring`}
                 >
-                  <Text style={manageStyles.hiddenRowText}>{s.display_name}</Text>
-                  <MaterialIcons name="add-circle-outline" size={20} color={colors.primary} />
+                  <Text style={manageStyles.dateButtonText}>
+                    {formatDateMDY(toDateOnly(addForm.nextExpectedDate))}
+                  </Text>
                 </Pressable>
-              ))}
-            </View>
-          )}
-        </ScrollView>
+                {showDatePicker && (
+                  <DateTimePicker
+                    value={addForm.nextExpectedDate}
+                    mode="date"
+                    onChange={(event, selectedDate) => {
+                      setShowDatePicker(false);
+                      if (event.type === 'dismissed' || !selectedDate) return;
+                      setAddForm((p) => ({ ...p, nextExpectedDate: selectedDate }));
+                    }}
+                  />
+                )}
+                {saving ? (
+                  <ActivityIndicator style={manageStyles.editButtonsSpacing} />
+                ) : (
+                  <View style={[manageStyles.editButtonsRow, manageStyles.editButtonsSpacing]}>
+                    <Pressable
+                      style={manageStyles.saveButton}
+                      onPress={saveAdd}
+                      accessibilityRole="button"
+                      accessibilityLabel="Add recurring charge"
+                    >
+                      <Text style={manageStyles.saveButtonText}>Add</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => {
+                        setShowAddForm(false);
+                        setAddForm(null);
+                      }}
+                      accessibilityRole="button"
+                    >
+                      <Text style={manageStyles.cancelLink}>Cancel</Text>
+                    </Pressable>
+                  </View>
+                )}
+              </View>
+            )}
+
+            {dismissedSeries.length > 0 && (
+              <View style={manageStyles.hiddenSection}>
+                <Text style={manageStyles.hiddenTitle}>REMOVED FROM RECURRING</Text>
+                {dismissedSeries.map((s) => (
+                  <Pressable
+                    key={s.merchant_key}
+                    style={manageStyles.hiddenRow}
+                    onPress={() => restoreDismissed(s)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Add ${s.display_name} back to recurring`}
+                  >
+                    <Text style={manageStyles.hiddenRowText}>{s.display_name}</Text>
+                    <MaterialIcons name="add-circle-outline" size={20} color={colors.primary} />
+                  </Pressable>
+                ))}
+              </View>
+            )}
+          </ScrollView>
         </KeyboardAvoidingView>
       </SettingsFetchGate>
     </SettingsScreenChrome>
@@ -663,209 +741,209 @@ export default function RecurringManage() {
 // (sage border, primary text) used everywhere else in Settings.
 function buildManageStyles(colors) {
   return StyleSheet.create({
-  body: {
-    flex: 1,
-  },
-  bodyContent: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    // Matches the tab screens' own scroll-content bottom clearance (Home/
-    // Budget/Recurring all use 150) - this screen's old 40 wasn't enough
-    // to clear the phone's own gesture bar, so the last item (usually the
-    // "Add a recurring charge" button) sat partly hidden behind it.
-    paddingBottom: 150,
-    gap: 10,
-  },
-  seriesCard: {
-    gap: 8,
-  },
-  seriesTopRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  seriesNameCol: {
-    flex: 1,
-    gap: 2,
-  },
-  seriesName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-  seriesMeta: {
-    fontSize: 12,
-    color: colors.dark,
-  },
-  editedBadge: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.primary,
-    marginTop: 2,
-  },
-  seriesActions: {
-    flexDirection: 'row',
-    gap: 14,
-  },
-  editSection: {
-    gap: 6,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.sage,
-    paddingTop: 10,
-    marginTop: 2,
-  },
-  fieldLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.dark,
-    marginTop: 4,
-  },
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
-  chip: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.sage,
-    borderRadius: 14,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    backgroundColor: colors.background,
-  },
-  chipSelected: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  chipText: {
-    fontSize: 12,
-    color: colors.dark,
-  },
-  chipTextSelected: {
-    color: colors.background,
-    fontWeight: '700',
-  },
-  editButtonsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  editButtonsSpacing: {
-    marginTop: 6,
-  },
-  saveButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 16,
-    paddingVertical: 8,
-    paddingHorizontal: 20,
-  },
-  saveButtonText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.background,
-  },
-  cancelLink: {
-    fontSize: 13,
-    color: colors.muted,
-    fontWeight: '600',
-  },
-  revertLink: {
-    fontSize: 13,
-    color: colors.error,
-    fontWeight: '600',
-  },
-  searchAgainLink: {
-    fontSize: 13,
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  merchantPicker: {
-    gap: 6,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.sage,
-    borderRadius: 12,
-    padding: 10,
-    marginBottom: 6,
-  },
-  merchantEmptyText: {
-    fontSize: 12,
-    color: colors.muted,
-  },
-  merchantRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.sage,
-  },
-  merchantRowText: {
-    flex: 1,
-  },
-  merchantRowName: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-  merchantRowMeta: {
-    fontSize: 11,
-    color: colors.muted,
-    marginTop: 1,
-  },
-  dateButton: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.sage,
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    backgroundColor: colors.background,
-  },
-  dateButtonText: {
-    fontSize: 14,
-    color: colors.darkest,
-  },
-  addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.sage,
-    backgroundColor: colors.card,
-    borderRadius: 22,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    marginTop: 4,
-  },
-  addButtonText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.primary,
-  },
-  hiddenSection: {
-    marginTop: 12,
-    gap: 4,
-  },
-  hiddenTitle: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    color: colors.muted,
-    marginBottom: 4,
-  },
-  hiddenRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    paddingHorizontal: 4,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.sage,
-  },
-  hiddenRowText: {
-    fontSize: 14,
-    color: colors.dark,
-  },
+    body: {
+      flex: 1,
+    },
+    bodyContent: {
+      paddingHorizontal: 16,
+      paddingTop: 8,
+      // Matches the tab screens' own scroll-content bottom clearance (Home/
+      // Budget/Recurring all use 150) - this screen's old 40 wasn't enough
+      // to clear the phone's own gesture bar, so the last item (usually the
+      // "Add a recurring charge" button) sat partly hidden behind it.
+      paddingBottom: 150,
+      gap: 10,
+    },
+    seriesCard: {
+      gap: 8,
+    },
+    seriesTopRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      gap: 10,
+    },
+    seriesNameCol: {
+      flex: 1,
+      gap: 2,
+    },
+    seriesName: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+    seriesMeta: {
+      fontSize: 12,
+      color: colors.dark,
+    },
+    editedBadge: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: colors.primary,
+      marginTop: 2,
+    },
+    seriesActions: {
+      flexDirection: 'row',
+      gap: 14,
+    },
+    editSection: {
+      gap: 6,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.sage,
+      paddingTop: 10,
+      marginTop: 2,
+    },
+    fieldLabel: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.dark,
+      marginTop: 4,
+    },
+    chipRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+    },
+    chip: {
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.sage,
+      borderRadius: 14,
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+      backgroundColor: colors.background,
+    },
+    chipSelected: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    chipText: {
+      fontSize: 12,
+      color: colors.dark,
+    },
+    chipTextSelected: {
+      color: colors.background,
+      fontWeight: '700',
+    },
+    editButtonsRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 16,
+    },
+    editButtonsSpacing: {
+      marginTop: 6,
+    },
+    saveButton: {
+      backgroundColor: colors.primary,
+      borderRadius: 16,
+      paddingVertical: 8,
+      paddingHorizontal: 20,
+    },
+    saveButtonText: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.background,
+    },
+    cancelLink: {
+      fontSize: 13,
+      color: colors.muted,
+      fontWeight: '600',
+    },
+    revertLink: {
+      fontSize: 13,
+      color: colors.error,
+      fontWeight: '600',
+    },
+    searchAgainLink: {
+      fontSize: 13,
+      color: colors.primary,
+      fontWeight: '600',
+    },
+    merchantPicker: {
+      gap: 6,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.sage,
+      borderRadius: 12,
+      padding: 10,
+      marginBottom: 6,
+    },
+    merchantEmptyText: {
+      fontSize: 12,
+      color: colors.muted,
+    },
+    merchantRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: 8,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.sage,
+    },
+    merchantRowText: {
+      flex: 1,
+    },
+    merchantRowName: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+    merchantRowMeta: {
+      fontSize: 11,
+      color: colors.muted,
+      marginTop: 1,
+    },
+    dateButton: {
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.sage,
+      borderRadius: 10,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      backgroundColor: colors.background,
+    },
+    dateButtonText: {
+      fontSize: 14,
+      color: colors.darkest,
+    },
+    addButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.sage,
+      backgroundColor: colors.card,
+      borderRadius: 22,
+      paddingVertical: 14,
+      paddingHorizontal: 20,
+      marginTop: 4,
+    },
+    addButtonText: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.primary,
+    },
+    hiddenSection: {
+      marginTop: 12,
+      gap: 4,
+    },
+    hiddenTitle: {
+      fontSize: 11,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+      color: colors.muted,
+      marginBottom: 4,
+    },
+    hiddenRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: 10,
+      paddingHorizontal: 4,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.sage,
+    },
+    hiddenRowText: {
+      fontSize: 14,
+      color: colors.dark,
+    },
   });
 }

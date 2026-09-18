@@ -57,19 +57,16 @@ const RECEIPT_QUERY =
 
 async function listCandidateMessages(access_token) {
   const params = new URLSearchParams({ q: RECEIPT_QUERY, maxResults: '25' });
-  const res = await fetch(
-    `https://www.googleapis.com/gmail/v1/users/me/messages?${params}`,
-    { headers: { Authorization: `Bearer ${access_token}` } }
-  );
+  const res = await fetch(`https://www.googleapis.com/gmail/v1/users/me/messages?${params}`, {
+    headers: { Authorization: `Bearer ${access_token}` },
+  });
   if (!res.ok) throw new Error(`Failed to list Gmail messages: ${await res.text()}`);
   const data = await res.json();
   return data.messages || [];
 }
 
 function decodeBase64Url(data) {
-  return Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString(
-    'utf-8'
-  );
+  return Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf-8');
 }
 
 function stripHtml(html) {
@@ -128,4 +125,9 @@ async function getMessage(access_token, messageId) {
   return { id: messageId, subject, from, date, body };
 }
 
-module.exports = { refreshAccessToken, listCandidateMessages, getMessage, GoogleTokenRevokedError };
+module.exports = {
+  refreshAccessToken,
+  listCandidateMessages,
+  getMessage,
+  GoogleTokenRevokedError,
+};

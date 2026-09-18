@@ -62,9 +62,7 @@ export function useGoalForm(initialGoal, { onSaved, onGoalProgressChanged } = {}
     initialGoal?.target_amount != null ? String(initialGoal.target_amount) : ''
   );
   const [goalTimeframe, setGoalTimeframe] = useState(
-    initialGoal?.target_timeframe_months != null
-      ? String(initialGoal.target_timeframe_months)
-      : ''
+    initialGoal?.target_timeframe_months != null ? String(initialGoal.target_timeframe_months) : ''
   );
   const [goalNotes, setGoalNotes] = useState(initialGoal?.notes || '');
   const [saving, setSaving] = useState(false);
@@ -210,7 +208,12 @@ export function useGoalForm(initialGoal, { onSaved, onGoalProgressChanged } = {}
     setGoalAmount('');
     setGoalTimeframe('');
     setGoalNotes('');
-    persist({ goal_type: 'savings', target_amount: null, target_timeframe_months: null, notes: null });
+    persist({
+      goal_type: 'savings',
+      target_amount: null,
+      target_timeframe_months: null,
+      notes: null,
+    });
   }
 
   return {
@@ -304,7 +307,9 @@ export function GoalFormFields({ form }) {
     } catch (err) {
       console.error(err);
       setVoiceError(
-        err.message === 'SERVER_ERROR' ? apiErrorMessage(err) : "Couldn't transcribe that - try again or type it."
+        err.message === 'SERVER_ERROR'
+          ? apiErrorMessage(err)
+          : "Couldn't transcribe that - try again or type it."
       );
     } finally {
       setTranscribing(false);
@@ -397,7 +402,9 @@ export function GoalFormFields({ form }) {
             accessibilityLabel={recorderState.isRecording ? 'Stop recording' : 'Speak the amount'}
             style={[
               localStyles.micButton,
-              recorderState.isRecording ? localStyles.micButtonRecording : localStyles.micButtonIdle,
+              recorderState.isRecording
+                ? localStyles.micButtonRecording
+                : localStyles.micButtonIdle,
             ]}
           >
             {/* Real contrast bug found (2026-09-11, theme redesign): this
@@ -410,7 +417,10 @@ export function GoalFormFields({ form }) {
             <MaterialIcons
               name={recorderState.isRecording ? 'stop' : 'mic'}
               size={20}
-              color={readableTextColor(recorderState.isRecording ? colors.error : colors.primary, colors)}
+              color={readableTextColor(
+                recorderState.isRecording ? colors.error : colors.primary,
+                colors
+              )}
             />
           </Pressable>
         )}

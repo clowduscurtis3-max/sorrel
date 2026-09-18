@@ -39,8 +39,12 @@ const {
   findMaxComfortableAmount,
   ScenarioValidationError,
 } = require('./scenario');
-const { extractCandidateAmounts, validateStatedAmountAgainstRawInput } = require('./affordabilityParse');
-const { parseFinanceTermMonths, computeEstimatedPayment, getCurrentAutoLoanRate } = require('./financeRate');
+const { validateStatedAmountAgainstRawInput } = require('./affordabilityParse');
+const {
+  parseFinanceTermMonths,
+  computeEstimatedPayment,
+  getCurrentAutoLoanRate,
+} = require('./financeRate');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -99,9 +103,14 @@ const TOOLS = [
       properties: {
         amount: {
           type: 'number',
-          description: 'The purchase amount in dollars, exactly as the user stated it in this conversation.',
+          description:
+            'The purchase amount in dollars, exactly as the user stated it in this conversation.',
         },
-        category: { type: 'string', enum: SPEND_CATEGORIES, description: 'Spending category, if known.' },
+        category: {
+          type: 'string',
+          enum: SPEND_CATEGORIES,
+          description: 'Spending category, if known.',
+        },
         recurrence: {
           type: 'string',
           enum: RECURRENCES,
@@ -120,9 +129,14 @@ const TOOLS = [
       properties: {
         amount: {
           type: 'number',
-          description: 'The purchase amount in dollars, exactly as the user stated it in this conversation.',
+          description:
+            'The purchase amount in dollars, exactly as the user stated it in this conversation.',
         },
-        category: { type: 'string', enum: SPEND_CATEGORIES, description: 'Spending category, if known.' },
+        category: {
+          type: 'string',
+          enum: SPEND_CATEGORIES,
+          description: 'Spending category, if known.',
+        },
         recurrence: {
           type: 'string',
           enum: RECURRENCES,
@@ -139,7 +153,11 @@ const TOOLS = [
     input_schema: {
       type: 'object',
       properties: {
-        category: { type: 'string', enum: SPEND_CATEGORIES, description: 'Spending category, if known.' },
+        category: {
+          type: 'string',
+          enum: SPEND_CATEGORIES,
+          description: 'Spending category, if known.',
+        },
         recurrence: {
           type: 'string',
           enum: RECURRENCES,
@@ -158,7 +176,8 @@ const TOOLS = [
       properties: {
         target_amount: {
           type: 'number',
-          description: 'The target amount in dollars, exactly as the user stated it in this conversation.',
+          description:
+            'The target amount in dollars, exactly as the user stated it in this conversation.',
         },
       },
       required: ['target_amount'],
@@ -174,19 +193,23 @@ const TOOLS = [
         category: {
           type: 'string',
           enum: ['Transportation', 'Shopping'],
-          description: 'Must be Transportation or Shopping - this tool has no estimate mechanism for anything else.',
+          description:
+            'Must be Transportation or Shopping - this tool has no estimate mechanism for anything else.',
         },
         total_price: {
           type: 'number',
-          description: 'The full total/purchase price in dollars, exactly as the user stated it in this conversation - before any down payment or trade-in value is subtracted.',
+          description:
+            'The full total/purchase price in dollars, exactly as the user stated it in this conversation - before any down payment or trade-in value is subtracted.',
         },
         down_payment: {
           type: 'number',
-          description: 'Optional. The cash down payment in dollars, exactly as the user stated it in this conversation. Omit entirely if the user never mentioned one - do not pass 0 as a guess.',
+          description:
+            'Optional. The cash down payment in dollars, exactly as the user stated it in this conversation. Omit entirely if the user never mentioned one - do not pass 0 as a guess.',
         },
         trade_in_value: {
           type: 'number',
-          description: "Optional. A trade-in vehicle's value in dollars, exactly as the user stated it (e.g. \"what if I traded in my car for $8,000\"). This is the user's own self-reported estimate, not a verified appraisal - omit entirely if the user never mentioned a trade-in, do not pass 0 as a guess, and do not confuse with down_payment (a separate argument even when the user mentions both together).",
+          description:
+            'Optional. A trade-in vehicle\'s value in dollars, exactly as the user stated it (e.g. "what if I traded in my car for $8,000"). This is the user\'s own self-reported estimate, not a verified appraisal - omit entirely if the user never mentioned a trade-in, do not pass 0 as a guess, and do not confuse with down_payment (a separate argument even when the user mentions both together).',
         },
         term_months: {
           type: 'number',
@@ -195,7 +218,8 @@ const TOOLS = [
         },
         annual_rate_percent: {
           type: 'number',
-          description: 'Optional. A hypothetical annual interest rate the user proposed, as a percent (6 for 6%, not 0.06) - exactly as they stated it. Omit entirely to use the real current published rate (Transportation) or the standard 0%-promo assumption (Shopping) automatically - never pass a rate the user did not actually say.',
+          description:
+            'Optional. A hypothetical annual interest rate the user proposed, as a percent (6 for 6%, not 0.06) - exactly as they stated it. Omit entirely to use the real current published rate (Transportation) or the standard 0%-promo assumption (Shopping) automatically - never pass a rate the user did not actually say.',
         },
       },
       required: ['category', 'total_price', 'term_months'],
@@ -214,7 +238,9 @@ const TOOLS = [
 // ---------------------------------------------------------------------------
 
 function userTexts(messages) {
-  return (messages || []).filter((m) => m?.role === 'user' && typeof m.text === 'string').map((m) => m.text);
+  return (messages || [])
+    .filter((m) => m?.role === 'user' && typeof m.text === 'string')
+    .map((m) => m.text);
 }
 
 // Recursively collects every finite numeric leaf from an object/array into
@@ -251,7 +277,8 @@ function verifyAmountAgainstConversation(messages, amount, knownNumbers) {
 }
 
 function verifyTermMonthsAgainstConversation(messages, termMonths, knownNumbers) {
-  if (typeof termMonths !== 'number' || !Number.isFinite(termMonths) || termMonths <= 0) return false;
+  if (typeof termMonths !== 'number' || !Number.isFinite(termMonths) || termMonths <= 0)
+    return false;
   const rounded = Math.round(termMonths);
   if (knownNumbers && knownNumbers.has(rounded * 100)) return true;
   return userTexts(messages).some((text) => parseFinanceTermMonths(text) === rounded);
@@ -283,9 +310,12 @@ function extractCandidateRates(text) {
 }
 
 function verifyRateAgainstConversation(messages, ratePercent, knownNumbers) {
-  if (typeof ratePercent !== 'number' || !Number.isFinite(ratePercent) || ratePercent < 0) return false;
+  if (typeof ratePercent !== 'number' || !Number.isFinite(ratePercent) || ratePercent < 0)
+    return false;
   if (knownNumbers && knownNumbers.has(Math.round(ratePercent * 100))) return true;
-  return userTexts(messages).some((text) => extractCandidateRates(text).some((r) => Math.abs(r - ratePercent) < 0.005));
+  return userTexts(messages).some((text) =>
+    extractCandidateRates(text).some((r) => Math.abs(r - ratePercent) < 0.005)
+  );
 }
 
 function sanitizeCategory(value) {
@@ -305,7 +335,11 @@ function sanitizeRecurrence(value) {
 async function executeTool(name, input, { context, messages, today, knownNumbers }) {
   if (name === 'evaluate_scenario') {
     if (!verifyAmountAgainstConversation(messages, input?.amount, knownNumbers)) {
-      return { ok: false, error: 'amount_not_verified: this amount was not found in anything the user actually typed - ask them to state it directly.' };
+      return {
+        ok: false,
+        error:
+          'amount_not_verified: this amount was not found in anything the user actually typed - ask them to state it directly.',
+      };
     }
     try {
       const result = evaluateScenario({
@@ -326,7 +360,11 @@ async function executeTool(name, input, { context, messages, today, knownNumbers
 
   if (name === 'compare_buy_now_vs_wait') {
     if (!verifyAmountAgainstConversation(messages, input?.amount, knownNumbers)) {
-      return { ok: false, error: 'amount_not_verified: this amount was not found in anything the user actually typed - ask them to state it directly.' };
+      return {
+        ok: false,
+        error:
+          'amount_not_verified: this amount was not found in anything the user actually typed - ask them to state it directly.',
+      };
     }
     try {
       const comparison = compareBuyNowVsWait({
@@ -340,7 +378,11 @@ async function executeTool(name, input, { context, messages, today, knownNumbers
       if (!comparison) {
         return {
           ok: true,
-          result: { available: false, detail: 'No recurring income has been detected, so there is no real payday to compare waiting against.' },
+          result: {
+            available: false,
+            detail:
+              'No recurring income has been detected, so there is no real payday to compare waiting against.',
+          },
         };
       }
       return { ok: true, result: { available: true, comparison } };
@@ -362,10 +404,17 @@ async function executeTool(name, input, { context, messages, today, knownNumbers
 
   if (name === 'project_affordable_date') {
     if (!verifyAmountAgainstConversation(messages, input?.target_amount, knownNumbers)) {
-      return { ok: false, error: 'amount_not_verified: this target amount was not found in anything the user actually typed - ask them to state it directly.' };
+      return {
+        ok: false,
+        error:
+          'amount_not_verified: this target amount was not found in anything the user actually typed - ask them to state it directly.',
+      };
     }
     try {
-      const result = projectAffordableDate({ context, targetAmount: input.target_amount });
+      const result = projectAffordableDate({
+        context,
+        targetAmount: input.target_amount,
+      });
       return { ok: true, result };
     } catch (err) {
       if (err instanceof ScenarioValidationError) return { ok: false, error: err.message };
@@ -376,13 +425,25 @@ async function executeTool(name, input, { context, messages, today, knownNumbers
   if (name === 'estimate_financing_payment') {
     const category = sanitizeCategory(input?.category);
     if (category !== 'Transportation' && category !== 'Shopping') {
-      return { ok: false, error: 'unsupported_category: this tool only estimates payments for Transportation or Shopping - ask the user for the monthly payment directly instead.' };
+      return {
+        ok: false,
+        error:
+          'unsupported_category: this tool only estimates payments for Transportation or Shopping - ask the user for the monthly payment directly instead.',
+      };
     }
     if (!verifyAmountAgainstConversation(messages, input?.total_price, knownNumbers)) {
-      return { ok: false, error: 'amount_not_verified: this total price was not found in anything the user actually typed - ask them to state it directly.' };
+      return {
+        ok: false,
+        error:
+          'amount_not_verified: this total price was not found in anything the user actually typed - ask them to state it directly.',
+      };
     }
     if (!verifyTermMonthsAgainstConversation(messages, input?.term_months, knownNumbers)) {
-      return { ok: false, error: 'term_not_verified: this term was not found in anything the user actually typed - ask them to state it directly (e.g. "60 months" or "5 years").' };
+      return {
+        ok: false,
+        error:
+          'term_not_verified: this term was not found in anything the user actually typed - ask them to state it directly (e.g. "60 months" or "5 years").',
+      };
     }
     // down_payment/trade_in_value are both optional and, unlike
     // total_price/term_months, never required to be present - but if
@@ -400,14 +461,22 @@ async function executeTool(name, input, { context, messages, today, knownNumbers
     let downPayment = 0;
     if (input?.down_payment !== undefined && input?.down_payment !== null) {
       if (!verifyAmountAgainstConversation(messages, input.down_payment, knownNumbers)) {
-        return { ok: false, error: 'amount_not_verified: this down payment was not found in anything the user actually typed - ask them to state it directly.' };
+        return {
+          ok: false,
+          error:
+            'amount_not_verified: this down payment was not found in anything the user actually typed - ask them to state it directly.',
+        };
       }
       downPayment = input.down_payment;
     }
     let tradeInValue = 0;
     if (input?.trade_in_value !== undefined && input?.trade_in_value !== null) {
       if (!verifyAmountAgainstConversation(messages, input.trade_in_value, knownNumbers)) {
-        return { ok: false, error: 'amount_not_verified: this trade-in value was not found in anything the user actually typed - ask them to state it directly.' };
+        return {
+          ok: false,
+          error:
+            'amount_not_verified: this trade-in value was not found in anything the user actually typed - ask them to state it directly.',
+        };
       }
       tradeInValue = input.trade_in_value;
     }
@@ -420,7 +489,11 @@ async function executeTool(name, input, { context, messages, today, knownNumbers
     const totalPrice = input.total_price;
     const financedAmount = totalPrice - downPayment - tradeInValue;
     if (financedAmount <= 0) {
-      return { ok: false, error: 'reduction_covers_price: the stated down payment and/or trade-in value together are greater than or equal to the total price, so there is nothing left to finance - tell the user no loan/payment plan is needed for this purchase.' };
+      return {
+        ok: false,
+        error:
+          'reduction_covers_price: the stated down payment and/or trade-in value together are greater than or equal to the total price, so there is nothing left to finance - tell the user no loan/payment plan is needed for this purchase.',
+      };
     }
 
     // A hypothetical rate the user proposed ("what if I got 6%") is
@@ -435,7 +508,11 @@ async function executeTool(name, input, { context, messages, today, knownNumbers
     let hypotheticalRatePercent = null;
     if (input?.annual_rate_percent !== undefined && input?.annual_rate_percent !== null) {
       if (!verifyRateAgainstConversation(messages, input.annual_rate_percent, knownNumbers)) {
-        return { ok: false, error: 'rate_not_verified: this rate was not found in anything the user actually typed - ask them to state it directly.' };
+        return {
+          ok: false,
+          error:
+            'rate_not_verified: this rate was not found in anything the user actually typed - ask them to state it directly.',
+        };
       }
       hypotheticalRatePercent = input.annual_rate_percent;
     }
@@ -451,9 +528,16 @@ async function executeTool(name, input, { context, messages, today, knownNumbers
         try {
           liveRate = await getCurrentAutoLoanRate();
         } catch (err) {
-          logError('affordabilityChat: FRED rate fetch failed (comparison context only - hypothetical rate still computed)', err);
+          logError(
+            'affordabilityChat: FRED rate fetch failed (comparison context only - hypothetical rate still computed)',
+            err
+          );
         }
-        const estimatedPayment = computeEstimatedPayment({ totalPrice: financedAmount, termMonths, annualRatePercent: hypotheticalRatePercent });
+        const estimatedPayment = computeEstimatedPayment({
+          totalPrice: financedAmount,
+          termMonths,
+          annualRatePercent: hypotheticalRatePercent,
+        });
         return {
           ok: true,
           result: {
@@ -466,7 +550,10 @@ async function executeTool(name, input, { context, messages, today, knownNumbers
             total_price: totalPrice,
             down_payment: downPayment,
             trade_in_value: tradeInValue,
-            trade_in_caveat: tradeInValue > 0 ? `The $${tradeInValue.toFixed(2)} trade-in value is what was stated, not a verified appraisal - a dealer's actual offer may differ.` : undefined,
+            trade_in_caveat:
+              tradeInValue > 0
+                ? `The $${tradeInValue.toFixed(2)} trade-in value is what was stated, not a verified appraisal - a dealer's actual offer may differ.`
+                : undefined,
             financed_amount: financedAmount,
             caveat: liveRate
               ? `This uses the ${hypotheticalRatePercent}% rate proposed, not a real quote - for comparison, the current published average new-auto-loan rate is ${liveRate.rate}% as of ${liveRate.as_of_date}. Actual rate depends on credit and lender.`
@@ -479,9 +566,17 @@ async function executeTool(name, input, { context, messages, today, knownNumbers
         rate = await getCurrentAutoLoanRate();
       } catch (err) {
         logError('affordabilityChat: FRED rate fetch failed', err);
-        return { ok: false, error: "rate_unavailable: couldn't pull current average loan rates right now - tell the user to try again shortly, or to state the monthly payment directly if they already know it." };
+        return {
+          ok: false,
+          error:
+            "rate_unavailable: couldn't pull current average loan rates right now - tell the user to try again shortly, or to state the monthly payment directly if they already know it.",
+        };
       }
-      const estimatedPayment = computeEstimatedPayment({ totalPrice: financedAmount, termMonths, annualRatePercent: rate.rate });
+      const estimatedPayment = computeEstimatedPayment({
+        totalPrice: financedAmount,
+        termMonths,
+        annualRatePercent: rate.rate,
+      });
       return {
         ok: true,
         result: {
@@ -493,7 +588,10 @@ async function executeTool(name, input, { context, messages, today, knownNumbers
           total_price: totalPrice,
           down_payment: downPayment,
           trade_in_value: tradeInValue,
-          trade_in_caveat: tradeInValue > 0 ? `The $${tradeInValue.toFixed(2)} trade-in value is what was stated, not a verified appraisal - a dealer's actual offer may differ.` : undefined,
+          trade_in_caveat:
+            tradeInValue > 0
+              ? `The $${tradeInValue.toFixed(2)} trade-in value is what was stated, not a verified appraisal - a dealer's actual offer may differ.`
+              : undefined,
           financed_amount: financedAmount,
           source: `Federal Reserve (FRED series ${rate.series_id})`,
           caveat: `This is an estimated payment based on the average new-auto-loan rate published by the Federal Reserve (${rate.rate}% as of ${rate.as_of_date}) - not a real quote. Actual rate depends on credit and lender.`,
@@ -509,7 +607,11 @@ async function executeTool(name, input, { context, messages, today, knownNumbers
     // default, non-hypothetical case.
     const isHypotheticalShoppingRate = hypotheticalRatePercent !== null;
     const shoppingRatePercent = isHypotheticalShoppingRate ? hypotheticalRatePercent : 0;
-    const estimatedPayment = computeEstimatedPayment({ totalPrice: financedAmount, termMonths, annualRatePercent: shoppingRatePercent });
+    const estimatedPayment = computeEstimatedPayment({
+      totalPrice: financedAmount,
+      termMonths,
+      annualRatePercent: shoppingRatePercent,
+    });
     return {
       ok: true,
       result: {
@@ -520,7 +622,10 @@ async function executeTool(name, input, { context, messages, today, knownNumbers
         total_price: totalPrice,
         down_payment: downPayment,
         trade_in_value: tradeInValue,
-        trade_in_caveat: tradeInValue > 0 ? `The $${tradeInValue.toFixed(2)} trade-in value is what was stated, not a verified appraisal - a dealer's actual offer may differ.` : undefined,
+        trade_in_caveat:
+          tradeInValue > 0
+            ? `The $${tradeInValue.toFixed(2)} trade-in value is what was stated, not a verified appraisal - a dealer's actual offer may differ.`
+            : undefined,
         financed_amount: financedAmount,
         ...(isHypotheticalShoppingRate
           ? {
@@ -599,8 +704,12 @@ async function runAffordabilityChatTurn({ anchorResult, messages, context, today
 
     const toolResultContent = [];
     for (const block of toolUseBlocks) {
-      // eslint-disable-next-line no-await-in-loop
-      const outcome = await executeTool(block.name, block.input, { context, messages, today, knownNumbers });
+      const outcome = await executeTool(block.name, block.input, {
+        context,
+        messages,
+        today,
+        knownNumbers,
+      });
       // Tagged with which tool produced it - real bug found by adversarial
       // review (2026-08-22): the five tools return five genuinely different
       // shapes (only evaluate_scenario's matches ScenarioResult.js's own

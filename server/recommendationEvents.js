@@ -24,7 +24,12 @@ const supabaseAdmin = require('./supabaseAdmin');
 // 'goal_timeframe_extend' added 2026-09-11 (goal-driven budget funding) -
 // accepting Sorrel's computed realistic date for a goal that can't hit
 // its stated deadline at the user's current realistic savings capacity.
-const VALID_TYPES = new Set(['budget_rebalance', 'budget_insight_cuts', 'emergency_fund_target', 'goal_timeframe_extend']);
+const VALID_TYPES = new Set([
+  'budget_rebalance',
+  'budget_insight_cuts',
+  'emergency_fund_target',
+  'goal_timeframe_extend',
+]);
 const VALID_STATUSES = new Set(['accepted', 'rejected']);
 
 async function logRecommendationEvent({ userId, recommendationType, status, context = {} }) {
@@ -70,11 +75,13 @@ async function getRecommendationHistory(userId) {
   // fetches also meant a transient failure on the unrelated /goal call
   // could fail the whole history screen. Resolving it in this one query
   // (deliberately unfiltered by archived_at) avoids both.
-  const goalIds = [...new Set(
-    events
-      .filter((e) => e.recommendation_type === 'goal_timeframe_extend' && e.context?.goal_id)
-      .map((e) => e.context.goal_id)
-  )];
+  const goalIds = [
+    ...new Set(
+      events
+        .filter((e) => e.recommendation_type === 'goal_timeframe_extend' && e.context?.goal_id)
+        .map((e) => e.context.goal_id)
+    ),
+  ];
   if (goalIds.length === 0) return events;
 
   const { data: goals, error: goalsError } = await supabaseAdmin
@@ -88,7 +95,14 @@ async function getRecommendationHistory(userId) {
   return events.map((e) => {
     const goal = e.recommendation_type === 'goal_timeframe_extend' && goalsById[e.context?.goal_id];
     return goal
-      ? { ...e, context: { ...e.context, goal_type: goal.goal_type, goal_notes: goal.notes } }
+      ? {
+          ...e,
+          context: {
+            ...e.context,
+            goal_type: goal.goal_type,
+            goal_notes: goal.notes,
+          },
+        }
       : e;
   });
 }

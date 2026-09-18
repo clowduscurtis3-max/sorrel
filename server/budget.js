@@ -1,8 +1,21 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const supabaseAdmin = require('./supabaseAdmin');
-const { SPEND_CATEGORIES, ESSENTIAL_CATEGORIES, DISCRETIONARY_CATEGORIES } = require('./categorize');
-const { HISTORY_DAYS, summarizeSpending, monthRange, currentMonthRange } = require('./spendingAverages');
-const { DISCRETIONARY_FLOOR_RATIO, getGoalFundingPlan, computeDiscretionaryTarget } = require('./goalFunding');
+const {
+  SPEND_CATEGORIES,
+  ESSENTIAL_CATEGORIES,
+  DISCRETIONARY_CATEGORIES,
+} = require('./categorize');
+const {
+  HISTORY_DAYS,
+  summarizeSpending,
+  monthRange,
+  currentMonthRange,
+} = require('./spendingAverages');
+const {
+  DISCRETIONARY_FLOOR_RATIO,
+  getGoalFundingPlan,
+  computeDiscretionaryTarget,
+} = require('./goalFunding');
 const { getKnownRecurringBillsTotal } = require('./subscriptionAudit');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -34,7 +47,13 @@ function round2(n) {
 // doesn't create a new "can't reach target" case, it just decides which
 // category absorbs the shortfall when this uniform-scale approach can't
 // hit target exactly, same honest-shortfall spirit as the floor above.
-function rescaleDiscretionaryRows({ rows, discretionaryCategories, target, averages, floorRatio = DISCRETIONARY_FLOOR_RATIO }) {
+function rescaleDiscretionaryRows({
+  rows,
+  discretionaryCategories,
+  target,
+  averages,
+  floorRatio = DISCRETIONARY_FLOOR_RATIO,
+}) {
   const discretionaryRows = rows.filter((r) => discretionaryCategories.includes(r.category));
   if (discretionaryRows.length === 0) return;
 
@@ -251,7 +270,6 @@ function extractJson(text) {
   return cleaned;
 }
 
-
 function describeGoal(goal) {
   const parts = [`Goal type: ${goal.goal_type}.`];
   if (goal.target_amount) parts.push(`Target amount: $${goal.target_amount}.`);
@@ -291,9 +309,7 @@ function describeGoals(goals) {
 // live current-month/today default every existing caller (the "Regenerate
 // budget" button, via POST /budget/generate) still gets unchanged.
 async function generateBudget(userId, target = {}) {
-  const { period_start, period_end } = target.period_start
-    ? target
-    : currentMonthRange();
+  const { period_start, period_end } = target.period_start ? target : currentMonthRange();
   const anchorDate = target.anchorDate || new Date();
 
   const { data: transactions, error: txError } = await supabaseAdmin
@@ -302,7 +318,9 @@ async function generateBudget(userId, target = {}) {
     .eq('user_id', userId);
   if (txError) throw txError;
   if (!transactions || transactions.length === 0) {
-    throw new NoHistoryError('No transaction history to budget from yet - sync transactions first.');
+    throw new NoHistoryError(
+      'No transaction history to budget from yet - sync transactions first.'
+    );
   }
 
   // Phase 42: a user can have several active goals now - .single() would
@@ -348,7 +366,10 @@ async function generateBudget(userId, target = {}) {
     is_user_set: true,
   }));
 
-  const { averages, averageMonthlyIncome, monthCount } = summarizeSpending(transactions, anchorDate);
+  const { averages, averageMonthlyIncome, monthCount } = summarizeSpending(
+    transactions,
+    anchorDate
+  );
 
   // Nothing left for the AI to propose - every category is user-set.
   if (categoriesToGenerate.length === 0) return userSetBudgetRows;
@@ -373,7 +394,9 @@ async function generateBudget(userId, target = {}) {
   // anywhere yet), so a backfilled month falls back to the original
   // target/timeframe heuristic below instead of fabricating one.
   const isBackfill = Boolean(target.period_start);
-  const discretionaryCategoriesToGenerate = DISCRETIONARY_CATEGORIES.filter((c) => categoriesToGenerate.includes(c));
+  const discretionaryCategoriesToGenerate = DISCRETIONARY_CATEGORIES.filter((c) =>
+    categoriesToGenerate.includes(c)
+  );
   const discretionaryAverageTotal = discretionaryCategoriesToGenerate.reduce(
     (sum, c) => sum + Math.max(0, averages[c] || 0),
     0
@@ -451,7 +474,8 @@ async function generateBudget(userId, target = {}) {
   // room this mechanism can actually touch.
   const needsShortfallDecision =
     !isBackfill && discretionaryCategoriesToGenerate.length > 0 && essentialShortfall > 0.01;
-  const allowDiscretionaryBelowFloor = needsShortfallDecision && target.allowDiscretionaryBelowFloor === true;
+  const allowDiscretionaryBelowFloor =
+    needsShortfallDecision && target.allowDiscretionaryBelowFloor === true;
   if (needsShortfallDecision && !allowDiscretionaryBelowFloor) {
     throw new DiscretionaryFloorShortfallError(
       `Your committed bills and essential spending exceed your income by ` +
@@ -574,7 +598,9 @@ async function generateBudget(userId, target = {}) {
   } catch (err) {
     console.error('Failed to parse Claude budget response:', err.message);
     console.error('stop_reason:', message.stop_reason, '- raw response:', text);
-    throw new Error('AI budget generation failed - could not parse a valid response.');
+    throw new Error('AI budget generation failed - could not parse a valid response.', {
+      cause: err,
+    });
   }
 
   const rows = buildBudgetRows({
@@ -698,9 +724,9 @@ async function resetCategoryToAI(userId, category) {
       // not thrown - `err` (the real reason generateBudget failed) is
       // still the more useful error to surface to the caller, but a
       // failed restore must never disappear with zero trace.
-      const { error: restoreError } = await supabaseAdmin.from('budgets').insert(
-        existingRows.map((r) => ({ ...r, user_id: userId, period_start }))
-      );
+      const { error: restoreError } = await supabaseAdmin
+        .from('budgets')
+        .insert(existingRows.map((r) => ({ ...r, user_id: userId, period_start })));
       if (restoreError) {
         console.error(
           `resetCategoryToAI: failed to restore ${category} for user ${userId} after ` +
@@ -773,9 +799,7 @@ function computeBudgetStatus({ budgets, actuals }) {
 // month instead of the live current-month default every existing caller
 // still gets unchanged.
 async function recomputeBudgetActuals(userId, target = {}) {
-  const { period_start, period_end } = target.period_start
-    ? target
-    : currentMonthRange();
+  const { period_start, period_end } = target.period_start ? target : currentMonthRange();
 
   const { data: transactions, error: txError } = await supabaseAdmin
     .from('transactions')
@@ -839,7 +863,10 @@ async function backfillBudgetHistory(userId, monthsBack) {
       .limit(1);
     if (existingError) throw existingError;
     if (existing && existing.length > 0) {
-      results.push({ period_start: range.period_start, status: 'already_present' });
+      results.push({
+        period_start: range.period_start,
+        status: 'already_present',
+      });
       continue;
     }
 
@@ -863,13 +890,19 @@ async function backfillBudgetHistory(userId, monthsBack) {
         // backfill, not a failure (an account whose real history starts
         // partway through the backfill window will legitimately hit this
         // for its earliest months).
-        results.push({ period_start: range.period_start, status: 'no_history' });
+        results.push({
+          period_start: range.period_start,
+          status: 'no_history',
+        });
         continue;
       }
       throw err;
     }
 
-    await recomputeBudgetActuals(userId, { period_start: range.period_start, period_end: range.period_end });
+    await recomputeBudgetActuals(userId, {
+      period_start: range.period_start,
+      period_end: range.period_end,
+    });
     results.push({ period_start: range.period_start, status: 'backfilled' });
   }
   return results;
@@ -936,7 +969,10 @@ async function proposeCategoryTrim({ amountNeeded, candidates, framing }) {
     ],
   });
 
-  const text = message.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
+  const text = message.content
+    .filter((b) => b.type === 'text')
+    .map((b) => b.text)
+    .join('');
   const cleaned = extractJson(text);
 
   let parsed;
@@ -945,7 +981,7 @@ async function proposeCategoryTrim({ amountNeeded, candidates, framing }) {
   } catch (err) {
     console.error('Failed to parse Claude category-trim response:', err.message);
     console.error('stop_reason:', message.stop_reason, '- raw response:', text);
-    throw new Error('AI suggestion failed - could not parse a valid response.');
+    throw new Error('AI suggestion failed - could not parse a valid response.', { cause: err });
   }
 
   // Same validation discipline as generateBudget: only trust finite,
@@ -1003,7 +1039,13 @@ async function proposeRebalance(userId, category, newAmount) {
   const delta = Math.round((newAmount - currentAmount) * 100) / 100;
 
   if (delta <= 0) {
-    return { category, previous_amount: currentAmount, new_amount: newAmount, delta, adjustments: [] };
+    return {
+      category,
+      previous_amount: currentAmount,
+      new_amount: newAmount,
+      delta,
+      adjustments: [],
+    };
   }
 
   // Only categories the AI still controls are candidates - a category the
@@ -1030,7 +1072,10 @@ async function proposeRebalance(userId, category, newAmount) {
       !budgets?.find((b) => b.category === c)?.is_user_set
   );
   const candidateBudgets = Object.fromEntries(
-    candidateCategories.map((c) => [c, budgets?.find((b) => b.category === c)?.budgeted_amount ?? 0])
+    candidateCategories.map((c) => [
+      c,
+      budgets?.find((b) => b.category === c)?.budgeted_amount ?? 0,
+    ])
   );
 
   if (candidateCategories.length === 0 || Object.values(candidateBudgets).every((v) => v === 0)) {
@@ -1050,7 +1095,10 @@ async function proposeRebalance(userId, category, newAmount) {
 
   const result = await proposeCategoryTrim({
     amountNeeded: delta,
-    candidates: candidateCategories.map((c) => ({ category: c, room: candidateBudgets[c] })),
+    candidates: candidateCategories.map((c) => ({
+      category: c,
+      room: candidateBudgets[c],
+    })),
     framing: `The user just increased their "${category}" budget by $${delta.toFixed(2)}.`,
   });
 
@@ -1086,7 +1134,10 @@ async function proposeFundSourceSplit(suggestion) {
 
   return proposeCategoryTrim({
     amountNeeded: suggestion.shortfall_amount,
-    candidates: suggestion.categories.map((c) => ({ category: c.category, room: c.available })),
+    candidates: suggestion.categories.map((c) => ({
+      category: c.category,
+      room: c.available,
+    })),
     framing:
       `A hypothetical purchase the user is asking about would leave this ` +
       `period's budget $${suggestion.shortfall_amount.toFixed(2)} short.`,

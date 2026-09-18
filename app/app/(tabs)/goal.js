@@ -40,7 +40,11 @@ import { useSessionContext } from '../_lib/session';
 import { useAppData } from '../_lib/appData';
 import { useGoalForm, computeTargetDateFromTimeframe } from '../_components/GoalForm';
 import { formatAmountLabel } from '../_lib/amountPicker';
-import { orderGoalsByPriority, describeRealisticDateInsight, goalDisplayName } from '../_lib/goalFunding';
+import {
+  orderGoalsByPriority,
+  describeRealisticDateInsight,
+  goalDisplayName,
+} from '../_lib/goalFunding';
 import SorrelWordmark from '../_components/SorrelWordmark';
 import PrimaryButton from '../_components/PrimaryButton';
 import DraggableCardList from '../_components/DraggableCardList';
@@ -73,19 +77,57 @@ const GOAL_TYPE_TAGLINE = {
 // sync by hand (no shared module between client/server in this project),
 // so an edit to one must be mirrored in the other.
 const US_STATES = [
-  ['AL', 'Alabama'], ['AK', 'Alaska'], ['AZ', 'Arizona'], ['AR', 'Arkansas'],
-  ['CA', 'California'], ['CO', 'Colorado'], ['CT', 'Connecticut'], ['DE', 'Delaware'],
-  ['DC', 'District of Columbia'], ['FL', 'Florida'], ['GA', 'Georgia'], ['HI', 'Hawaii'],
-  ['ID', 'Idaho'], ['IL', 'Illinois'], ['IN', 'Indiana'], ['IA', 'Iowa'],
-  ['KS', 'Kansas'], ['KY', 'Kentucky'], ['LA', 'Louisiana'], ['ME', 'Maine'],
-  ['MD', 'Maryland'], ['MA', 'Massachusetts'], ['MI', 'Michigan'], ['MN', 'Minnesota'],
-  ['MS', 'Mississippi'], ['MO', 'Missouri'], ['MT', 'Montana'], ['NE', 'Nebraska'],
-  ['NV', 'Nevada'], ['NH', 'New Hampshire'], ['NJ', 'New Jersey'], ['NM', 'New Mexico'],
-  ['NY', 'New York'], ['NC', 'North Carolina'], ['ND', 'North Dakota'], ['OH', 'Ohio'],
-  ['OK', 'Oklahoma'], ['OR', 'Oregon'], ['PA', 'Pennsylvania'], ['RI', 'Rhode Island'],
-  ['SC', 'South Carolina'], ['SD', 'South Dakota'], ['TN', 'Tennessee'], ['TX', 'Texas'],
-  ['UT', 'Utah'], ['VT', 'Vermont'], ['VA', 'Virginia'], ['WA', 'Washington'],
-  ['WV', 'West Virginia'], ['WI', 'Wisconsin'], ['WY', 'Wyoming'],
+  ['AL', 'Alabama'],
+  ['AK', 'Alaska'],
+  ['AZ', 'Arizona'],
+  ['AR', 'Arkansas'],
+  ['CA', 'California'],
+  ['CO', 'Colorado'],
+  ['CT', 'Connecticut'],
+  ['DE', 'Delaware'],
+  ['DC', 'District of Columbia'],
+  ['FL', 'Florida'],
+  ['GA', 'Georgia'],
+  ['HI', 'Hawaii'],
+  ['ID', 'Idaho'],
+  ['IL', 'Illinois'],
+  ['IN', 'Indiana'],
+  ['IA', 'Iowa'],
+  ['KS', 'Kansas'],
+  ['KY', 'Kentucky'],
+  ['LA', 'Louisiana'],
+  ['ME', 'Maine'],
+  ['MD', 'Maryland'],
+  ['MA', 'Massachusetts'],
+  ['MI', 'Michigan'],
+  ['MN', 'Minnesota'],
+  ['MS', 'Mississippi'],
+  ['MO', 'Missouri'],
+  ['MT', 'Montana'],
+  ['NE', 'Nebraska'],
+  ['NV', 'Nevada'],
+  ['NH', 'New Hampshire'],
+  ['NJ', 'New Jersey'],
+  ['NM', 'New Mexico'],
+  ['NY', 'New York'],
+  ['NC', 'North Carolina'],
+  ['ND', 'North Dakota'],
+  ['OH', 'Ohio'],
+  ['OK', 'Oklahoma'],
+  ['OR', 'Oregon'],
+  ['PA', 'Pennsylvania'],
+  ['RI', 'Rhode Island'],
+  ['SC', 'South Carolina'],
+  ['SD', 'South Dakota'],
+  ['TN', 'Tennessee'],
+  ['TX', 'Texas'],
+  ['UT', 'Utah'],
+  ['VT', 'Vermont'],
+  ['VA', 'Virginia'],
+  ['WA', 'Washington'],
+  ['WV', 'West Virginia'],
+  ['WI', 'Wisconsin'],
+  ['WY', 'Wyoming'],
 ];
 
 // Plain-language read of the back-end DTI tier (server/homeAffordability.js's
@@ -169,7 +211,8 @@ function formatTargetDate(isoDate) {
 // under the old realized-pace version this replaced.
 function describeMilestoneStatus(milestone) {
   if (milestone.status === 'already_reached') return 'Already reached';
-  if (milestone.status === 'projected') return `Projected: ${formatTargetDate(milestone.projected_date)}`;
+  if (milestone.status === 'projected')
+    return `Projected: ${formatTargetDate(milestone.projected_date)}`;
   return milestone.detail || 'Not enough data yet';
 }
 
@@ -277,7 +320,8 @@ export default function Goal() {
   const goalStyles = useMemo(() => buildGoalStyles(colors), [colors]);
   const router = useRouter();
   const { refetchGoal } = useSessionContext();
-  const { goalsProgress, refetchGoalsProgress, subscriptionAudit, budgetStatus, accounts } = useAppData();
+  const { goalsProgress, refetchGoalsProgress, subscriptionAudit, budgetStatus, accounts } =
+    useAppData();
   const [showNotificationCenter, setShowNotificationCenter] = useState(false);
 
   // Phase 42 (multi-goal tracking, 2026-09-08): the single "Primary Goal"
@@ -499,7 +543,9 @@ export default function Goal() {
     } catch (err) {
       console.error(err);
       setEditAmountVoiceError(
-        err.message === 'SERVER_ERROR' ? apiErrorMessage(err) : "Couldn't transcribe that - try again or type it."
+        err.message === 'SERVER_ERROR'
+          ? apiErrorMessage(err)
+          : "Couldn't transcribe that - try again or type it."
       );
     } finally {
       setEditAmountTranscribing(false);
@@ -512,11 +558,6 @@ export default function Goal() {
     } else {
       startEditAmountRecording();
     }
-  }
-
-  function closeEditorAnd(fn) {
-    setActiveEditor(null);
-    fn();
   }
 
   // Phase 42 (multi-goal tracking, 2026-09-08): a user can have several
@@ -597,7 +638,9 @@ export default function Goal() {
     // the editor and saving now self-heals a stale config instead of
     // permanently wedging it.
     const realAccountIds = new Set(depositoryAccounts.map((a) => a.id));
-    setEfSelectedAccountIds((emergencyFundStatus?.account_ids || []).filter((id) => realAccountIds.has(id)));
+    setEfSelectedAccountIds(
+      (emergencyFundStatus?.account_ids || []).filter((id) => realAccountIds.has(id))
+    );
     setEfTargetText(
       emergencyFundStatus?.target_amount ? String(emergencyFundStatus.target_amount) : ''
     );
@@ -679,7 +722,9 @@ export default function Goal() {
       // amount is still exactly the one they tapped, unedited since -
       // see efUsedSuggestedAmount's own comment above.
       if (efUsedSuggestedAmount === targetAmount) {
-        logRecommendationEvent('emergency_fund_target', 'accepted', { target_amount: targetAmount });
+        logRecommendationEvent('emergency_fund_target', 'accepted', {
+          target_amount: targetAmount,
+        });
       }
       setEfEditing(false);
     }
@@ -742,7 +787,9 @@ export default function Goal() {
     } catch (err) {
       console.error(err);
       setCalculatorVoiceError(
-        err.message === 'SERVER_ERROR' ? apiErrorMessage(err) : "Couldn't transcribe that - try again or type it."
+        err.message === 'SERVER_ERROR'
+          ? apiErrorMessage(err)
+          : "Couldn't transcribe that - try again or type it."
       );
     } finally {
       setCalculatorTranscribing(false);
@@ -840,7 +887,11 @@ export default function Goal() {
       const res = await apiFetch('/home-affordability', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ home_price: homePrice, down_payment: downPayment, state: homeState }),
+        body: JSON.stringify({
+          home_price: homePrice,
+          down_payment: downPayment,
+          state: homeState,
+        }),
       });
       if (!res.ok) throw new Error('SERVER_ERROR');
       const data = await res.json();
@@ -904,7 +955,9 @@ export default function Goal() {
     } catch (err) {
       console.error(err);
       setMilestonesVoiceError(
-        err.message === 'SERVER_ERROR' ? apiErrorMessage(err) : "Couldn't transcribe that - try again or type it."
+        err.message === 'SERVER_ERROR'
+          ? apiErrorMessage(err)
+          : "Couldn't transcribe that - try again or type it."
       );
     } finally {
       setMilestonesTranscribing(false);
@@ -1051,7 +1104,9 @@ export default function Goal() {
 
   function reorderGoalPriority(newOrderIds) {
     setGoalSettings((prev) => ({ ...prev, goal_priority_order: newOrderIds }));
-    patchSettings('goal_settings', { goal_priority_order: newOrderIds }).catch((err) => console.error(err));
+    patchSettings('goal_settings', { goal_priority_order: newOrderIds }).catch((err) =>
+      console.error(err)
+    );
   }
 
   const [acceptingRealisticDateFor, setAcceptingRealisticDateFor] = useState(null);
@@ -1128,9 +1183,15 @@ export default function Goal() {
   const editGoalTagline = GOAL_TYPE_TAGLINE[form.goalType] || 'Your own goal, your own pace.';
   const editTargetDate = computeTargetDateFromTimeframe(form.goalTimeframe);
   const editTargetDateLabel = editTargetDate
-    ? editTargetDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    ? editTargetDate.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      })
     : 'No target date set';
-  const editAmountLabel = form.goalAmount ? formatAmountLabel(form.goalAmount) : 'No target amount set';
+  const editAmountLabel = form.goalAmount
+    ? formatAmountLabel(form.goalAmount)
+    : 'No target amount set';
   const editGoalTypeLabel = GOAL_TYPES.find((g) => g.value === form.goalType)?.label || 'Goal type';
   const tomorrow = new Date(Date.now() + 86400000);
 
@@ -1171,253 +1232,262 @@ export default function Goal() {
           </View>
 
           <TopEdgeFade height={90}>
-          <ScrollView
-            style={goalStyles.editingScroll}
-            // 150 (the default every other tab uses) wasn't enough here -
-            // this screen's content (a couple of short cards) is close
-            // enough to viewport height that there's little natural
-            // overflow to scroll through, so the Save Changes/Delete Goal
-            // buttons at the very end stayed pinned behind the floating tab
-            // bar even at max scroll (real, user-reported 2026-08-28). 350
-            // overshot the other direction (confirmed on-device: a large
-            // blank gap between Delete Goal and the tab bar at max scroll) -
-            // 260 matches Budget's own ScrollView, which needed more than
-            // the 150 default for the same reason and was already tuned
-            // against a real device.
-            contentContainerStyle={{ paddingBottom: 260 }}
-          >
-            {/* Goal Summary - informational only, no button here (the old
+            <ScrollView
+              style={goalStyles.editingScroll}
+              // 150 (the default every other tab uses) wasn't enough here -
+              // this screen's content (a couple of short cards) is close
+              // enough to viewport height that there's little natural
+              // overflow to scroll through, so the Save Changes/Delete Goal
+              // buttons at the very end stayed pinned behind the floating tab
+              // bar even at max scroll (real, user-reported 2026-08-28). 350
+              // overshot the other direction (confirmed on-device: a large
+              // blank gap between Delete Goal and the tab bar at max scroll) -
+              // 260 matches Budget's own ScrollView, which needed more than
+              // the 150 default for the same reason and was already tuned
+              // against a real device.
+              contentContainerStyle={{ paddingBottom: 260 }}
+            >
+              {/* Goal Summary - informational only, no button here (the old
                 screen's giant "SAVE FOR A HOUSE"-style buttons lived in the
                 type picker below instead, also since replaced). */}
-            <View style={[styles.card, goalStyles.cardMargin]}>
-              <View style={goalStyles.summaryRow}>
-                <View style={goalStyles.summaryIconCircle}>
-                  <MaterialIcons name={editGoalIcon} size={28} color={colors.dark} />
-                </View>
-                <View style={goalStyles.summaryTextCol}>
-                  <Text style={goalStyles.cardEyebrow}>YOUR GOAL</Text>
-                  <Text style={goalStyles.summaryName}>{editGoalName}</Text>
-                  <Text style={goalStyles.summaryTagline}>{editGoalTagline}</Text>
+              <View style={[styles.card, goalStyles.cardMargin]}>
+                <View style={goalStyles.summaryRow}>
+                  <View style={goalStyles.summaryIconCircle}>
+                    <MaterialIcons name={editGoalIcon} size={28} color={colors.dark} />
+                  </View>
+                  <View style={goalStyles.summaryTextCol}>
+                    <Text style={goalStyles.cardEyebrow}>YOUR GOAL</Text>
+                    <Text style={goalStyles.summaryName}>{editGoalName}</Text>
+                    <Text style={goalStyles.summaryTagline}>{editGoalTagline}</Text>
+                  </View>
                 </View>
               </View>
-            </View>
 
-            {/* Goal Settings - one unified card, three tap-to-reveal rows
+              {/* Goal Settings - one unified card, three tap-to-reveal rows
                 instead of the old permanently-visible type-button wall +
                 wheel + date picker + two "CLEAR" buttons all shown at once. */}
-            <View style={[styles.card, goalStyles.cardMargin, goalStyles.settingsCard]}>
-              <Pressable
-                style={goalStyles.settingsRow}
-                onPress={() => setActiveEditor(activeEditor === 'amount' ? null : 'amount')}
-                accessibilityRole="button"
-                accessibilityLabel={`Target amount: ${editAmountLabel}`}
-              >
-                <View style={goalStyles.settingsIconCircle}>
-                  <MaterialIcons name="attach-money" size={18} color={colors.dark} />
-                </View>
-                <View style={goalStyles.settingsRowText}>
-                  <Text style={goalStyles.settingsRowLabel}>Target amount</Text>
-                  <Text style={goalStyles.settingsRowValue}>{editAmountLabel}</Text>
-                </View>
-                <MaterialIcons
-                  name={activeEditor === 'amount' ? 'expand-less' : 'chevron-right'}
-                  size={22}
-                  color={colors.muted}
-                />
-              </Pressable>
-              {activeEditor === 'amount' && (
-                <View style={goalStyles.inlineEditor}>
-                  <View style={goalStyles.calculatorInputRow}>
-                    <TextInput
-                      style={[styles.input, goalStyles.calculatorInput]}
-                      value={form.goalAmount}
-                      onChangeText={form.setGoalAmount}
-                      placeholder="e.g. $10,000"
-                      placeholderTextColor={colors.placeholder}
-                      keyboardType="numeric"
-                      editable={!editAmountTranscribing && !editAmountRecorderState.isRecording}
-                    />
-                    {editAmountTranscribing ? (
-                      <ActivityIndicator style={goalStyles.calculatorMicButton} />
-                    ) : (
-                      <Pressable
-                        onPress={onEditAmountMicPress}
-                        accessibilityRole="button"
-                        accessibilityLabel={
-                          editAmountRecorderState.isRecording ? 'Stop recording' : 'Speak the amount'
-                        }
-                        style={[
-                          goalStyles.calculatorMicButton,
-                          editAmountRecorderState.isRecording
-                            ? goalStyles.calculatorMicButtonRecording
-                            : goalStyles.calculatorMicButtonIdle,
-                        ]}
-                      >
-                        <MaterialIcons
-                          name={editAmountRecorderState.isRecording ? 'stop' : 'mic'}
-                          size={20}
-                          color={colors.background}
-                        />
-                      </Pressable>
-                    )}
+              <View style={[styles.card, goalStyles.cardMargin, goalStyles.settingsCard]}>
+                <Pressable
+                  style={goalStyles.settingsRow}
+                  onPress={() => setActiveEditor(activeEditor === 'amount' ? null : 'amount')}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Target amount: ${editAmountLabel}`}
+                >
+                  <View style={goalStyles.settingsIconCircle}>
+                    <MaterialIcons name="attach-money" size={18} color={colors.dark} />
                   </View>
-                  {editAmountVoiceError && (
-                    <Text style={styles.errorText}>{editAmountVoiceError}</Text>
-                  )}
-                  <View style={goalStyles.inlineEditorActions}>
-                    {!!form.goalAmount && (
-                      <Pressable
-                        onPress={() => form.setGoalAmount('')}
-                        accessibilityRole="button"
-                        accessibilityLabel="Clear target amount"
-                      >
-                        <Text style={goalStyles.inlineEditorLink}>Clear amount</Text>
-                      </Pressable>
-                    )}
-                    <Pressable onPress={() => setActiveEditor(null)} accessibilityRole="button">
-                      <Text style={goalStyles.inlineEditorLinkDone}>Done</Text>
-                    </Pressable>
+                  <View style={goalStyles.settingsRowText}>
+                    <Text style={goalStyles.settingsRowLabel}>Target amount</Text>
+                    <Text style={goalStyles.settingsRowValue}>{editAmountLabel}</Text>
                   </View>
-                </View>
-              )}
-
-              <View style={goalStyles.settingsDivider} />
-
-              <Pressable
-                style={goalStyles.settingsRow}
-                onPress={() => setActiveEditor(activeEditor === 'date' ? null : 'date')}
-                accessibilityRole="button"
-                accessibilityLabel={`Target date: ${editTargetDateLabel}`}
-              >
-                <View style={[goalStyles.settingsIconCircle, goalStyles.settingsIconCircleWarm]}>
-                  <MaterialIcons name="event" size={18} color={colors.warningText} />
-                </View>
-                <View style={goalStyles.settingsRowText}>
-                  <Text style={goalStyles.settingsRowLabel}>Target date</Text>
-                  <Text style={goalStyles.settingsRowValue}>{editTargetDateLabel}</Text>
-                </View>
-                <MaterialIcons
-                  name={activeEditor === 'date' ? 'expand-less' : 'chevron-right'}
-                  size={22}
-                  color={colors.muted}
-                />
-              </Pressable>
-              {activeEditor === 'date' && (
-                <View style={goalStyles.inlineEditor}>
-                  <DateTimePicker
-                    value={editTargetDate ?? tomorrow}
-                    mode="date"
-                    minimumDate={tomorrow}
-                    onChange={(event, selectedDate) => {
-                      if (event.type === 'dismissed' || !selectedDate) return;
-                      const months = Math.max(
-                        1,
-                        Math.round((selectedDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24 * 30.44))
-                      );
-                      form.setGoalTimeframe(String(months));
-                    }}
+                  <MaterialIcons
+                    name={activeEditor === 'amount' ? 'expand-less' : 'chevron-right'}
+                    size={22}
+                    color={colors.muted}
                   />
-                  <View style={goalStyles.inlineEditorActions}>
-                    {!!editTargetDate && (
-                      <Pressable
-                        onPress={() => form.setGoalTimeframe('')}
-                        accessibilityRole="button"
-                        accessibilityLabel="Remove target date"
-                      >
-                        <Text style={goalStyles.inlineEditorLink}>Remove date</Text>
-                      </Pressable>
-                    )}
-                    <Pressable onPress={() => setActiveEditor(null)} accessibilityRole="button">
-                      <Text style={goalStyles.inlineEditorLinkDone}>Done</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              )}
-
-              <View style={goalStyles.settingsDivider} />
-
-              <Pressable
-                style={goalStyles.settingsRow}
-                onPress={() => setActiveEditor(activeEditor === 'type' ? null : 'type')}
-                accessibilityRole="button"
-                accessibilityLabel={`Goal type: ${editGoalTypeLabel}`}
-              >
-                <View style={goalStyles.settingsIconCircle}>
-                  <MaterialIcons name="track-changes" size={18} color={colors.dark} />
-                </View>
-                <View style={goalStyles.settingsRowText}>
-                  <Text style={goalStyles.settingsRowLabel}>Goal type</Text>
-                  <Text style={goalStyles.settingsRowValue}>{editGoalTypeLabel}</Text>
-                </View>
-                <MaterialIcons
-                  name={activeEditor === 'type' ? 'expand-less' : 'chevron-right'}
-                  size={22}
-                  color={colors.muted}
-                />
-              </Pressable>
-              {activeEditor === 'type' && (
-                <View style={goalStyles.inlineEditor}>
-                  {GOAL_TYPES.map((g) => {
-                    const selected = form.goalType === g.value;
-                    return (
-                      <Pressable
-                        key={g.value}
-                        style={[goalStyles.typeOptionCard, selected && goalStyles.typeOptionCardSelected]}
-                        onPress={() => form.setGoalType(g.value)}
-                        accessibilityRole="radio"
-                        accessibilityState={{ checked: selected }}
-                        accessibilityLabel={g.label}
-                      >
-                        <View
+                </Pressable>
+                {activeEditor === 'amount' && (
+                  <View style={goalStyles.inlineEditor}>
+                    <View style={goalStyles.calculatorInputRow}>
+                      <TextInput
+                        style={[styles.input, goalStyles.calculatorInput]}
+                        value={form.goalAmount}
+                        onChangeText={form.setGoalAmount}
+                        placeholder="e.g. $10,000"
+                        placeholderTextColor={colors.placeholder}
+                        keyboardType="numeric"
+                        editable={!editAmountTranscribing && !editAmountRecorderState.isRecording}
+                      />
+                      {editAmountTranscribing ? (
+                        <ActivityIndicator style={goalStyles.calculatorMicButton} />
+                      ) : (
+                        <Pressable
+                          onPress={onEditAmountMicPress}
+                          accessibilityRole="button"
+                          accessibilityLabel={
+                            editAmountRecorderState.isRecording
+                              ? 'Stop recording'
+                              : 'Speak the amount'
+                          }
                           style={[
-                            goalStyles.settingsIconCircle,
-                            selected && goalStyles.settingsIconCircleSelected,
+                            goalStyles.calculatorMicButton,
+                            editAmountRecorderState.isRecording
+                              ? goalStyles.calculatorMicButtonRecording
+                              : goalStyles.calculatorMicButtonIdle,
                           ]}
                         >
                           <MaterialIcons
-                            name={GOAL_TYPE_ICON[g.value] || 'flag'}
-                            size={18}
-                            color={selected ? colors.card : colors.dark}
+                            name={editAmountRecorderState.isRecording ? 'stop' : 'mic'}
+                            size={20}
+                            color={colors.background}
                           />
-                        </View>
-                        <View style={goalStyles.typeOptionTextGroup}>
-                          <Text style={goalStyles.typeOptionTitle}>{g.label}</Text>
-                          {!!GOAL_TYPE_TAGLINE[g.value] && (
-                            <Text style={goalStyles.typeOptionSubtitle}>{GOAL_TYPE_TAGLINE[g.value]}</Text>
-                          )}
-                        </View>
-                        <MaterialIcons
-                          name={selected ? 'check-circle' : 'radio-button-unchecked'}
-                          size={20}
-                          color={selected ? colors.primary : colors.muted}
-                        />
+                        </Pressable>
+                      )}
+                    </View>
+                    {editAmountVoiceError && (
+                      <Text style={styles.errorText}>{editAmountVoiceError}</Text>
+                    )}
+                    <View style={goalStyles.inlineEditorActions}>
+                      {!!form.goalAmount && (
+                        <Pressable
+                          onPress={() => form.setGoalAmount('')}
+                          accessibilityRole="button"
+                          accessibilityLabel="Clear target amount"
+                        >
+                          <Text style={goalStyles.inlineEditorLink}>Clear amount</Text>
+                        </Pressable>
+                      )}
+                      <Pressable onPress={() => setActiveEditor(null)} accessibilityRole="button">
+                        <Text style={goalStyles.inlineEditorLinkDone}>Done</Text>
                       </Pressable>
-                    );
-                  })}
-                  {/* Always shown, not gated behind a specific type
+                    </View>
+                  </View>
+                )}
+
+                <View style={goalStyles.settingsDivider} />
+
+                <Pressable
+                  style={goalStyles.settingsRow}
+                  onPress={() => setActiveEditor(activeEditor === 'date' ? null : 'date')}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Target date: ${editTargetDateLabel}`}
+                >
+                  <View style={[goalStyles.settingsIconCircle, goalStyles.settingsIconCircleWarm]}>
+                    <MaterialIcons name="event" size={18} color={colors.warningText} />
+                  </View>
+                  <View style={goalStyles.settingsRowText}>
+                    <Text style={goalStyles.settingsRowLabel}>Target date</Text>
+                    <Text style={goalStyles.settingsRowValue}>{editTargetDateLabel}</Text>
+                  </View>
+                  <MaterialIcons
+                    name={activeEditor === 'date' ? 'expand-less' : 'chevron-right'}
+                    size={22}
+                    color={colors.muted}
+                  />
+                </Pressable>
+                {activeEditor === 'date' && (
+                  <View style={goalStyles.inlineEditor}>
+                    <DateTimePicker
+                      value={editTargetDate ?? tomorrow}
+                      mode="date"
+                      minimumDate={tomorrow}
+                      onChange={(event, selectedDate) => {
+                        if (event.type === 'dismissed' || !selectedDate) return;
+                        const months = Math.max(
+                          1,
+                          Math.round(
+                            (selectedDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24 * 30.44)
+                          )
+                        );
+                        form.setGoalTimeframe(String(months));
+                      }}
+                    />
+                    <View style={goalStyles.inlineEditorActions}>
+                      {!!editTargetDate && (
+                        <Pressable
+                          onPress={() => form.setGoalTimeframe('')}
+                          accessibilityRole="button"
+                          accessibilityLabel="Remove target date"
+                        >
+                          <Text style={goalStyles.inlineEditorLink}>Remove date</Text>
+                        </Pressable>
+                      )}
+                      <Pressable onPress={() => setActiveEditor(null)} accessibilityRole="button">
+                        <Text style={goalStyles.inlineEditorLinkDone}>Done</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                )}
+
+                <View style={goalStyles.settingsDivider} />
+
+                <Pressable
+                  style={goalStyles.settingsRow}
+                  onPress={() => setActiveEditor(activeEditor === 'type' ? null : 'type')}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Goal type: ${editGoalTypeLabel}`}
+                >
+                  <View style={goalStyles.settingsIconCircle}>
+                    <MaterialIcons name="track-changes" size={18} color={colors.dark} />
+                  </View>
+                  <View style={goalStyles.settingsRowText}>
+                    <Text style={goalStyles.settingsRowLabel}>Goal type</Text>
+                    <Text style={goalStyles.settingsRowValue}>{editGoalTypeLabel}</Text>
+                  </View>
+                  <MaterialIcons
+                    name={activeEditor === 'type' ? 'expand-less' : 'chevron-right'}
+                    size={22}
+                    color={colors.muted}
+                  />
+                </Pressable>
+                {activeEditor === 'type' && (
+                  <View style={goalStyles.inlineEditor}>
+                    {GOAL_TYPES.map((g) => {
+                      const selected = form.goalType === g.value;
+                      return (
+                        <Pressable
+                          key={g.value}
+                          style={[
+                            goalStyles.typeOptionCard,
+                            selected && goalStyles.typeOptionCardSelected,
+                          ]}
+                          onPress={() => form.setGoalType(g.value)}
+                          accessibilityRole="radio"
+                          accessibilityState={{ checked: selected }}
+                          accessibilityLabel={g.label}
+                        >
+                          <View
+                            style={[
+                              goalStyles.settingsIconCircle,
+                              selected && goalStyles.settingsIconCircleSelected,
+                            ]}
+                          >
+                            <MaterialIcons
+                              name={GOAL_TYPE_ICON[g.value] || 'flag'}
+                              size={18}
+                              color={selected ? colors.card : colors.dark}
+                            />
+                          </View>
+                          <View style={goalStyles.typeOptionTextGroup}>
+                            <Text style={goalStyles.typeOptionTitle}>{g.label}</Text>
+                            {!!GOAL_TYPE_TAGLINE[g.value] && (
+                              <Text style={goalStyles.typeOptionSubtitle}>
+                                {GOAL_TYPE_TAGLINE[g.value]}
+                              </Text>
+                            )}
+                          </View>
+                          <MaterialIcons
+                            name={selected ? 'check-circle' : 'radio-button-unchecked'}
+                            size={20}
+                            color={selected ? colors.primary : colors.muted}
+                          />
+                        </Pressable>
+                      );
+                    })}
+                    {/* Always shown, not gated behind a specific type
                       (2026-09-01) - this is what actually names the goal
                       (see goalDisplayName above), whether it's debt or
                       savings, so it shouldn't be hidden behind a menu
                       choice. */}
-                  <Text style={goalStyles.settingsRowLabel}>What's this for? (optional)</Text>
-                  <TextInput
-                    style={[styles.input, goalStyles.notesInput]}
-                    placeholder="e.g. a house, a wedding, the Chase card"
-                    placeholderTextColor={colors.placeholder}
-                    value={form.goalNotes}
-                    onChangeText={form.setGoalNotes}
-                  />
-                  <View style={goalStyles.inlineEditorActions}>
-                    <Pressable onPress={() => setActiveEditor(null)} accessibilityRole="button">
-                      <Text style={goalStyles.inlineEditorLinkDone}>Done</Text>
-                    </Pressable>
+                    <Text style={goalStyles.settingsRowLabel}>What's this for? (optional)</Text>
+                    <TextInput
+                      style={[styles.input, goalStyles.notesInput]}
+                      placeholder="e.g. a house, a wedding, the Chase card"
+                      placeholderTextColor={colors.placeholder}
+                      value={form.goalNotes}
+                      onChangeText={form.setGoalNotes}
+                    />
+                    <View style={goalStyles.inlineEditorActions}>
+                      <Pressable onPress={() => setActiveEditor(null)} accessibilityRole="button">
+                        <Text style={goalStyles.inlineEditorLinkDone}>Done</Text>
+                      </Pressable>
+                    </View>
                   </View>
-                </View>
-              )}
+                )}
 
-              <View style={goalStyles.settingsDivider} />
+                <View style={goalStyles.settingsDivider} />
 
-              {/* Linked accounts (Phase 42, 2026-09-08) - which real
+                {/* Linked accounts (Phase 42, 2026-09-08) - which real
                   account(s) this goal's balance is tracked against, same
                   account-picker pattern Emergency Fund's own editor
                   already uses (checkboxes over depositoryAccounts, name +
@@ -1434,183 +1504,191 @@ export default function Goal() {
                   without a device to re-verify it on right now). Worth
                   extracting into a shared AccountCheckboxList the next time
                   either picker needs a real change. */}
-              <Pressable
-                style={goalStyles.settingsRow}
-                onPress={() => setActiveEditor(activeEditor === 'accounts' ? null : 'accounts')}
-                accessibilityRole="button"
-                accessibilityLabel={`Linked accounts: ${goalAccountIds.length}`}
-              >
-                <View style={goalStyles.settingsIconCircle}>
-                  <MaterialIcons name="account-balance" size={18} color={colors.dark} />
-                </View>
-                <View style={goalStyles.settingsRowText}>
-                  <Text style={goalStyles.settingsRowLabel}>Linked accounts</Text>
-                  <Text style={goalStyles.settingsRowValue}>
-                    {goalAccountIds.length === 0
-                      ? 'None yet'
-                      : `${goalAccountIds.length} account${goalAccountIds.length === 1 ? '' : 's'}`}
-                  </Text>
-                </View>
-                <MaterialIcons
-                  name={activeEditor === 'accounts' ? 'expand-less' : 'chevron-right'}
-                  size={22}
-                  color={colors.muted}
-                />
-              </Pressable>
-              {activeEditor === 'accounts' && (
-                <View style={goalStyles.inlineEditor}>
-                  <Text style={styles.smallText}>
-                    Pick which real account(s) count toward this goal - Sorrel tracks the actual
-                    balance against your target, the same way Emergency Fund does.
-                  </Text>
-                  {depositoryAccounts.length === 0 ? (
-                    <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
-                      No linked bank/savings accounts found yet.
-                    </Text>
-                  ) : (
-                    <View style={goalStyles.estimateSpacing}>
-                      {depositoryAccounts.map((a) => {
-                        const selected = goalAccountIds.includes(a.id);
-                        const balance = a.available_balance ?? a.current_balance;
-                        return (
-                          <Pressable
-                            key={a.id}
-                            style={goalStyles.efAccountRow}
-                            onPress={() => toggleGoalAccount(a.id)}
-                            accessibilityRole="checkbox"
-                            accessibilityState={{ checked: selected }}
-                          >
-                            <MaterialIcons
-                              name={selected ? 'check-box' : 'check-box-outline-blank'}
-                              size={20}
-                              color={selected ? colors.primary : colors.muted}
-                            />
-                            <View style={goalStyles.efAccountRowText}>
-                              <Text style={goalStyles.settingsRowLabel}>
-                                {a.name}
-                                {a.mask ? ` ····${a.mask}` : ''}
-                              </Text>
-                              <Text style={styles.smallText}>
-                                {a.institution_name ? `${a.institution_name} · ` : ''}
-                                {balance != null ? `$${formatDecimal(balance)}` : '—'}
-                              </Text>
-                            </View>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  )}
-                  <View style={goalStyles.inlineEditorActions}>
-                    <Pressable onPress={() => setActiveEditor(null)} accessibilityRole="button">
-                      <Text style={goalStyles.inlineEditorLinkDone}>Done</Text>
-                    </Pressable>
+                <Pressable
+                  style={goalStyles.settingsRow}
+                  onPress={() => setActiveEditor(activeEditor === 'accounts' ? null : 'accounts')}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Linked accounts: ${goalAccountIds.length}`}
+                >
+                  <View style={goalStyles.settingsIconCircle}>
+                    <MaterialIcons name="account-balance" size={18} color={colors.dark} />
                   </View>
-                </View>
-              )}
-            </View>
+                  <View style={goalStyles.settingsRowText}>
+                    <Text style={goalStyles.settingsRowLabel}>Linked accounts</Text>
+                    <Text style={goalStyles.settingsRowValue}>
+                      {goalAccountIds.length === 0
+                        ? 'None yet'
+                        : `${goalAccountIds.length} account${goalAccountIds.length === 1 ? '' : 's'}`}
+                    </Text>
+                  </View>
+                  <MaterialIcons
+                    name={activeEditor === 'accounts' ? 'expand-less' : 'chevron-right'}
+                    size={22}
+                    color={colors.muted}
+                  />
+                </Pressable>
+                {activeEditor === 'accounts' && (
+                  <View style={goalStyles.inlineEditor}>
+                    <Text style={styles.smallText}>
+                      Pick which real account(s) count toward this goal - Sorrel tracks the actual
+                      balance against your target, the same way Emergency Fund does.
+                    </Text>
+                    {depositoryAccounts.length === 0 ? (
+                      <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
+                        No linked bank/savings accounts found yet.
+                      </Text>
+                    ) : (
+                      <View style={goalStyles.estimateSpacing}>
+                        {depositoryAccounts.map((a) => {
+                          const selected = goalAccountIds.includes(a.id);
+                          const balance = a.available_balance ?? a.current_balance;
+                          return (
+                            <Pressable
+                              key={a.id}
+                              style={goalStyles.efAccountRow}
+                              onPress={() => toggleGoalAccount(a.id)}
+                              accessibilityRole="checkbox"
+                              accessibilityState={{ checked: selected }}
+                            >
+                              <MaterialIcons
+                                name={selected ? 'check-box' : 'check-box-outline-blank'}
+                                size={20}
+                                color={selected ? colors.primary : colors.muted}
+                              />
+                              <View style={goalStyles.efAccountRowText}>
+                                <Text style={goalStyles.settingsRowLabel}>
+                                  {a.name}
+                                  {a.mask ? ` ····${a.mask}` : ''}
+                                </Text>
+                                <Text style={styles.smallText}>
+                                  {a.institution_name ? `${a.institution_name} · ` : ''}
+                                  {balance != null ? `$${formatDecimal(balance)}` : '—'}
+                                </Text>
+                              </View>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    )}
+                    <View style={goalStyles.inlineEditorActions}>
+                      <Pressable onPress={() => setActiveEditor(null)} accessibilityRole="button">
+                        <Text style={goalStyles.inlineEditorLinkDone}>Done</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                )}
+              </View>
 
-            {/* Progress - the *saved* goal's real progress (viewingGoal,
+              {/* Progress - the *saved* goal's real progress (viewingGoal,
                 same canonical server calculation the goal list above
                 already uses), not the pending form edits above - not
                 shown at all while adding a brand new goal, since there's
                 no saved goal yet to show progress for. */}
-            {!addingGoal && (
-            <View style={[styles.card, goalStyles.cardMargin]}>
-              <View style={goalStyles.progressHeaderRow}>
-                <Text style={goalStyles.cardEyebrow}>YOUR PROGRESS</Text>
-                <MaterialIcons name="auto-awesome" size={16} color={colors.dark} />
-              </View>
-              {!viewingGoal ? (
-                <Text style={styles.smallText}>Loading…</Text>
-              ) : !viewingGoal.has_target ? (
-                <Text style={styles.smallText}>
-                  Set a target amount to start tracking progress toward this goal.
-                </Text>
-              ) : (
-                (() => {
-                  const percent = Math.min(100, Math.max(0, viewingGoal.percent_complete));
-                  const remaining = Math.max(0, viewingGoal.target_amount - viewingGoal.saved_amount);
-                  return (
-                    <>
-                      <View style={goalStyles.progressValuesRow}>
-                        <View>
-                          <Text style={goalStyles.progressBigValue}>
-                            ${formatDecimal(viewingGoal.saved_amount)}
+              {!addingGoal && (
+                <View style={[styles.card, goalStyles.cardMargin]}>
+                  <View style={goalStyles.progressHeaderRow}>
+                    <Text style={goalStyles.cardEyebrow}>YOUR PROGRESS</Text>
+                    <MaterialIcons name="auto-awesome" size={16} color={colors.dark} />
+                  </View>
+                  {!viewingGoal ? (
+                    <Text style={styles.smallText}>Loading…</Text>
+                  ) : !viewingGoal.has_target ? (
+                    <Text style={styles.smallText}>
+                      Set a target amount to start tracking progress toward this goal.
+                    </Text>
+                  ) : (
+                    (() => {
+                      const percent = Math.min(100, Math.max(0, viewingGoal.percent_complete));
+                      const remaining = Math.max(
+                        0,
+                        viewingGoal.target_amount - viewingGoal.saved_amount
+                      );
+                      return (
+                        <>
+                          <View style={goalStyles.progressValuesRow}>
+                            <View>
+                              <Text style={goalStyles.progressBigValue}>
+                                ${formatDecimal(viewingGoal.saved_amount)}
+                              </Text>
+                              <Text style={styles.smallText}>saved so far</Text>
+                            </View>
+                            <View style={{ alignItems: 'flex-end' }}>
+                              <Text
+                                style={[goalStyles.progressBigValue, { color: colors.primary }]}
+                              >
+                                {Math.round(percent)}%
+                              </Text>
+                              <Text style={styles.smallText}>of your goal</Text>
+                            </View>
+                          </View>
+                          <View style={goalStyles.progressTrack}>
+                            <View style={[goalStyles.progressFill, { width: `${percent}%` }]} />
+                          </View>
+                          <Text style={[styles.smallText, { marginTop: 8 }]}>
+                            ${formatDecimal(remaining)} to go
                           </Text>
-                          <Text style={styles.smallText}>saved so far</Text>
-                        </View>
-                        <View style={{ alignItems: 'flex-end' }}>
-                          <Text style={[goalStyles.progressBigValue, { color: colors.primary }]}>
-                            {Math.round(percent)}%
-                          </Text>
-                          <Text style={styles.smallText}>of your goal</Text>
-                        </View>
-                      </View>
-                      <View style={goalStyles.progressTrack}>
-                        <View style={[goalStyles.progressFill, { width: `${percent}%` }]} />
-                      </View>
-                      <Text style={[styles.smallText, { marginTop: 8 }]}>
-                        ${formatDecimal(remaining)} to go
-                      </Text>
-                    </>
-                  );
-                })()
+                        </>
+                      );
+                    })()
+                  )}
+                </View>
               )}
-            </View>
-            )}
 
-            {/* Sorrel's Take - reuses viewingGoal.projections verbatim
+              {/* Sorrel's Take - reuses viewingGoal.projections verbatim
                 (server/goalProgress.js's computeGoalProjections, already
                 built and already shown in the goal list above) - no new
                 calculation. "See how I calculated this" is a plain expand
                 over numbers already in hand, not a second fetch/estimate. */}
-            {!addingGoal && viewingGoal?.projections && (
-              <View style={[styles.card, goalStyles.cardMargin, goalStyles.insightCard]}>
-                <View style={goalStyles.insightIconCircle}>
-                  <MaterialIcons name="auto-awesome" size={18} color={colors.dark} />
-                </View>
-                <View style={goalStyles.insightBody}>
-                  <Text style={goalStyles.cardEyebrow}>SORREL'S TAKE</Text>
-                  <Text style={goalStyles.insightText}>
-                    {viewingGoal.projections.deadline_passed
-                      ? `Your target date of ${formatTargetDate(viewingGoal.projections.target_date)} has passed - you'd still need about $${formatWhole(viewingGoal.projections.monthly_savings_needed)} per month to reach this goal.`
-                      : `To reach your goal by ${formatTargetDate(viewingGoal.projections.target_date)}, you'll need to save about $${formatWhole(viewingGoal.projections.monthly_savings_needed)} per month.`}
-                  </Text>
-                  <Pressable
-                    onPress={() => setShowCalculationDetail((s) => !s)}
-                    accessibilityRole="button"
-                  >
-                    <Text style={goalStyles.inlineEditorLink}>
-                      {showCalculationDetail ? 'Hide calculation' : 'See how I calculated this'}
-                      {'  '}
-                      <MaterialIcons
-                        name={showCalculationDetail ? 'expand-less' : 'chevron-right'}
-                        size={14}
-                      />
+              {!addingGoal && viewingGoal?.projections && (
+                <View style={[styles.card, goalStyles.cardMargin, goalStyles.insightCard]}>
+                  <View style={goalStyles.insightIconCircle}>
+                    <MaterialIcons name="auto-awesome" size={18} color={colors.dark} />
+                  </View>
+                  <View style={goalStyles.insightBody}>
+                    <Text style={goalStyles.cardEyebrow}>SORREL'S TAKE</Text>
+                    <Text style={goalStyles.insightText}>
+                      {viewingGoal.projections.deadline_passed
+                        ? `Your target date of ${formatTargetDate(viewingGoal.projections.target_date)} has passed - you'd still need about $${formatWhole(viewingGoal.projections.monthly_savings_needed)} per month to reach this goal.`
+                        : `To reach your goal by ${formatTargetDate(viewingGoal.projections.target_date)}, you'll need to save about $${formatWhole(viewingGoal.projections.monthly_savings_needed)} per month.`}
                     </Text>
-                  </Pressable>
-                  {showCalculationDetail && (
-                    <View style={goalStyles.calculationDetail}>
-                      <Text style={styles.smallText}>
-                        Target amount: ${formatDecimal(viewingGoal.target_amount)}
+                    <Pressable
+                      onPress={() => setShowCalculationDetail((s) => !s)}
+                      accessibilityRole="button"
+                    >
+                      <Text style={goalStyles.inlineEditorLink}>
+                        {showCalculationDetail ? 'Hide calculation' : 'See how I calculated this'}
+                        {'  '}
+                        <MaterialIcons
+                          name={showCalculationDetail ? 'expand-less' : 'chevron-right'}
+                          size={14}
+                        />
                       </Text>
-                      <Text style={styles.smallText}>
-                        Saved so far: ${formatDecimal(viewingGoal.saved_amount)}
-                      </Text>
-                      <Text style={styles.smallText}>
-                        Remaining: $
-                        {formatDecimal(Math.max(0, viewingGoal.target_amount - viewingGoal.saved_amount))}
-                      </Text>
-                      <Text style={styles.smallText}>
-                        Time remaining: {formatTimeRemaining(viewingGoal.projections.months_remaining)}
-                      </Text>
-                      <Text style={styles.smallText}>
-                        Remaining ÷ time remaining = about $
-                        {formatWhole(viewingGoal.projections.monthly_savings_needed)}/month
-                      </Text>
-                    </View>
-                  )}
-                  {/* Real gap found via direct user report, 2026-09-14:
+                    </Pressable>
+                    {showCalculationDetail && (
+                      <View style={goalStyles.calculationDetail}>
+                        <Text style={styles.smallText}>
+                          Target amount: ${formatDecimal(viewingGoal.target_amount)}
+                        </Text>
+                        <Text style={styles.smallText}>
+                          Saved so far: ${formatDecimal(viewingGoal.saved_amount)}
+                        </Text>
+                        <Text style={styles.smallText}>
+                          Remaining: $
+                          {formatDecimal(
+                            Math.max(0, viewingGoal.target_amount - viewingGoal.saved_amount)
+                          )}
+                        </Text>
+                        <Text style={styles.smallText}>
+                          Time remaining:{' '}
+                          {formatTimeRemaining(viewingGoal.projections.months_remaining)}
+                        </Text>
+                        <Text style={styles.smallText}>
+                          Remaining ÷ time remaining = about $
+                          {formatWhole(viewingGoal.projections.monthly_savings_needed)}/month
+                        </Text>
+                      </View>
+                    )}
+                    {/* Real gap found via direct user report, 2026-09-14:
                       "Sorrel's Take" above states the raw monthly amount
                       needed to hit the stated date, with zero mention of
                       whether that's actually achievable given real budget
@@ -1620,269 +1698,289 @@ export default function Goal() {
                       "am I on track?") never duplicated. Same
                       allocationFor/describeRealisticDateInsight already
                       used there - reused, not recomputed. */}
-                  {(() => {
-                    const allocation = allocationFor(viewingGoal.id);
-                    const insight = describeRealisticDateInsight(allocation, goalDisplayName(viewingGoal.goal_type, viewingGoal.notes));
-                    if (!insight) return null;
-                    return (
-                      <View style={goalStyles.fundingInsightRow}>
-                        <Text style={goalStyles.fundingInsightText}>{insight}</Text>
-                        {allocation?.realistic_date && (
-                          acceptingRealisticDateFor === viewingGoal.id ? (
-                            <ActivityIndicator style={{ marginTop: 6 }} size="small" />
-                          ) : (
-                            <Pressable
-                              onPress={() => acceptRealisticDate(viewingGoal.id)}
-                              accessibilityRole="button"
-                              accessibilityLabel="Use this realistic date as the new target date"
-                            >
-                              <Text style={goalStyles.fundingInsightLink}>Use this date</Text>
-                            </Pressable>
-                          )
-                        )}
-                        {acceptRealisticDateError && acceptingRealisticDateFor === null && (
-                          <Text style={styles.errorText}>{acceptRealisticDateError}</Text>
-                        )}
-                      </View>
-                    );
-                  })()}
+                    {(() => {
+                      const allocation = allocationFor(viewingGoal.id);
+                      const insight = describeRealisticDateInsight(
+                        allocation,
+                        goalDisplayName(viewingGoal.goal_type, viewingGoal.notes)
+                      );
+                      if (!insight) return null;
+                      return (
+                        <View style={goalStyles.fundingInsightRow}>
+                          <Text style={goalStyles.fundingInsightText}>{insight}</Text>
+                          {allocation?.realistic_date &&
+                            (acceptingRealisticDateFor === viewingGoal.id ? (
+                              <ActivityIndicator style={{ marginTop: 6 }} size="small" />
+                            ) : (
+                              <Pressable
+                                onPress={() => acceptRealisticDate(viewingGoal.id)}
+                                accessibilityRole="button"
+                                accessibilityLabel="Use this realistic date as the new target date"
+                              >
+                                <Text style={goalStyles.fundingInsightLink}>Use this date</Text>
+                              </Pressable>
+                            ))}
+                          {acceptRealisticDateError && acceptingRealisticDateFor === null && (
+                            <Text style={styles.errorText}>{acceptRealisticDateError}</Text>
+                          )}
+                        </View>
+                      );
+                    })()}
+                  </View>
                 </View>
-              </View>
-            )}
+              )}
 
-            {/* Phase 42: Goal Calculator, Savings Planner, and Advisor Tip
+              {/* Phase 42: Goal Calculator, Savings Planner, and Advisor Tip
                 moved here from the old page-level Planning Tools row -
                 they're inherently per-goal tools now that a user can have
                 several goals, so they live inside this goal's own detail
                 view instead of needing a separate goal picker of their
                 own. Not shown while adding a brand new goal (no saved
                 goal/id to run them against yet). */}
-            {!addingGoal && viewingGoal && (
-              <>
-                <View style={[styles.card, goalStyles.cardMargin]}>
-                  <View style={goalStyles.projectionsHeaderRow}>
-                    <MaterialIcons name="calculate" size={18} color={colors.dark} />
-                    <Text style={goalStyles.cardTitle}>Goal Calculator</Text>
-                  </View>
-                  {!showCalculator ? (
-                    <Pressable
-                      style={[goalStyles.estimateOutlineButton, goalStyles.estimateSpacing]}
-                      onPress={() => setShowCalculator(true)}
-                      accessibilityRole="button"
-                    >
-                      <Text style={goalStyles.estimateOutlineButtonText}>
-                        SEE HOW A MONTHLY AMOUNT REACHES YOUR GOAL FASTER
-                      </Text>
-                    </Pressable>
-                  ) : (
-                    <>
-                      <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
-                        Type or speak a hypothetical monthly amount to see when it would reach your target.
-                      </Text>
-                      <View style={[goalStyles.calculatorInputRow, goalStyles.estimateSpacing]}>
-                        <TextInput
-                          style={[styles.input, goalStyles.calculatorInput]}
-                          value={calculatorAmountText}
-                          onChangeText={setCalculatorAmountText}
-                          placeholder="e.g. $200"
-                          placeholderTextColor={colors.placeholder}
-                          keyboardType="numeric"
-                          editable={!calculatingGoal && !calculatorTranscribing}
-                        />
-                        {calculatorTranscribing ? (
-                          <ActivityIndicator style={goalStyles.calculatorMicButton} />
-                        ) : (
-                          <Pressable
-                            onPress={onCalculatorMicPress}
-                            disabled={calculatingGoal}
-                            accessibilityRole="button"
-                            accessibilityLabel={
-                              calculatorRecorderState.isRecording ? 'Stop recording' : 'Speak the amount'
-                            }
-                            style={[
-                              goalStyles.calculatorMicButton,
-                              calculatorRecorderState.isRecording
-                                ? goalStyles.calculatorMicButtonRecording
-                                : goalStyles.calculatorMicButtonIdle,
-                            ]}
-                          >
-                            <MaterialIcons
-                              name={calculatorRecorderState.isRecording ? 'stop' : 'mic'}
-                              size={20}
-                              color={colors.background}
-                            />
-                          </Pressable>
-                        )}
-                      </View>
-                      {calculatorVoiceError && (
-                        <Text style={[styles.errorText, goalStyles.estimateSpacing]}>{calculatorVoiceError}</Text>
-                      )}
-                      {calculatorError && <Text style={styles.errorText}>{calculatorError}</Text>}
-                      {calculatingGoal ? (
-                        <ActivityIndicator style={goalStyles.estimateSpacing} />
-                      ) : (
-                        <View style={goalStyles.estimateSpacing}>
-                          <PrimaryButton
-                            title="SEE PROJECTED DATE"
-                            onPress={runGoalCalculator}
-                            disabled={calculatorTranscribing || calculatorRecorderState.isRecording}
+              {!addingGoal && viewingGoal && (
+                <>
+                  <View style={[styles.card, goalStyles.cardMargin]}>
+                    <View style={goalStyles.projectionsHeaderRow}>
+                      <MaterialIcons name="calculate" size={18} color={colors.dark} />
+                      <Text style={goalStyles.cardTitle}>Goal Calculator</Text>
+                    </View>
+                    {!showCalculator ? (
+                      <Pressable
+                        style={[goalStyles.estimateOutlineButton, goalStyles.estimateSpacing]}
+                        onPress={() => setShowCalculator(true)}
+                        accessibilityRole="button"
+                      >
+                        <Text style={goalStyles.estimateOutlineButtonText}>
+                          SEE HOW A MONTHLY AMOUNT REACHES YOUR GOAL FASTER
+                        </Text>
+                      </Pressable>
+                    ) : (
+                      <>
+                        <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
+                          Type or speak a hypothetical monthly amount to see when it would reach
+                          your target.
+                        </Text>
+                        <View style={[goalStyles.calculatorInputRow, goalStyles.estimateSpacing]}>
+                          <TextInput
+                            style={[styles.input, goalStyles.calculatorInput]}
+                            value={calculatorAmountText}
+                            onChangeText={setCalculatorAmountText}
+                            placeholder="e.g. $200"
+                            placeholderTextColor={colors.placeholder}
+                            keyboardType="numeric"
+                            editable={!calculatingGoal && !calculatorTranscribing}
                           />
-                        </View>
-                      )}
-
-                      {calculatorResult && (
-                        <View style={goalStyles.estimateSpacing}>
-                          {calculatorResult.available && calculatorResult.status === 'already_reached' ? (
-                            <Text style={styles.smallText}>
-                              The target is already met by what's been saved - no monthly amount is
-                              needed to reach it.
-                            </Text>
-                          ) : calculatorResult.available && calculatorResult.status === 'projected' ? (
-                            <Text style={styles.smallText}>
-                              At ${formatWhole(calculatorResult.hypothetical_monthly_amount)}/month, the
-                              target would be reached around{' '}
-                              {formatTargetDate(calculatorResult.projected_date)}.
-                            </Text>
+                          {calculatorTranscribing ? (
+                            <ActivityIndicator style={goalStyles.calculatorMicButton} />
                           ) : (
-                            <Text style={styles.smallText}>{calculatorResult.detail}</Text>
+                            <Pressable
+                              onPress={onCalculatorMicPress}
+                              disabled={calculatingGoal}
+                              accessibilityRole="button"
+                              accessibilityLabel={
+                                calculatorRecorderState.isRecording
+                                  ? 'Stop recording'
+                                  : 'Speak the amount'
+                              }
+                              style={[
+                                goalStyles.calculatorMicButton,
+                                calculatorRecorderState.isRecording
+                                  ? goalStyles.calculatorMicButtonRecording
+                                  : goalStyles.calculatorMicButtonIdle,
+                              ]}
+                            >
+                              <MaterialIcons
+                                name={calculatorRecorderState.isRecording ? 'stop' : 'mic'}
+                                size={20}
+                                color={colors.background}
+                              />
+                            </Pressable>
                           )}
                         </View>
-                      )}
-                    </>
-                  )}
-                </View>
+                        {calculatorVoiceError && (
+                          <Text style={[styles.errorText, goalStyles.estimateSpacing]}>
+                            {calculatorVoiceError}
+                          </Text>
+                        )}
+                        {calculatorError && <Text style={styles.errorText}>{calculatorError}</Text>}
+                        {calculatingGoal ? (
+                          <ActivityIndicator style={goalStyles.estimateSpacing} />
+                        ) : (
+                          <View style={goalStyles.estimateSpacing}>
+                            <PrimaryButton
+                              title="SEE PROJECTED DATE"
+                              onPress={runGoalCalculator}
+                              disabled={
+                                calculatorTranscribing || calculatorRecorderState.isRecording
+                              }
+                            />
+                          </View>
+                        )}
 
-                <View style={[styles.card, goalStyles.cardMargin]}>
-                  <View style={goalStyles.projectionsHeaderRow}>
-                    <MaterialIcons name="flag" size={18} color={colors.dark} />
-                    <Text style={goalStyles.cardTitle}>Savings Planner</Text>
+                        {calculatorResult && (
+                          <View style={goalStyles.estimateSpacing}>
+                            {calculatorResult.available &&
+                            calculatorResult.status === 'already_reached' ? (
+                              <Text style={styles.smallText}>
+                                The target is already met by what's been saved - no monthly amount
+                                is needed to reach it.
+                              </Text>
+                            ) : calculatorResult.available &&
+                              calculatorResult.status === 'projected' ? (
+                              <Text style={styles.smallText}>
+                                At ${formatWhole(calculatorResult.hypothetical_monthly_amount)}
+                                /month, the target would be reached around{' '}
+                                {formatTargetDate(calculatorResult.projected_date)}.
+                              </Text>
+                            ) : (
+                              <Text style={styles.smallText}>{calculatorResult.detail}</Text>
+                            )}
+                          </View>
+                        )}
+                      </>
+                    )}
                   </View>
-                  {/* Phase 42: rebuilt as hypothetical-pace-driven, same
+
+                  <View style={[styles.card, goalStyles.cardMargin]}>
+                    <View style={goalStyles.projectionsHeaderRow}>
+                      <MaterialIcons name="flag" size={18} color={colors.dark} />
+                      <Text style={goalStyles.cardTitle}>Savings Planner</Text>
+                    </View>
+                    {/* Phase 42: rebuilt as hypothetical-pace-driven, same
                       math/UI pattern as the Goal Calculator above - this
                       app has no per-account history deep enough yet to
                       trust a realized pace for every goal, so every
                       checkpoint date here is explicitly "if you
                       contributed $X/month," never an observed rate. */}
-                  <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
-                    Type or speak a hypothetical monthly amount to see when each checkpoint would land.
-                  </Text>
-                  <View style={[goalStyles.calculatorInputRow, goalStyles.estimateSpacing]}>
-                    <TextInput
-                      style={[styles.input, goalStyles.calculatorInput]}
-                      value={milestonesAmountText}
-                      onChangeText={setMilestonesAmountText}
-                      placeholder="e.g. $200"
-                      placeholderTextColor={colors.placeholder}
-                      keyboardType="numeric"
-                      editable={!loadingMilestones && !milestonesTranscribing}
-                    />
-                    {milestonesTranscribing ? (
-                      <ActivityIndicator style={goalStyles.calculatorMicButton} />
+                    <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
+                      Type or speak a hypothetical monthly amount to see when each checkpoint would
+                      land.
+                    </Text>
+                    <View style={[goalStyles.calculatorInputRow, goalStyles.estimateSpacing]}>
+                      <TextInput
+                        style={[styles.input, goalStyles.calculatorInput]}
+                        value={milestonesAmountText}
+                        onChangeText={setMilestonesAmountText}
+                        placeholder="e.g. $200"
+                        placeholderTextColor={colors.placeholder}
+                        keyboardType="numeric"
+                        editable={!loadingMilestones && !milestonesTranscribing}
+                      />
+                      {milestonesTranscribing ? (
+                        <ActivityIndicator style={goalStyles.calculatorMicButton} />
+                      ) : (
+                        <Pressable
+                          onPress={onMilestonesMicPress}
+                          disabled={loadingMilestones}
+                          accessibilityRole="button"
+                          accessibilityLabel={
+                            milestonesRecorderState.isRecording
+                              ? 'Stop recording'
+                              : 'Speak the amount'
+                          }
+                          style={[
+                            goalStyles.calculatorMicButton,
+                            milestonesRecorderState.isRecording
+                              ? goalStyles.calculatorMicButtonRecording
+                              : goalStyles.calculatorMicButtonIdle,
+                          ]}
+                        >
+                          <MaterialIcons
+                            name={milestonesRecorderState.isRecording ? 'stop' : 'mic'}
+                            size={20}
+                            color={colors.background}
+                          />
+                        </Pressable>
+                      )}
+                    </View>
+                    {milestonesVoiceError && (
+                      <Text style={[styles.errorText, goalStyles.estimateSpacing]}>
+                        {milestonesVoiceError}
+                      </Text>
+                    )}
+                    {milestonesError && <Text style={styles.errorText}>{milestonesError}</Text>}
+                    {loadingMilestones ? (
+                      <ActivityIndicator style={goalStyles.estimateSpacing} />
                     ) : (
-                      <Pressable
-                        onPress={onMilestonesMicPress}
-                        disabled={loadingMilestones}
-                        accessibilityRole="button"
-                        accessibilityLabel={
-                          milestonesRecorderState.isRecording ? 'Stop recording' : 'Speak the amount'
-                        }
-                        style={[
-                          goalStyles.calculatorMicButton,
-                          milestonesRecorderState.isRecording
-                            ? goalStyles.calculatorMicButtonRecording
-                            : goalStyles.calculatorMicButtonIdle,
-                        ]}
-                      >
-                        <MaterialIcons
-                          name={milestonesRecorderState.isRecording ? 'stop' : 'mic'}
-                          size={20}
-                          color={colors.background}
+                      <View style={goalStyles.estimateSpacing}>
+                        <PrimaryButton
+                          title="SEE CHECKPOINTS"
+                          onPress={fetchMilestones}
+                          disabled={milestonesTranscribing || milestonesRecorderState.isRecording}
                         />
-                      </Pressable>
+                      </View>
+                    )}
+                    {milestonesResult?.available && (
+                      <View style={goalStyles.estimateSpacing}>
+                        {milestonesResult.milestones.map((milestone) => (
+                          <View key={milestone.percent} style={goalStyles.milestoneRow}>
+                            <Text style={goalStyles.milestoneLabel}>
+                              {milestone.percent}% · ${formatWhole(milestone.amount)}
+                            </Text>
+                            <Text style={goalStyles.milestoneStatus}>
+                              {describeMilestoneStatus(milestone)}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                    {milestonesResult && !milestonesResult.available && (
+                      <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
+                        {milestonesResult.detail || 'Checkpoints are not available right now.'}
+                      </Text>
                     )}
                   </View>
-                  {milestonesVoiceError && (
-                    <Text style={[styles.errorText, goalStyles.estimateSpacing]}>{milestonesVoiceError}</Text>
-                  )}
-                  {milestonesError && <Text style={styles.errorText}>{milestonesError}</Text>}
-                  {loadingMilestones ? (
-                    <ActivityIndicator style={goalStyles.estimateSpacing} />
-                  ) : (
-                    <View style={goalStyles.estimateSpacing}>
-                      <PrimaryButton
-                        title="SEE CHECKPOINTS"
-                        onPress={fetchMilestones}
-                        disabled={milestonesTranscribing || milestonesRecorderState.isRecording}
-                      />
-                    </View>
-                  )}
-                  {milestonesResult?.available && (
-                    <View style={goalStyles.estimateSpacing}>
-                      {milestonesResult.milestones.map((milestone) => (
-                        <View key={milestone.percent} style={goalStyles.milestoneRow}>
-                          <Text style={goalStyles.milestoneLabel}>
-                            {milestone.percent}% · ${formatWhole(milestone.amount)}
-                          </Text>
-                          <Text style={goalStyles.milestoneStatus}>
-                            {describeMilestoneStatus(milestone)}
-                          </Text>
+
+                  {goalSettings.show_advisor_tip !== false &&
+                    (() => {
+                      const tip = computeGoalAdvisorTip({
+                        goalProgress: viewingGoal,
+                        subscriptionAudit,
+                        budgetStatus,
+                      });
+                      if (!tip) return null;
+                      return (
+                        <View style={[styles.card, goalStyles.cardMargin, goalStyles.insightCard]}>
+                          <View style={goalStyles.insightIconCircle}>
+                            <MaterialIcons name={tip.icon} size={18} color={colors.dark} />
+                          </View>
+                          <View style={goalStyles.insightBody}>
+                            <Text style={goalStyles.cardEyebrow}>ADVISOR TIP</Text>
+                            <Text style={goalStyles.insightText}>{tip.text}</Text>
+                          </View>
                         </View>
-                      ))}
-                    </View>
-                  )}
-                  {milestonesResult && !milestonesResult.available && (
-                    <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
-                      {milestonesResult.detail || 'Checkpoints are not available right now.'}
-                    </Text>
-                  )}
-                </View>
+                      );
+                    })()}
+                </>
+              )}
 
-                {goalSettings.show_advisor_tip !== false &&
-                  (() => {
-                    const tip = computeGoalAdvisorTip({ goalProgress: viewingGoal, subscriptionAudit, budgetStatus });
-                    if (!tip) return null;
-                    return (
-                      <View style={[styles.card, goalStyles.cardMargin, goalStyles.insightCard]}>
-                        <View style={goalStyles.insightIconCircle}>
-                          <MaterialIcons name={tip.icon} size={18} color={colors.dark} />
-                        </View>
-                        <View style={goalStyles.insightBody}>
-                          <Text style={goalStyles.cardEyebrow}>ADVISOR TIP</Text>
-                          <Text style={goalStyles.insightText}>{tip.text}</Text>
-                        </View>
-                      </View>
-                    );
-                  })()}
-              </>
-            )}
+              {form.error && (
+                <Text style={[styles.errorText, goalStyles.cardMargin]}>{form.error}</Text>
+              )}
 
-            {form.error && (
-              <Text style={[styles.errorText, goalStyles.cardMargin]}>{form.error}</Text>
-            )}
+              <View style={goalStyles.cardMargin}>
+                <PrimaryButton
+                  title={addingGoal ? 'Save Goal' : 'Save Changes'}
+                  onPress={() => form.save({ account_ids: goalAccountIds })}
+                  loading={form.saving}
+                />
+              </View>
 
-            <View style={goalStyles.cardMargin}>
-              <PrimaryButton
-                title={addingGoal ? 'Save Goal' : 'Save Changes'}
-                onPress={() => form.save({ account_ids: goalAccountIds })}
-                loading={form.saving}
-              />
-            </View>
-
-            {/* Archiving only makes sense for a goal that already exists -
+              {/* Archiving only makes sense for a goal that already exists -
                 not shown while adding a brand new one. */}
-            {!addingGoal && (
-              <Pressable
-                style={[goalStyles.deleteGoalButton, goalStyles.cardMargin]}
-                onPress={confirmDeleteGoal}
-                disabled={form.saving}
-                accessibilityRole="button"
-                accessibilityLabel="Archive goal"
-              >
-                <MaterialIcons name="delete-outline" size={18} color={colors.error} />
-                <Text style={goalStyles.deleteGoalButtonText}>Archive Goal</Text>
-              </Pressable>
-            )}
-          </ScrollView>
+              {!addingGoal && (
+                <Pressable
+                  style={[goalStyles.deleteGoalButton, goalStyles.cardMargin]}
+                  onPress={confirmDeleteGoal}
+                  disabled={form.saving}
+                  accessibilityRole="button"
+                  accessibilityLabel="Archive goal"
+                >
+                  <MaterialIcons name="delete-outline" size={18} color={colors.error} />
+                  <Text style={goalStyles.deleteGoalButtonText}>Archive Goal</Text>
+                </Pressable>
+              )}
+            </ScrollView>
           </TopEdgeFade>
         </>
       ) : (
@@ -1900,14 +1998,14 @@ export default function Goal() {
           </View>
 
           <TopEdgeFade height={90}>
-          <ScrollView
-            style={[styles.list, goalStyles.transparentScroll]}
-            contentContainerStyle={{ paddingBottom: 150 }}
-          >
-            <View style={goalStyles.titleBlock}>
-              <Text style={goalStyles.title}>Your Goals</Text>
-              <Text style={goalStyles.subtitle}>Build the future you want.</Text>
-              {/* Priority-order disclaimer, added 2026-09-14 per direct
+            <ScrollView
+              style={[styles.list, goalStyles.transparentScroll]}
+              contentContainerStyle={{ paddingBottom: 150 }}
+            >
+              <View style={goalStyles.titleBlock}>
+                <Text style={goalStyles.title}>Your Goals</Text>
+                <Text style={goalStyles.subtitle}>Build the future you want.</Text>
+                {/* Priority-order disclaimer, added 2026-09-14 per direct
                   user request - goal-driven budget funding (Phase 43)
                   funds deadline-having goals in this exact order when
                   realistic capacity can't cover all of them, so the order
@@ -1915,16 +2013,16 @@ export default function Goal() {
                   user needs to know both that it matters and how to
                   change it. Only shown with 2+ goals - order has nothing
                   to decide between with just one. */}
-              {goalsProgress && goalsProgress.length > 1 && (
-                <Text style={[styles.smallText, goalStyles.priorityDisclaimer]}>
-                  {editingGoalOrder
-                    ? 'Drag to reorder, then tap Done to save.'
-                    : 'Goals are funded in this order, top to bottom, when there isn’t enough room for all of them. Tap and hold a goal to reorder.'}
-                </Text>
-              )}
-            </View>
+                {goalsProgress && goalsProgress.length > 1 && (
+                  <Text style={[styles.smallText, goalStyles.priorityDisclaimer]}>
+                    {editingGoalOrder
+                      ? 'Drag to reorder, then tap Done to save.'
+                      : 'Goals are funded in this order, top to bottom, when there isn’t enough room for all of them. Tap and hold a goal to reorder.'}
+                  </Text>
+                )}
+              </View>
 
-            {/* Real bug found via on-device tap-test, 2026-09-14: entering
+              {/* Real bug found via on-device tap-test, 2026-09-14: entering
                 edit mode (long-press) had no reliable way out - each goal
                 card's own Pressable (onPress={openGoal}) sits inside
                 DraggableCardList's GestureDetector, and nothing here
@@ -1936,19 +2034,19 @@ export default function Goal() {
                 now disabled while editing (below), and this explicit
                 "Done" link give a way out that doesn't depend on the
                 gesture-vs-Pressable race resolving correctly at all. */}
-            {editingGoalOrder && (
-              <View style={[goalStyles.cardMargin, goalStyles.inlineEditorActions]}>
-                <Pressable
-                  onPress={() => setEditingGoalOrder(false)}
-                  accessibilityRole="button"
-                  accessibilityLabel="Done reordering goals"
-                >
-                  <Text style={goalStyles.inlineEditorLinkDone}>Done</Text>
-                </Pressable>
-              </View>
-            )}
+              {editingGoalOrder && (
+                <View style={[goalStyles.cardMargin, goalStyles.inlineEditorActions]}>
+                  <Pressable
+                    onPress={() => setEditingGoalOrder(false)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Done reordering goals"
+                  >
+                    <Text style={goalStyles.inlineEditorLinkDone}>Done</Text>
+                  </Pressable>
+                </View>
+              )}
 
-            {/* Phase 42 (multi-goal tracking, 2026-09-08): the single
+              {/* Phase 42 (multi-goal tracking, 2026-09-08): the single
                 "Primary Goal" card is now a list of compact goal cards -
                 tapping one opens its own local-state detail view (see
                 showingGoalDetail above) with the full progress/projections/
@@ -1957,57 +2055,67 @@ export default function Goal() {
                 show. Round-Ups (goal-independent - it never referenced
                 goal amount/type) is relocated to page level, right after
                 the list, instead of living inside a per-goal branch. */}
-            {!goalsProgress ? (
-              <Text style={[styles.smallText, goalStyles.cardMargin]}>
-                Loading goals…
-              </Text>
-            ) : goalsProgress.length === 0 ? (
-              <View style={[styles.card, goalStyles.cardMargin, goalStyles.insightCard]}>
-                <View style={goalStyles.insightIconCircle}>
-                  <MaterialIcons name="auto-awesome" size={18} color={colors.dark} />
-                </View>
-                <View style={goalStyles.insightBody}>
-                  <Text style={goalStyles.cardEyebrow}>GOAL INSIGHT</Text>
-                  <Text style={goalStyles.insightText}>
-                    No goals set yet - add one to start tracking real progress.
-                  </Text>
-                  <View style={goalStyles.editGoalSpacing}>
-                    <PrimaryButton title="ADD A GOAL" onPress={openAddGoal} />
+              {!goalsProgress ? (
+                <Text style={[styles.smallText, goalStyles.cardMargin]}>Loading goals…</Text>
+              ) : goalsProgress.length === 0 ? (
+                <View style={[styles.card, goalStyles.cardMargin, goalStyles.insightCard]}>
+                  <View style={goalStyles.insightIconCircle}>
+                    <MaterialIcons name="auto-awesome" size={18} color={colors.dark} />
+                  </View>
+                  <View style={goalStyles.insightBody}>
+                    <Text style={goalStyles.cardEyebrow}>GOAL INSIGHT</Text>
+                    <Text style={goalStyles.insightText}>
+                      No goals set yet - add one to start tracking real progress.
+                    </Text>
+                    <View style={goalStyles.editGoalSpacing}>
+                      <PrimaryButton title="ADD A GOAL" onPress={openAddGoal} />
+                    </View>
                   </View>
                 </View>
-              </View>
-            ) : (
-              <>
-                <DraggableCardList
-                  items={orderGoalsByPriority(goalsProgress, goalSettings.goal_priority_order).map((g) => {
-                    const badge = goalStatusBadge(g, colors);
-                    const percent = Math.min(100, Math.max(0, g.percent_complete || 0));
-                    const allocation = allocationFor(g.id);
-                    const insight = describeRealisticDateInsight(allocation, goalDisplayName(g.goal_type, g.notes));
-                    return {
-                      key: g.id,
-                      node: (
-                        <Pressable
-                          style={[styles.card, goalStyles.cardMargin]}
-                          onPress={() => !editingGoalOrder && openGoal(g.id)}
-                          disabled={editingGoalOrder}
-                          accessibilityRole="button"
-                          accessibilityLabel={`View ${goalDisplayName(g.goal_type, g.notes)}`}
-                        >
-                          <View style={goalStyles.primaryGoalHeaderRow}>
-                            <View style={goalStyles.targetIconCircle}>
-                              <MaterialIcons name={GOAL_TYPE_ICON[g.goal_type] || 'flag'} size={20} color={colors.dark} />
-                            </View>
-                            <View style={goalStyles.primaryGoalHeaderText}>
-                              <Text style={goalStyles.primaryGoalEyebrow}>
-                                {goalDisplayName(g.goal_type, g.notes)}
-                              </Text>
-                              <Text style={goalStyles.primaryGoalTarget}>
-                                {g.has_target ? `$${formatDecimal(g.target_amount)} Target` : 'No target set'}
-                              </Text>
-                            </View>
-                            <View style={[goalStyles.badge, { backgroundColor: badge.color }]}>
-                              {/* Real contrast bug found (2026-09-11, theme
+              ) : (
+                <>
+                  <DraggableCardList
+                    items={orderGoalsByPriority(
+                      goalsProgress,
+                      goalSettings.goal_priority_order
+                    ).map((g) => {
+                      const badge = goalStatusBadge(g, colors);
+                      const percent = Math.min(100, Math.max(0, g.percent_complete || 0));
+                      const allocation = allocationFor(g.id);
+                      const insight = describeRealisticDateInsight(
+                        allocation,
+                        goalDisplayName(g.goal_type, g.notes)
+                      );
+                      return {
+                        key: g.id,
+                        node: (
+                          <Pressable
+                            style={[styles.card, goalStyles.cardMargin]}
+                            onPress={() => !editingGoalOrder && openGoal(g.id)}
+                            disabled={editingGoalOrder}
+                            accessibilityRole="button"
+                            accessibilityLabel={`View ${goalDisplayName(g.goal_type, g.notes)}`}
+                          >
+                            <View style={goalStyles.primaryGoalHeaderRow}>
+                              <View style={goalStyles.targetIconCircle}>
+                                <MaterialIcons
+                                  name={GOAL_TYPE_ICON[g.goal_type] || 'flag'}
+                                  size={20}
+                                  color={colors.dark}
+                                />
+                              </View>
+                              <View style={goalStyles.primaryGoalHeaderText}>
+                                <Text style={goalStyles.primaryGoalEyebrow}>
+                                  {goalDisplayName(g.goal_type, g.notes)}
+                                </Text>
+                                <Text style={goalStyles.primaryGoalTarget}>
+                                  {g.has_target
+                                    ? `$${formatDecimal(g.target_amount)} Target`
+                                    : 'No target set'}
+                                </Text>
+                              </View>
+                              <View style={[goalStyles.badge, { backgroundColor: badge.color }]}>
+                                {/* Real contrast bug found (2026-09-11, theme
                                   redesign): badgeText used to hardcode
                                   color: colors.background, correct only for
                                   two of the three real badge fills
@@ -2019,335 +2127,351 @@ export default function Goal() {
                                   readableTextColor computes the actually-
                                   correct text color for whatever the real
                                   fill is, in both modes. */}
-                              <Text style={[goalStyles.badgeText, { color: readableTextColor(badge.color, colors) }]}>
-                                {badge.label}
-                              </Text>
-                            </View>
-                          </View>
-
-                          {g.has_target && (
-                            <>
-                              <View style={goalStyles.savedRow}>
-                                <Text style={goalStyles.savedAmount}>
-                                  ${formatDecimal(g.saved_amount)} saved
+                                <Text
+                                  style={[
+                                    goalStyles.badgeText,
+                                    { color: readableTextColor(badge.color, colors) },
+                                  ]}
+                                >
+                                  {badge.label}
                                 </Text>
-                                <Text style={goalStyles.savedPercent}>{Math.round(percent)}%</Text>
                               </View>
-                              <View style={goalStyles.progressTrack}>
-                                <View style={[goalStyles.progressFill, { width: `${percent}%` }]} />
-                              </View>
-                            </>
-                          )}
+                            </View>
 
-                          <Text style={[styles.smallText, { marginTop: 8 }]}>{g.message}</Text>
+                            {g.has_target && (
+                              <>
+                                <View style={goalStyles.savedRow}>
+                                  <Text style={goalStyles.savedAmount}>
+                                    ${formatDecimal(g.saved_amount)} saved
+                                  </Text>
+                                  <Text style={goalStyles.savedPercent}>
+                                    {Math.round(percent)}%
+                                  </Text>
+                                </View>
+                                <View style={goalStyles.progressTrack}>
+                                  <View
+                                    style={[goalStyles.progressFill, { width: `${percent}%` }]}
+                                  />
+                                </View>
+                              </>
+                            )}
 
-                          {/* Goal-driven budget funding (2026-09-11): a
+                            <Text style={[styles.smallText, { marginTop: 8 }]}>{g.message}</Text>
+
+                            {/* Goal-driven budget funding (2026-09-11): a
                               deadline-having goal that can't hit its
                               stated date at the current realistic savings
                               capacity gets an honest insight here, with a
                               one-tap accept when a real achievable date
                               exists - matches this app's propose-then-
                               accept rule, never silently applied. */}
-                          {insight && (
-                            <View style={goalStyles.fundingInsightRow}>
-                              <Text style={goalStyles.fundingInsightText}>{insight}</Text>
-                              {allocation?.realistic_date && (
-                                acceptingRealisticDateFor === g.id ? (
-                                  <ActivityIndicator style={{ marginTop: 6 }} size="small" />
-                                ) : (
-                                  <Pressable
-                                    onPress={() => acceptRealisticDate(g.id)}
-                                    accessibilityRole="button"
-                                    accessibilityLabel="Use this realistic date as the new target date"
-                                  >
-                                    <Text style={goalStyles.fundingInsightLink}>Use this date</Text>
-                                  </Pressable>
-                                )
-                              )}
-                              {acceptRealisticDateError && acceptingRealisticDateFor === null && (
-                                <Text style={styles.errorText}>{acceptRealisticDateError}</Text>
-                              )}
-                            </View>
-                          )}
-                        </Pressable>
-                      ),
-                    };
-                  })}
-                  editing={editingGoalOrder}
-                  onEditingChange={setEditingGoalOrder}
-                  onReorder={reorderGoalPriority}
-                  onDelete={() => {}}
-                  showDelete={false}
-                />
+                            {insight && (
+                              <View style={goalStyles.fundingInsightRow}>
+                                <Text style={goalStyles.fundingInsightText}>{insight}</Text>
+                                {allocation?.realistic_date &&
+                                  (acceptingRealisticDateFor === g.id ? (
+                                    <ActivityIndicator style={{ marginTop: 6 }} size="small" />
+                                  ) : (
+                                    <Pressable
+                                      onPress={() => acceptRealisticDate(g.id)}
+                                      accessibilityRole="button"
+                                      accessibilityLabel="Use this realistic date as the new target date"
+                                    >
+                                      <Text style={goalStyles.fundingInsightLink}>
+                                        Use this date
+                                      </Text>
+                                    </Pressable>
+                                  ))}
+                                {acceptRealisticDateError && acceptingRealisticDateFor === null && (
+                                  <Text style={styles.errorText}>{acceptRealisticDateError}</Text>
+                                )}
+                              </View>
+                            )}
+                          </Pressable>
+                        ),
+                      };
+                    })}
+                    editing={editingGoalOrder}
+                    onEditingChange={setEditingGoalOrder}
+                    onReorder={reorderGoalPriority}
+                    onDelete={() => {}}
+                    showDelete={false}
+                  />
 
-                <View style={goalStyles.cardMargin}>
-                  <PrimaryButton title="ADD ANOTHER GOAL" onPress={openAddGoal} />
+                  <View style={goalStyles.cardMargin}>
+                    <PrimaryButton title="ADD ANOTHER GOAL" onPress={openAddGoal} />
+                  </View>
+                </>
+              )}
+
+              {goalSettings.round_ups_enabled !== false && (
+                <View style={[styles.card, goalStyles.cardMargin]}>
+                  <View style={goalStyles.projectionsHeaderRow}>
+                    <MaterialIcons name="toll" size={18} color={colors.dark} />
+                    <Text style={goalStyles.cardTitle}>Round-Ups</Text>
+                  </View>
+                  {!showRoundUps ? (
+                    <Pressable
+                      style={[goalStyles.estimateOutlineButton, goalStyles.estimateSpacing]}
+                      onPress={openRoundUps}
+                      accessibilityRole="button"
+                    >
+                      <Text style={goalStyles.estimateOutlineButtonText}>
+                        SEE HOW MUCH ROUND-UPS COULD ADD UP TO
+                      </Text>
+                    </Pressable>
+                  ) : loadingRoundUps ? (
+                    <ActivityIndicator style={goalStyles.estimateSpacing} />
+                  ) : roundUpsError ? (
+                    <Text style={[styles.errorText, goalStyles.estimateSpacing]}>
+                      {roundUpsError}
+                    </Text>
+                  ) : (
+                    <View style={[goalStyles.estimateSpacing, goalStyles.wrappingTextBlock]}>
+                      <Text style={[styles.smallText, goalStyles.wrappingText]}>
+                        Rounding each of this period's {roundUpsResult?.transaction_count ?? 0}{' '}
+                        purchase{roundUpsResult?.transaction_count === 1 ? '' : 's'} up to the next
+                        dollar would have added up to{' '}
+                        <Text style={goalStyles.inlineBold}>
+                          ${formatDecimal(roundUpsResult?.total_round_ups ?? 0)}
+                        </Text>
+                        . This is an estimate only - nothing is actually being set aside
+                        automatically.
+                      </Text>
+                    </View>
+                  )}
                 </View>
-              </>
-            )}
+              )}
 
-            {goalSettings.round_ups_enabled !== false && (
+              {(() => {
+                const estimate = emergencyFundStatus?.essential_expense_estimate;
+                const refusalMessage = estimate ? emergencyEstimateRefusalMessage(estimate) : null;
+                const isConfigured =
+                  emergencyFundStatus?.enabled &&
+                  emergencyFundStatus?.target_amount &&
+                  (emergencyFundStatus?.account_ids?.length || 0) > 0;
+
+                return (
+                  <View style={[styles.card, goalStyles.cardMargin]}>
+                    <View style={[goalStyles.projectionsHeaderRow, goalStyles.spaceBetweenRow]}>
+                      <View style={goalStyles.projectionsHeaderRow}>
+                        <MaterialIcons name="shield" size={18} color={colors.dark} />
+                        <Text style={goalStyles.cardTitle}>Emergency Fund</Text>
+                      </View>
+                      {emergencyFundStatus && (
+                        <Switch
+                          value={!!emergencyFundStatus.enabled}
+                          onValueChange={handleEmergencyFundToggle}
+                          disabled={savingEmergencyFund}
+                          trackColor={{ false: colors.sage, true: colors.primary }}
+                        />
+                      )}
+                    </View>
+
+                    {!emergencyFundStatus ? (
+                      <Text style={[styles.smallText, goalStyles.estimateSpacing]}>Loading…</Text>
+                    ) : efEditing ? (
+                      <>
+                        <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
+                          Choose which account(s) this tracks and a target amount - Sorrel will
+                          track the real balance against it, the same way a budget category does.
+                        </Text>
+
+                        {depositoryAccounts.length === 0 ? (
+                          <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
+                            No linked bank/savings accounts found yet.
+                          </Text>
+                        ) : (
+                          <View style={goalStyles.estimateSpacing}>
+                            {depositoryAccounts.map((a) => {
+                              const selected = efSelectedAccountIds.includes(a.id);
+                              const balance = a.available_balance ?? a.current_balance;
+                              return (
+                                <Pressable
+                                  key={a.id}
+                                  style={goalStyles.efAccountRow}
+                                  onPress={() => toggleEfAccount(a.id)}
+                                  accessibilityRole="checkbox"
+                                  accessibilityState={{ checked: selected }}
+                                >
+                                  <MaterialIcons
+                                    name={selected ? 'check-box' : 'check-box-outline-blank'}
+                                    size={20}
+                                    color={selected ? colors.primary : colors.muted}
+                                  />
+                                  <View style={goalStyles.efAccountRowText}>
+                                    <Text style={goalStyles.settingsRowLabel}>
+                                      {a.name}
+                                      {a.mask ? ` ····${a.mask}` : ''}
+                                    </Text>
+                                    <Text style={styles.smallText}>
+                                      {a.institution_name ? `${a.institution_name} · ` : ''}
+                                      {balance != null ? `$${formatDecimal(balance)}` : '—'}
+                                    </Text>
+                                  </View>
+                                </Pressable>
+                              );
+                            })}
+                          </View>
+                        )}
+
+                        {estimate && !refusalMessage && (
+                          <>
+                            <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
+                              Based on ${formatWhole(estimate.averageMonthlyEssential)}/month in
+                              essential spending ({estimate.monthsOfHistory} months of history), a
+                              typical emergency fund covers 3-6 months of essential expenses.
+                            </Text>
+                            <View style={goalStyles.estimateButtonRow}>
+                              <Pressable
+                                style={goalStyles.estimateOutlineButton}
+                                onPress={() =>
+                                  applySuggestedTarget(
+                                    Math.round(estimate.averageMonthlyEssential * 3)
+                                  )
+                                }
+                                accessibilityRole="button"
+                              >
+                                <Text style={goalStyles.estimateOutlineButtonText}>
+                                  3 MONTHS (${Math.round(estimate.averageMonthlyEssential * 3)})
+                                </Text>
+                              </Pressable>
+                              <Pressable
+                                style={goalStyles.estimateOutlineButton}
+                                onPress={() =>
+                                  applySuggestedTarget(
+                                    Math.round(estimate.averageMonthlyEssential * 6)
+                                  )
+                                }
+                                accessibilityRole="button"
+                              >
+                                <Text style={goalStyles.estimateOutlineButtonText}>
+                                  6 MONTHS (${Math.round(estimate.averageMonthlyEssential * 6)})
+                                </Text>
+                              </Pressable>
+                            </View>
+                          </>
+                        )}
+
+                        <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
+                          Target amount
+                        </Text>
+                        <TextInput
+                          style={styles.input}
+                          value={efTargetText}
+                          onChangeText={(text) => {
+                            setEfTargetText(text);
+                            setEfUsedSuggestedAmount(null);
+                          }}
+                          placeholder="e.g. $10,000"
+                          placeholderTextColor={colors.placeholder}
+                          keyboardType="numeric"
+                        />
+
+                        {emergencyFundError && (
+                          <Text style={styles.errorText}>{emergencyFundError}</Text>
+                        )}
+
+                        {savingEmergencyFund ? (
+                          <ActivityIndicator style={goalStyles.estimateSpacing} />
+                        ) : (
+                          <View style={goalStyles.estimateButtonRow}>
+                            <PrimaryButton title="SAVE" onPress={submitEmergencyFundEditor} />
+                            <Pressable
+                              onPress={() => setEfEditing(false)}
+                              accessibilityRole="button"
+                            >
+                              <Text style={goalStyles.textLink}>Cancel</Text>
+                            </Pressable>
+                          </View>
+                        )}
+                      </>
+                    ) : isConfigured ? (
+                      <>
+                        <View style={goalStyles.progressTrack}>
+                          <View
+                            style={[
+                              goalStyles.progressFill,
+                              {
+                                width: `${Math.min(
+                                  100,
+                                  Math.max(0, emergencyFundStatus.percent_complete || 0)
+                                )}%`,
+                              },
+                            ]}
+                          />
+                        </View>
+                        <Text style={styles.smallText}>
+                          ${formatDecimal(emergencyFundStatus.current_amount)} of $
+                          {formatDecimal(emergencyFundStatus.target_amount)} —{' '}
+                          {Math.round(emergencyFundStatus.percent_complete)}%
+                        </Text>
+                        {emergencyFundStatus.missing_account_ids?.length > 0 && (
+                          <Text style={[styles.errorText, goalStyles.estimateSpacing]}>
+                            One or more tracked accounts are no longer linked - edit below to update
+                            which accounts count toward this.
+                          </Text>
+                        )}
+                        <Pressable
+                          onPress={openEmergencyFundEditor}
+                          accessibilityRole="button"
+                          style={goalStyles.estimateSpacing}
+                        >
+                          <Text style={goalStyles.textLink}>Edit accounts or target</Text>
+                        </Pressable>
+                      </>
+                    ) : (
+                      <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
+                        Turn this on to track a dedicated safety-net balance across one or more of
+                        your accounts, the same way a budget category is tracked - separate from
+                        your other goals above, not competing with them.
+                      </Text>
+                    )}
+                  </View>
+                );
+              })()}
+
               <View style={[styles.card, goalStyles.cardMargin]}>
                 <View style={goalStyles.projectionsHeaderRow}>
-                  <MaterialIcons name="toll" size={18} color={colors.dark} />
-                  <Text style={goalStyles.cardTitle}>Round-Ups</Text>
+                  <MaterialIcons name="home" size={18} color={colors.dark} />
+                  <Text style={goalStyles.cardTitle}>Home Affordability</Text>
                 </View>
-                {!showRoundUps ? (
+                {!showHomeAffordability ? (
                   <Pressable
                     style={[goalStyles.estimateOutlineButton, goalStyles.estimateSpacing]}
-                    onPress={openRoundUps}
+                    onPress={() => setShowHomeAffordability(true)}
                     accessibilityRole="button"
                   >
                     <Text style={goalStyles.estimateOutlineButtonText}>
-                      SEE HOW MUCH ROUND-UPS COULD ADD UP TO
+                      SEE IF YOU CAN AFFORD A HOME
                     </Text>
                   </Pressable>
-                ) : loadingRoundUps ? (
-                  <ActivityIndicator style={goalStyles.estimateSpacing} />
-                ) : roundUpsError ? (
-                  <Text style={[styles.errorText, goalStyles.estimateSpacing]}>{roundUpsError}</Text>
                 ) : (
-                  <View style={[goalStyles.estimateSpacing, goalStyles.wrappingTextBlock]}>
-                    <Text style={[styles.smallText, goalStyles.wrappingText]}>
-                      Rounding each of this period's {roundUpsResult?.transaction_count ?? 0}{' '}
-                      purchase{roundUpsResult?.transaction_count === 1 ? '' : 's'} up to the next
-                      dollar would have added up to{' '}
-                      <Text style={goalStyles.inlineBold}>
-                        ${formatDecimal(roundUpsResult?.total_round_ups ?? 0)}
-                      </Text>
-                      . This is an estimate only - nothing is actually being set aside
-                      automatically.
-                    </Text>
-                  </View>
-                )}
-              </View>
-            )}
-
-            {(() => {
-              const estimate = emergencyFundStatus?.essential_expense_estimate;
-              const refusalMessage = estimate ? emergencyEstimateRefusalMessage(estimate) : null;
-              const isConfigured =
-                emergencyFundStatus?.enabled &&
-                emergencyFundStatus?.target_amount &&
-                (emergencyFundStatus?.account_ids?.length || 0) > 0;
-
-              return (
-                <View style={[styles.card, goalStyles.cardMargin]}>
-                  <View style={[goalStyles.projectionsHeaderRow, goalStyles.spaceBetweenRow]}>
-                    <View style={goalStyles.projectionsHeaderRow}>
-                      <MaterialIcons name="shield" size={18} color={colors.dark} />
-                      <Text style={goalStyles.cardTitle}>Emergency Fund</Text>
-                    </View>
-                    {emergencyFundStatus && (
-                      <Switch
-                        value={!!emergencyFundStatus.enabled}
-                        onValueChange={handleEmergencyFundToggle}
-                        disabled={savingEmergencyFund}
-                        trackColor={{ false: colors.sage, true: colors.primary }}
-                      />
-                    )}
-                  </View>
-
-                  {!emergencyFundStatus ? (
-                    <Text style={[styles.smallText, goalStyles.estimateSpacing]}>Loading…</Text>
-                  ) : efEditing ? (
-                    <>
-                      <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
-                        Choose which account(s) this tracks and a target amount - Sorrel will
-                        track the real balance against it, the same way a budget category does.
-                      </Text>
-
-                      {depositoryAccounts.length === 0 ? (
-                        <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
-                          No linked bank/savings accounts found yet.
-                        </Text>
-                      ) : (
-                        <View style={goalStyles.estimateSpacing}>
-                          {depositoryAccounts.map((a) => {
-                            const selected = efSelectedAccountIds.includes(a.id);
-                            const balance = a.available_balance ?? a.current_balance;
-                            return (
-                              <Pressable
-                                key={a.id}
-                                style={goalStyles.efAccountRow}
-                                onPress={() => toggleEfAccount(a.id)}
-                                accessibilityRole="checkbox"
-                                accessibilityState={{ checked: selected }}
-                              >
-                                <MaterialIcons
-                                  name={selected ? 'check-box' : 'check-box-outline-blank'}
-                                  size={20}
-                                  color={selected ? colors.primary : colors.muted}
-                                />
-                                <View style={goalStyles.efAccountRowText}>
-                                  <Text style={goalStyles.settingsRowLabel}>
-                                    {a.name}
-                                    {a.mask ? ` ····${a.mask}` : ''}
-                                  </Text>
-                                  <Text style={styles.smallText}>
-                                    {a.institution_name ? `${a.institution_name} · ` : ''}
-                                    {balance != null ? `$${formatDecimal(balance)}` : '—'}
-                                  </Text>
-                                </View>
-                              </Pressable>
-                            );
-                          })}
-                        </View>
-                      )}
-
-                      {estimate && !refusalMessage && (
-                        <>
-                          <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
-                            Based on ${formatWhole(estimate.averageMonthlyEssential)}/month in
-                            essential spending ({estimate.monthsOfHistory} months of history), a
-                            typical emergency fund covers 3-6 months of essential expenses.
-                          </Text>
-                          <View style={goalStyles.estimateButtonRow}>
-                            <Pressable
-                              style={goalStyles.estimateOutlineButton}
-                              onPress={() =>
-                                applySuggestedTarget(Math.round(estimate.averageMonthlyEssential * 3))
-                              }
-                              accessibilityRole="button"
-                            >
-                              <Text style={goalStyles.estimateOutlineButtonText}>
-                                3 MONTHS (${Math.round(estimate.averageMonthlyEssential * 3)})
-                              </Text>
-                            </Pressable>
-                            <Pressable
-                              style={goalStyles.estimateOutlineButton}
-                              onPress={() =>
-                                applySuggestedTarget(Math.round(estimate.averageMonthlyEssential * 6))
-                              }
-                              accessibilityRole="button"
-                            >
-                              <Text style={goalStyles.estimateOutlineButtonText}>
-                                6 MONTHS (${Math.round(estimate.averageMonthlyEssential * 6)})
-                              </Text>
-                            </Pressable>
-                          </View>
-                        </>
-                      )}
-
-                      <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
-                        Target amount
-                      </Text>
-                      <TextInput
-                        style={styles.input}
-                        value={efTargetText}
-                        onChangeText={(text) => {
-                          setEfTargetText(text);
-                          setEfUsedSuggestedAmount(null);
-                        }}
-                        placeholder="e.g. $10,000"
-                        placeholderTextColor={colors.placeholder}
-                        keyboardType="numeric"
-                      />
-
-                      {emergencyFundError && (
-                        <Text style={styles.errorText}>{emergencyFundError}</Text>
-                      )}
-
-                      {savingEmergencyFund ? (
-                        <ActivityIndicator style={goalStyles.estimateSpacing} />
-                      ) : (
-                        <View style={goalStyles.estimateButtonRow}>
-                          <PrimaryButton title="SAVE" onPress={submitEmergencyFundEditor} />
-                          <Pressable
-                            onPress={() => setEfEditing(false)}
-                            accessibilityRole="button"
-                          >
-                            <Text style={goalStyles.textLink}>Cancel</Text>
-                          </Pressable>
-                        </View>
-                      )}
-                    </>
-                  ) : isConfigured ? (
-                    <>
-                      <View style={goalStyles.progressTrack}>
-                        <View
-                          style={[
-                            goalStyles.progressFill,
-                            {
-                              width: `${Math.min(
-                                100,
-                                Math.max(0, emergencyFundStatus.percent_complete || 0)
-                              )}%`,
-                            },
-                          ]}
-                        />
-                      </View>
-                      <Text style={styles.smallText}>
-                        ${formatDecimal(emergencyFundStatus.current_amount)} of $
-                        {formatDecimal(emergencyFundStatus.target_amount)} —{' '}
-                        {Math.round(emergencyFundStatus.percent_complete)}%
-                      </Text>
-                      {emergencyFundStatus.missing_account_ids?.length > 0 && (
-                        <Text style={[styles.errorText, goalStyles.estimateSpacing]}>
-                          One or more tracked accounts are no longer linked - edit below to
-                          update which accounts count toward this.
-                        </Text>
-                      )}
-                      <Pressable
-                        onPress={openEmergencyFundEditor}
-                        accessibilityRole="button"
-                        style={goalStyles.estimateSpacing}
-                      >
-                        <Text style={goalStyles.textLink}>Edit accounts or target</Text>
-                      </Pressable>
-                    </>
-                  ) : (
+                  <>
                     <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
-                      Turn this on to track a dedicated safety-net balance across one or more of
-                      your accounts, the same way a budget category is tracked - separate from
-                      your other goals above, not competing with them.
+                      Enter a home price, down payment, and state to see an estimated monthly cost
+                      and how it stacks up against your real income and debt.
                     </Text>
-                  )}
-                </View>
-              );
-            })()}
-
-            <View style={[styles.card, goalStyles.cardMargin]}>
-              <View style={goalStyles.projectionsHeaderRow}>
-                <MaterialIcons name="home" size={18} color={colors.dark} />
-                <Text style={goalStyles.cardTitle}>Home Affordability</Text>
-              </View>
-              {!showHomeAffordability ? (
-                <Pressable
-                  style={[goalStyles.estimateOutlineButton, goalStyles.estimateSpacing]}
-                  onPress={() => setShowHomeAffordability(true)}
-                  accessibilityRole="button"
-                >
-                  <Text style={goalStyles.estimateOutlineButtonText}>
-                    SEE IF YOU CAN AFFORD A HOME
-                  </Text>
-                </Pressable>
-              ) : (
-                <>
-                  <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
-                    Enter a home price, down payment, and state to see an estimated monthly
-                    cost and how it stacks up against your real income and debt.
-                  </Text>
-                  <TextInput
-                    style={[styles.input, goalStyles.estimateSpacing]}
-                    value={homePriceText}
-                    onChangeText={setHomePriceText}
-                    placeholder="Home price, e.g. $350,000"
-                    placeholderTextColor={colors.placeholder}
-                    keyboardType="numeric"
-                    editable={!calculatingHomeAffordability}
-                  />
-                  <TextInput
-                    style={[styles.input, goalStyles.estimateSpacing]}
-                    value={downPaymentText}
-                    onChangeText={setDownPaymentText}
-                    placeholder="Down payment, e.g. $35,000"
-                    placeholderTextColor={colors.placeholder}
-                    keyboardType="numeric"
-                    editable={!calculatingHomeAffordability}
-                  />
-                  <View style={[styles.picker, goalStyles.estimateSpacing]}>
-                    {/* Found 2026-09-11 (real on-device report, tap-testing
+                    <TextInput
+                      style={[styles.input, goalStyles.estimateSpacing]}
+                      value={homePriceText}
+                      onChangeText={setHomePriceText}
+                      placeholder="Home price, e.g. $350,000"
+                      placeholderTextColor={colors.placeholder}
+                      keyboardType="numeric"
+                      editable={!calculatingHomeAffordability}
+                    />
+                    <TextInput
+                      style={[styles.input, goalStyles.estimateSpacing]}
+                      value={downPaymentText}
+                      onChangeText={setDownPaymentText}
+                      placeholder="Down payment, e.g. $35,000"
+                      placeholderTextColor={colors.placeholder}
+                      keyboardType="numeric"
+                      editable={!calculatingHomeAffordability}
+                    />
+                    <View style={[styles.picker, goalStyles.estimateSpacing]}>
+                      {/* Found 2026-09-11 (real on-device report, tap-testing
                         Phase 42): the exact bug already fixed for
                         settings/goal.js's Round-Ups/Auto-Save pickers -
                         that fix's own comment predicted this one would
@@ -2357,126 +2481,139 @@ export default function Goal() {
                         background set directly on the Picker and each
                         Picker.Item, or the box renders with invisible
                         text. Same fix, mirrored exactly. */}
-                    <Picker
-                      selectedValue={homeState}
-                      onValueChange={setHomeState}
-                      enabled={!calculatingHomeAffordability}
-                      style={goalStyles.homeStatePickerControl}
-                      dropdownIconColor={colors.darkest}
-                      mode="dropdown"
-                    >
-                      <Picker.Item
-                        label="Choose a state..."
-                        value=""
-                        color={colors.darkest}
-                        style={goalStyles.homeStatePickerItem}
-                      />
-                      {US_STATES.map(([code, name]) => (
+                      <Picker
+                        selectedValue={homeState}
+                        onValueChange={setHomeState}
+                        enabled={!calculatingHomeAffordability}
+                        style={goalStyles.homeStatePickerControl}
+                        dropdownIconColor={colors.darkest}
+                        mode="dropdown"
+                      >
                         <Picker.Item
-                          key={code}
-                          label={name}
-                          value={code}
+                          label="Choose a state..."
+                          value=""
                           color={colors.darkest}
                           style={goalStyles.homeStatePickerItem}
                         />
-                      ))}
-                    </Picker>
-                  </View>
-                  {homeAffordabilityError && (
-                    <Text style={styles.errorText}>{homeAffordabilityError}</Text>
-                  )}
-                  {calculatingHomeAffordability ? (
-                    <ActivityIndicator style={goalStyles.estimateSpacing} />
-                  ) : (
-                    <View style={goalStyles.estimateSpacing}>
-                      <PrimaryButton title="ESTIMATE MONTHLY COST" onPress={runHomeAffordability} />
+                        {US_STATES.map(([code, name]) => (
+                          <Picker.Item
+                            key={code}
+                            label={name}
+                            value={code}
+                            color={colors.darkest}
+                            style={goalStyles.homeStatePickerItem}
+                          />
+                        ))}
+                      </Picker>
                     </View>
-                  )}
+                    {homeAffordabilityError && (
+                      <Text style={styles.errorText}>{homeAffordabilityError}</Text>
+                    )}
+                    {calculatingHomeAffordability ? (
+                      <ActivityIndicator style={goalStyles.estimateSpacing} />
+                    ) : (
+                      <View style={goalStyles.estimateSpacing}>
+                        <PrimaryButton
+                          title="ESTIMATE MONTHLY COST"
+                          onPress={runHomeAffordability}
+                        />
+                      </View>
+                    )}
 
-                  {homeAffordabilityResult && (
-                    <View style={goalStyles.estimateSpacing}>
-                      <View style={styles.card}>
-                        <Text style={styles.cardTitle}>Estimated monthly cost</Text>
-                        <View style={styles.comparisonTableRow}>
-                          <Text style={styles.comparisonTableLabel}>Loan amount</Text>
-                          <Text style={styles.comparisonTableValue}>
-                            ${formatDecimal(homeAffordabilityResult.loan_amount)}
-                          </Text>
-                        </View>
-                        <View style={styles.comparisonTableRow}>
-                          <Text style={styles.comparisonTableLabel}>Down payment</Text>
-                          <Text style={styles.comparisonTableValue}>
-                            {homeAffordabilityResult.down_payment_percent}%
-                          </Text>
-                        </View>
-                        <View style={styles.comparisonTableRow}>
-                          <Text style={styles.comparisonTableLabel}>Principal & interest</Text>
-                          <Text style={styles.comparisonTableValue}>
-                            ${formatDecimal(homeAffordabilityResult.monthly_principal_and_interest)}/mo
-                          </Text>
-                        </View>
-                        {homeAffordabilityResult.has_state_cost_data && (
-                          <>
-                            <View style={styles.comparisonTableRow}>
-                              <Text style={styles.comparisonTableLabel}>Property tax (est.)</Text>
-                              <Text style={styles.comparisonTableValue}>
-                                ${formatDecimal(homeAffordabilityResult.monthly_property_tax)}/mo
-                              </Text>
-                            </View>
-                            <View style={styles.comparisonTableRow}>
-                              <Text style={styles.comparisonTableLabel}>Home insurance (est.)</Text>
-                              <Text style={styles.comparisonTableValue}>
-                                ${formatDecimal(homeAffordabilityResult.monthly_insurance)}/mo
-                              </Text>
-                            </View>
-                          </>
-                        )}
-                        {homeAffordabilityResult.pmi_applies && (
+                    {homeAffordabilityResult && (
+                      <View style={goalStyles.estimateSpacing}>
+                        <View style={styles.card}>
+                          <Text style={styles.cardTitle}>Estimated monthly cost</Text>
                           <View style={styles.comparisonTableRow}>
-                            <Text style={styles.comparisonTableLabel}>PMI (est., under 20% down)</Text>
+                            <Text style={styles.comparisonTableLabel}>Loan amount</Text>
                             <Text style={styles.comparisonTableValue}>
-                              ${formatDecimal(homeAffordabilityResult.monthly_pmi)}/mo
+                              ${formatDecimal(homeAffordabilityResult.loan_amount)}
                             </Text>
                           </View>
-                        )}
-                        <View style={[styles.comparisonTableRow, { borderBottomWidth: 0 }]}>
-                          <Text style={styles.comparisonTableLabel}>Total monthly housing cost</Text>
-                          <Text style={styles.comparisonTableValue}>
-                            {homeAffordabilityResult.total_monthly_housing_cost != null
-                              ? `$${formatDecimal(homeAffordabilityResult.total_monthly_housing_cost)}/mo`
-                              : 'Unavailable'}
-                          </Text>
+                          <View style={styles.comparisonTableRow}>
+                            <Text style={styles.comparisonTableLabel}>Down payment</Text>
+                            <Text style={styles.comparisonTableValue}>
+                              {homeAffordabilityResult.down_payment_percent}%
+                            </Text>
+                          </View>
+                          <View style={styles.comparisonTableRow}>
+                            <Text style={styles.comparisonTableLabel}>Principal & interest</Text>
+                            <Text style={styles.comparisonTableValue}>
+                              $
+                              {formatDecimal(
+                                homeAffordabilityResult.monthly_principal_and_interest
+                              )}
+                              /mo
+                            </Text>
+                          </View>
+                          {homeAffordabilityResult.has_state_cost_data && (
+                            <>
+                              <View style={styles.comparisonTableRow}>
+                                <Text style={styles.comparisonTableLabel}>Property tax (est.)</Text>
+                                <Text style={styles.comparisonTableValue}>
+                                  ${formatDecimal(homeAffordabilityResult.monthly_property_tax)}/mo
+                                </Text>
+                              </View>
+                              <View style={styles.comparisonTableRow}>
+                                <Text style={styles.comparisonTableLabel}>
+                                  Home insurance (est.)
+                                </Text>
+                                <Text style={styles.comparisonTableValue}>
+                                  ${formatDecimal(homeAffordabilityResult.monthly_insurance)}/mo
+                                </Text>
+                              </View>
+                            </>
+                          )}
+                          {homeAffordabilityResult.pmi_applies && (
+                            <View style={styles.comparisonTableRow}>
+                              <Text style={styles.comparisonTableLabel}>
+                                PMI (est., under 20% down)
+                              </Text>
+                              <Text style={styles.comparisonTableValue}>
+                                ${formatDecimal(homeAffordabilityResult.monthly_pmi)}/mo
+                              </Text>
+                            </View>
+                          )}
+                          <View style={[styles.comparisonTableRow, { borderBottomWidth: 0 }]}>
+                            <Text style={styles.comparisonTableLabel}>
+                              Total monthly housing cost
+                            </Text>
+                            <Text style={styles.comparisonTableValue}>
+                              {homeAffordabilityResult.total_monthly_housing_cost != null
+                                ? `$${formatDecimal(homeAffordabilityResult.total_monthly_housing_cost)}/mo`
+                                : 'Unavailable'}
+                            </Text>
+                          </View>
                         </View>
+
+                        {homeAffordabilityResult.back_end_dti_tier ? (
+                          <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
+                            {homeAffordabilityResult.back_end_dti_exceeds_display_cap
+                              ? `Including this and your other recurring debt ($${formatDecimal(homeAffordabilityResult.existing_monthly_debt)}/month), your total monthly debt would come to well more than your detected income covers.`
+                              : `Including this and your other recurring debt ($${formatDecimal(homeAffordabilityResult.existing_monthly_debt)}/month), your total monthly debt would be about ${homeAffordabilityResult.back_end_dti_percent}% of your income — ${DTI_TIER_COPY[homeAffordabilityResult.back_end_dti_tier]}.`}{' '}
+                            This is a general guideline, not a lending decision — actual approval
+                            depends on credit and other factors this app can't see.
+                          </Text>
+                        ) : (
+                          <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
+                            Not enough income history is detected yet to estimate how this would
+                            compare to your income.
+                          </Text>
+                        )}
+
+                        {!homeAffordabilityResult.has_state_cost_data && (
+                          <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
+                            Property tax and insurance estimates aren't available for this state
+                            yet, so the total above only includes principal, interest
+                            {homeAffordabilityResult.pmi_applies ? ', and PMI' : ''}.
+                          </Text>
+                        )}
                       </View>
-
-                      {homeAffordabilityResult.back_end_dti_tier ? (
-                        <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
-                          {homeAffordabilityResult.back_end_dti_exceeds_display_cap
-                            ? `Including this and your other recurring debt ($${formatDecimal(homeAffordabilityResult.existing_monthly_debt)}/month), your total monthly debt would come to well more than your detected income covers.`
-                            : `Including this and your other recurring debt ($${formatDecimal(homeAffordabilityResult.existing_monthly_debt)}/month), your total monthly debt would be about ${homeAffordabilityResult.back_end_dti_percent}% of your income — ${DTI_TIER_COPY[homeAffordabilityResult.back_end_dti_tier]}.`}
-                          {' '}This is a general guideline, not a lending decision — actual
-                          approval depends on credit and other factors this app can't see.
-                        </Text>
-                      ) : (
-                        <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
-                          Not enough income history is detected yet to estimate how this
-                          would compare to your income.
-                        </Text>
-                      )}
-
-                      {!homeAffordabilityResult.has_state_cost_data && (
-                        <Text style={[styles.smallText, goalStyles.estimateSpacing]}>
-                          Property tax and insurance estimates aren't available for this state
-                          yet, so the total above only includes principal, interest
-                          {homeAffordabilityResult.pmi_applies ? ', and PMI' : ''}.
-                        </Text>
-                      )}
-                    </View>
-                  )}
-                </>
-              )}
-            </View>
-          </ScrollView>
+                    )}
+                  </>
+                )}
+              </View>
+            </ScrollView>
           </TopEdgeFade>
         </>
       )}
@@ -2498,532 +2635,532 @@ export default function Goal() {
 // via useMemo inside the component (keyed on colors).
 function buildGoalStyles(colors) {
   return StyleSheet.create({
-  // Home Affordability's state Picker - see that Picker's own JSX comment
-  // for the full "why." Same values settings/goal.js's already-fixed
-  // pickerControl/pickerItem use.
-  homeStatePickerControl: {
-    color: colors.darkest,
-    backgroundColor: colors.background,
-  },
-  homeStatePickerItem: {
-    color: colors.darkest,
-    backgroundColor: colors.background,
-  },
-  wordmarkStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 24,
-    paddingTop: 8,
-    paddingBottom: 8,
-  },
-  // Shared by both the Overview and Edit Goal ScrollViews - kept plain
-  // (no paddingTop here). Overview's own first child (titleBlock, below)
-  // already carries the standard paddingTop:110 fade-clearing padding;
-  // adding it here too double-stacked it for Overview specifically (220px
-  // instead of 110) when this was added to fix Edit Goal's own missing
-  // padding - editingScroll (below) carries that fix instead, scoped to
-  // just the screen that actually needed it.
-  transparentScroll: {
-    backgroundColor: 'transparent',
-  },
-  // Edit Goal's own ScrollView style (2026-08-27) - unlike Overview,
-  // Edit Goal's first child (the Goal Summary card) has no paddingTop of
-  // its own, so this is the one screen that genuinely needs it here
-  // rather than on its first child.
-  editingScroll: {
-    flex: 1,
-    backgroundColor: 'transparent',
-    paddingTop: 110,
-  },
-  // --- Edit Goal redesign (2026-08-27) ---
-  editHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 56,
-    paddingBottom: 12,
-    gap: 12,
-  },
-  // Plain arrow, no square/card background (2026-08-27, direct user
-  // feedback: the rounded-square treatment this used to share with Home's
-  // bank drill-down back button made the arrow itself hard to see - "its
-  // almost invisible in the square"). Keeps the same 40x40 touch target
-  // for a comfortable tap area, just transparent instead of card-colored.
-  backButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  editHeaderTextCol: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  editHeaderTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  editHeaderSubtitle: {
-    fontSize: 13,
-    color: colors.dark,
-    marginTop: 2,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-  },
-  summaryIconCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: colors.sage,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  summaryTextCol: {
-    flex: 1,
-    gap: 2,
-  },
-  summaryName: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  summaryTagline: {
-    fontSize: 13,
-    color: colors.dark,
-  },
-  settingsCard: {
-    paddingVertical: 4,
-  },
-  settingsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
-  },
-  settingsIconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  settingsIconCircleWarm: {
-    backgroundColor: '#F3D9B8',
-  },
-  settingsRowText: {
-    flex: 1,
-    gap: 2,
-  },
-  settingsRowLabel: {
-    fontSize: 12,
-    color: colors.dark,
-  },
-  settingsRowValue: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  settingsDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.sage,
-  },
-  inlineEditor: {
-    paddingBottom: 12,
-    gap: 8,
-  },
-  inlineEditorActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 20,
-    paddingTop: 4,
-  },
-  inlineEditorLink: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.error,
-    textDecorationLine: 'underline',
-  },
-  inlineEditorLinkDone: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.primary,
-  },
-  typeOptionCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 10,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'transparent',
-  },
-  typeOptionCardSelected: {
-    backgroundColor: colors.background,
-    borderColor: colors.sage,
-  },
-  typeOptionTextGroup: {
-    flex: 1,
-    gap: 2,
-  },
-  typeOptionTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  typeOptionSubtitle: {
-    fontSize: 12,
-    color: colors.muted,
-  },
-  settingsIconCircleSelected: {
-    backgroundColor: colors.primary,
-  },
-  notesInput: {
-    marginTop: 4,
-  },
-  progressHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  progressValuesRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-end',
-  },
-  progressBigValue: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  calculationDetail: {
-    marginTop: 8,
-    gap: 2,
-  },
-  deleteGoalButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.error,
-    borderRadius: 22,
-    paddingVertical: 12,
-  },
-  deleteGoalButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.error,
-  },
-  titleBlock: {
-    paddingHorizontal: 24,
-    // Same top clearance every other tab's own first scroll-item uses,
-    // below the fixed wordmark strip above it.
-    paddingTop: 110,
-    paddingBottom: 24,
-    gap: 4,
-  },
-  // fontSize 26, matching Budget's and Recurring's own page title exactly
-  // (found via a cross-tab consistency pass, 2026-08-31) - this was 22,
-  // the one tab whose title read visibly smaller than its two siblings.
-  title: {
-    fontSize: 26,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  subtitle: {
-    fontSize: 13,
-    color: colors.dark,
-  },
-  priorityDisclaimer: {
-    marginTop: 8,
-  },
-  cardMargin: {
-    marginHorizontal: 16,
-    marginBottom: 12,
-  },
-  primaryGoalHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-  },
-  targetIconCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primaryGoalHeaderText: {
-    flex: 1,
-    gap: 2,
-  },
-  primaryGoalEyebrow: {
-    fontSize: 12,
-    color: colors.dark,
-  },
-  primaryGoalTarget: {
-    fontSize: 19,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  badge: {
-    borderRadius: 12,
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-  },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.background,
-  },
-  primaryGoalTagline: {
-    fontSize: 13,
-    color: colors.dark,
-    marginTop: 8,
-  },
-  savedRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-end',
-    marginTop: 14,
-  },
-  savedAmount: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-  savedPercent: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-  progressTrack: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.sage,
-    marginTop: 8,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.darkest,
-  },
-  fundingInsightRow: {
-    marginTop: 10,
-    paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.sage,
-    gap: 4,
-  },
-  fundingInsightText: {
-    fontSize: 12,
-    color: colors.warningText,
-    lineHeight: 17,
-  },
-  fundingInsightLink: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.primary,
-  },
-  editGoalSpacing: {
-    marginTop: 16,
-  },
-  cardEyebrow: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    color: colors.dark,
-  },
-  cardTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-  insightCard: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-  },
-  insightIconCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  insightBody: {
-    flex: 1,
-    gap: 4,
-  },
-  insightText: {
-    fontSize: 15,
-    color: colors.darkest,
-  },
-  projectionsHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 4,
-  },
-  // Emergency fund card (2026-09-01) - a plain header row plus a toggle
-  // switch at the far end, reused wherever a card header needs a control
-  // on the opposite side rather than just the icon+title.
-  spaceBetweenRow: {
-    justifyContent: 'space-between',
-  },
-  efAccountRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 6,
-  },
-  efAccountRowText: {
-    flex: 1,
-  },
-  // Plain secondary link text - Cancel/Edit-style actions that aren't
-  // destructive (inlineEditorLink above is styled for "Remove date"-style
-  // destructive actions specifically, not a fit here).
-  textLink: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.dark,
-    textDecorationLine: 'underline',
-  },
-  projectionsRow: {
-    flexDirection: 'row',
-    marginTop: 8,
-  },
-  projectionTile: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 4,
-  },
-  projectionDivider: {
-    width: StyleSheet.hairlineWidth,
-    backgroundColor: colors.sage,
-    marginHorizontal: 4,
-  },
-  projectionLabel: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: colors.muted,
-    letterSpacing: 0.3,
-    textAlign: 'center',
-  },
-  projectionValue: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.darkest,
-    textAlign: 'center',
-  },
-  estimateSpacing: {
-    marginTop: 8,
-  },
-  estimateButtonRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 8,
-  },
-  estimateOutlineButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.sage,
-    backgroundColor: colors.background,
-    borderRadius: 22,
-    paddingVertical: 10,
-    minHeight: 40,
-  },
-  estimateOutlineButtonText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.primary,
-    letterSpacing: 0.3,
-    textAlign: 'center',
-  },
-  milestoneRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.sage,
-  },
-  milestoneLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.darkest,
-    flexShrink: 0,
-  },
-  // Real bug found on-device (2026-08-25): a long status string (e.g.
-  // "Not enough observed saving history yet to project a rate.") had no
-  // flex/width constraint in this row, so it rendered at its own full
-  // intrinsic width and ran off the right edge of the screen instead of
-  // wrapping. `flex: 1` claims the remaining row width after the label so
-  // it has somewhere bounded to wrap into; `textAlign: 'right'` keeps the
-  // original visual alignment for the short "on track" cases.
-  milestoneStatus: {
-    fontSize: 12,
-    color: colors.dark,
-    flex: 1,
-    flexShrink: 1,
-    textAlign: 'right',
-    marginLeft: 12,
-  },
-  inlineBold: {
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  // Goal Calculator's text + voice input (2026-08-25) - same visual
-  // pattern as AffordabilityQuery.js's own input row, sized for a card
-  // rather than the full-width query bar.
-  calculatorInputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  calculatorInput: {
-    flex: 1,
-  },
-  calculatorMicButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  calculatorMicButtonIdle: {
-    backgroundColor: colors.primary,
-  },
-  calculatorMicButtonRecording: {
-    backgroundColor: colors.error,
-  },
-  // Defensive wrap fix for the Round-Ups paragraph (2026-08-25, direct
-  // user report - "the text ... is going off screen") - explicit width/
-  // flexShrink so this long, nested-bold-Text paragraph can't render at
-  // an unconstrained intrinsic width regardless of what's above it in the
-  // tree; alongside the Savings Planner row fix above, which was the
-  // other, structurally-confirmed source of the same symptom on this tab.
-  wrappingTextBlock: {
-    width: '100%',
-  },
-  wrappingText: {
-    flexShrink: 1,
-    alignSelf: 'stretch',
-  },
+    // Home Affordability's state Picker - see that Picker's own JSX comment
+    // for the full "why." Same values settings/goal.js's already-fixed
+    // pickerControl/pickerItem use.
+    homeStatePickerControl: {
+      color: colors.darkest,
+      backgroundColor: colors.background,
+    },
+    homeStatePickerItem: {
+      color: colors.darkest,
+      backgroundColor: colors.background,
+    },
+    wordmarkStrip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 24,
+      paddingTop: 8,
+      paddingBottom: 8,
+    },
+    // Shared by both the Overview and Edit Goal ScrollViews - kept plain
+    // (no paddingTop here). Overview's own first child (titleBlock, below)
+    // already carries the standard paddingTop:110 fade-clearing padding;
+    // adding it here too double-stacked it for Overview specifically (220px
+    // instead of 110) when this was added to fix Edit Goal's own missing
+    // padding - editingScroll (below) carries that fix instead, scoped to
+    // just the screen that actually needed it.
+    transparentScroll: {
+      backgroundColor: 'transparent',
+    },
+    // Edit Goal's own ScrollView style (2026-08-27) - unlike Overview,
+    // Edit Goal's first child (the Goal Summary card) has no paddingTop of
+    // its own, so this is the one screen that genuinely needs it here
+    // rather than on its first child.
+    editingScroll: {
+      flex: 1,
+      backgroundColor: 'transparent',
+      paddingTop: 110,
+    },
+    // --- Edit Goal redesign (2026-08-27) ---
+    editHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      paddingTop: 56,
+      paddingBottom: 12,
+      gap: 12,
+    },
+    // Plain arrow, no square/card background (2026-08-27, direct user
+    // feedback: the rounded-square treatment this used to share with Home's
+    // bank drill-down back button made the arrow itself hard to see - "its
+    // almost invisible in the square"). Keeps the same 40x40 touch target
+    // for a comfortable tap area, just transparent instead of card-colored.
+    backButton: {
+      width: 40,
+      height: 40,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    editHeaderTextCol: {
+      flex: 1,
+      alignItems: 'center',
+    },
+    editHeaderTitle: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    editHeaderSubtitle: {
+      fontSize: 13,
+      color: colors.dark,
+      marginTop: 2,
+    },
+    summaryRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+    },
+    summaryIconCircle: {
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+      backgroundColor: colors.sage,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    summaryTextCol: {
+      flex: 1,
+      gap: 2,
+    },
+    summaryName: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    summaryTagline: {
+      fontSize: 13,
+      color: colors.dark,
+    },
+    settingsCard: {
+      paddingVertical: 4,
+    },
+    settingsRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingVertical: 12,
+    },
+    settingsIconCircle: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    settingsIconCircleWarm: {
+      backgroundColor: '#F3D9B8',
+    },
+    settingsRowText: {
+      flex: 1,
+      gap: 2,
+    },
+    settingsRowLabel: {
+      fontSize: 12,
+      color: colors.dark,
+    },
+    settingsRowValue: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    settingsDivider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: colors.sage,
+    },
+    inlineEditor: {
+      paddingBottom: 12,
+      gap: 8,
+    },
+    inlineEditorActions: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      gap: 20,
+      paddingTop: 4,
+    },
+    inlineEditorLink: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.error,
+      textDecorationLine: 'underline',
+    },
+    inlineEditorLinkDone: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.primary,
+    },
+    typeOptionCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingVertical: 10,
+      paddingHorizontal: 10,
+      borderRadius: 14,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: 'transparent',
+    },
+    typeOptionCardSelected: {
+      backgroundColor: colors.background,
+      borderColor: colors.sage,
+    },
+    typeOptionTextGroup: {
+      flex: 1,
+      gap: 2,
+    },
+    typeOptionTitle: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    typeOptionSubtitle: {
+      fontSize: 12,
+      color: colors.muted,
+    },
+    settingsIconCircleSelected: {
+      backgroundColor: colors.primary,
+    },
+    notesInput: {
+      marginTop: 4,
+    },
+    progressHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 8,
+    },
+    progressValuesRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-end',
+    },
+    progressBigValue: {
+      fontSize: 22,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    calculationDetail: {
+      marginTop: 8,
+      gap: 2,
+    },
+    deleteGoalButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.error,
+      borderRadius: 22,
+      paddingVertical: 12,
+    },
+    deleteGoalButtonText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.error,
+    },
+    titleBlock: {
+      paddingHorizontal: 24,
+      // Same top clearance every other tab's own first scroll-item uses,
+      // below the fixed wordmark strip above it.
+      paddingTop: 110,
+      paddingBottom: 24,
+      gap: 4,
+    },
+    // fontSize 26, matching Budget's and Recurring's own page title exactly
+    // (found via a cross-tab consistency pass, 2026-08-31) - this was 22,
+    // the one tab whose title read visibly smaller than its two siblings.
+    title: {
+      fontSize: 26,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    subtitle: {
+      fontSize: 13,
+      color: colors.dark,
+    },
+    priorityDisclaimer: {
+      marginTop: 8,
+    },
+    cardMargin: {
+      marginHorizontal: 16,
+      marginBottom: 12,
+    },
+    primaryGoalHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+    },
+    targetIconCircle: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    primaryGoalHeaderText: {
+      flex: 1,
+      gap: 2,
+    },
+    primaryGoalEyebrow: {
+      fontSize: 12,
+      color: colors.dark,
+    },
+    primaryGoalTarget: {
+      fontSize: 19,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    badge: {
+      borderRadius: 12,
+      paddingVertical: 4,
+      paddingHorizontal: 10,
+    },
+    badgeText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: colors.background,
+    },
+    primaryGoalTagline: {
+      fontSize: 13,
+      color: colors.dark,
+      marginTop: 8,
+    },
+    savedRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-end',
+      marginTop: 14,
+    },
+    savedAmount: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+    savedPercent: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+    progressTrack: {
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: colors.sage,
+      marginTop: 8,
+      overflow: 'hidden',
+    },
+    progressFill: {
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: colors.darkest,
+    },
+    fundingInsightRow: {
+      marginTop: 10,
+      paddingTop: 10,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.sage,
+      gap: 4,
+    },
+    fundingInsightText: {
+      fontSize: 12,
+      color: colors.warningText,
+      lineHeight: 17,
+    },
+    fundingInsightLink: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.primary,
+    },
+    editGoalSpacing: {
+      marginTop: 16,
+    },
+    cardEyebrow: {
+      fontSize: 11,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+      color: colors.dark,
+    },
+    cardTitle: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+    insightCard: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+    },
+    insightIconCircle: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    insightBody: {
+      flex: 1,
+      gap: 4,
+    },
+    insightText: {
+      fontSize: 15,
+      color: colors.darkest,
+    },
+    projectionsHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginBottom: 4,
+    },
+    // Emergency fund card (2026-09-01) - a plain header row plus a toggle
+    // switch at the far end, reused wherever a card header needs a control
+    // on the opposite side rather than just the icon+title.
+    spaceBetweenRow: {
+      justifyContent: 'space-between',
+    },
+    efAccountRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingVertical: 6,
+    },
+    efAccountRowText: {
+      flex: 1,
+    },
+    // Plain secondary link text - Cancel/Edit-style actions that aren't
+    // destructive (inlineEditorLink above is styled for "Remove date"-style
+    // destructive actions specifically, not a fit here).
+    textLink: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.dark,
+      textDecorationLine: 'underline',
+    },
+    projectionsRow: {
+      flexDirection: 'row',
+      marginTop: 8,
+    },
+    projectionTile: {
+      flex: 1,
+      alignItems: 'center',
+      gap: 4,
+    },
+    projectionDivider: {
+      width: StyleSheet.hairlineWidth,
+      backgroundColor: colors.sage,
+      marginHorizontal: 4,
+    },
+    projectionLabel: {
+      fontSize: 9,
+      fontWeight: '700',
+      color: colors.muted,
+      letterSpacing: 0.3,
+      textAlign: 'center',
+    },
+    projectionValue: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: colors.darkest,
+      textAlign: 'center',
+    },
+    estimateSpacing: {
+      marginTop: 8,
+    },
+    estimateButtonRow: {
+      flexDirection: 'row',
+      gap: 10,
+      marginTop: 8,
+    },
+    estimateOutlineButton: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.sage,
+      backgroundColor: colors.background,
+      borderRadius: 22,
+      paddingVertical: 10,
+      minHeight: 40,
+    },
+    estimateOutlineButtonText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.primary,
+      letterSpacing: 0.3,
+      textAlign: 'center',
+    },
+    milestoneRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingVertical: 8,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.sage,
+    },
+    milestoneLabel: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.darkest,
+      flexShrink: 0,
+    },
+    // Real bug found on-device (2026-08-25): a long status string (e.g.
+    // "Not enough observed saving history yet to project a rate.") had no
+    // flex/width constraint in this row, so it rendered at its own full
+    // intrinsic width and ran off the right edge of the screen instead of
+    // wrapping. `flex: 1` claims the remaining row width after the label so
+    // it has somewhere bounded to wrap into; `textAlign: 'right'` keeps the
+    // original visual alignment for the short "on track" cases.
+    milestoneStatus: {
+      fontSize: 12,
+      color: colors.dark,
+      flex: 1,
+      flexShrink: 1,
+      textAlign: 'right',
+      marginLeft: 12,
+    },
+    inlineBold: {
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    // Goal Calculator's text + voice input (2026-08-25) - same visual
+    // pattern as AffordabilityQuery.js's own input row, sized for a card
+    // rather than the full-width query bar.
+    calculatorInputRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    calculatorInput: {
+      flex: 1,
+    },
+    calculatorMicButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    calculatorMicButtonIdle: {
+      backgroundColor: colors.primary,
+    },
+    calculatorMicButtonRecording: {
+      backgroundColor: colors.error,
+    },
+    // Defensive wrap fix for the Round-Ups paragraph (2026-08-25, direct
+    // user report - "the text ... is going off screen") - explicit width/
+    // flexShrink so this long, nested-bold-Text paragraph can't render at
+    // an unconstrained intrinsic width regardless of what's above it in the
+    // tree; alongside the Savings Planner row fix above, which was the
+    // other, structurally-confirmed source of the same symptom on this tab.
+    wrappingTextBlock: {
+      width: '100%',
+    },
+    wrappingText: {
+      flexShrink: 1,
+      alignSelf: 'stretch',
+    },
   });
 }

@@ -161,7 +161,10 @@ async function deliverPendingEventsForUserUnlocked(userId, now = new Date()) {
         const progress = await getGoalBalanceProgressById(userId, event.data.goal_id);
         if (progress?.message) body = progress.message;
       } catch (err) {
-        logError('Failed to refresh goal progress before delivery (non-fatal, using queued snapshot):', err);
+        logError(
+          'Failed to refresh goal progress before delivery (non-fatal, using queued snapshot):',
+          err
+        );
       }
     }
 

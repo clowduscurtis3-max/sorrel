@@ -93,12 +93,16 @@ async function exchangeCodeForTokens(code) {
 }
 
 async function getGmailProfile(access_token) {
-  const res = await fetch(
-    'https://www.googleapis.com/gmail/v1/users/me/profile',
-    { headers: { Authorization: `Bearer ${access_token}` } }
-  );
+  const res = await fetch('https://www.googleapis.com/gmail/v1/users/me/profile', {
+    headers: { Authorization: `Bearer ${access_token}` },
+  });
   if (!res.ok) throw new Error(`Failed to fetch Gmail profile: ${await res.text()}`);
   return res.json();
 }
 
-module.exports = { buildAuthUrl, verifyState, exchangeCodeForTokens, getGmailProfile };
+module.exports = {
+  buildAuthUrl,
+  verifyState,
+  exchangeCodeForTokens,
+  getGmailProfile,
+};

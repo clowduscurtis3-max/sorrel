@@ -61,15 +61,22 @@ async function patchSettings(userId, section, patch) {
   const current = await getSettings(userId);
   const merged = { ...current[section], ...patch };
 
-  const { error } = await supabaseAdmin
-    .from('user_settings')
-    .upsert(
-      { user_id: userId, [section]: merged, updated_at: new Date().toISOString() },
-      { onConflict: 'user_id' }
-    );
+  const { error } = await supabaseAdmin.from('user_settings').upsert(
+    {
+      user_id: userId,
+      [section]: merged,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'user_id' }
+  );
   if (error) throw error;
 
   return { ...current, [section]: merged };
 }
 
-module.exports = { SETTINGS_SECTIONS, emptySettings, getSettings, patchSettings };
+module.exports = {
+  SETTINGS_SECTIONS,
+  emptySettings,
+  getSettings,
+  patchSettings,
+};

@@ -47,10 +47,6 @@ const MAX_TOKENS = 600;
 // is guaranteed structurally, not by a hard mid-flight cutoff.
 const MAX_TOOL_ROUNDS = 3;
 
-function round2(n) {
-  return Math.round(n * 100) / 100;
-}
-
 // Deliberately a *guideline*, not a hard-coded priority table this agent
 // just mechanically follows - the whole point of this agent (versus the
 // static priority table originally sketched for Home's advisor-briefing
@@ -160,7 +156,8 @@ const TOOLS = [
   },
   {
     name: 'get_income_summary',
-    description: 'Expected income (90-day trailing average) vs. actual income credited so far this period.',
+    description:
+      'Expected income (90-day trailing average) vs. actual income credited so far this period.',
     input_schema: EMPTY_SCHEMA,
   },
 ];
@@ -220,7 +217,9 @@ function stripJargon(text) {
         // leading "Discretionary" -> "Extra", not a jarring lowercase
         // "extra" at the start of a sentence) - real bug caught by this
         // module's own test before it ever reached a live response.
-        match[0] === match[0].toUpperCase() ? replacement[0].toUpperCase() + replacement.slice(1) : replacement
+        match[0] === match[0].toUpperCase()
+          ? replacement[0].toUpperCase() + replacement.slice(1)
+          : replacement
       ),
     text
   );
@@ -263,7 +262,10 @@ function parseBriefing(text) {
   // recommended_actions may legitimately be empty ("nothing to recommend
   // right now" is a real, honest output) - every other array/string field
   // here must be genuinely non-empty content, this one alone may be [].
-  if (!Array.isArray(recommended_actions) || !recommended_actions.every((s) => typeof s === 'string' && s.trim())) {
+  if (
+    !Array.isArray(recommended_actions) ||
+    !recommended_actions.every((s) => typeof s === 'string' && s.trim())
+  ) {
     return null;
   }
   if (!Array.isArray(facts_used) || !facts_used.every((f) => typeof f === 'string')) return null;
@@ -301,7 +303,12 @@ function extractText(response) {
 // fixture-driven loop-control-flow test needs to exercise round-by-round
 // bounding/dispatch without ever reaching the real database, exactly the
 // same reasoning that makes `client` injectable.
-async function runAdvisorInvestigation({ userId, activeEvents, client = anthropic, executeToolFn = executeTool }) {
+async function runAdvisorInvestigation({
+  userId,
+  activeEvents,
+  client = anthropic,
+  executeToolFn = executeTool,
+}) {
   const messages = [{ role: 'user', content: 'Investigate and produce the briefing now.' }];
   const system = systemPrompt(activeEvents);
 
@@ -407,7 +414,13 @@ async function getAdvisorBriefing(userId) {
         needs_clarification: false,
         requires_approval: false,
       };
-      console.log('[advisor-agent]', { userId, roundsUsed: 0, toolsCalled: [], durationMs: Date.now() - startedAt, outcome: 'no-op' });
+      console.log('[advisor-agent]', {
+        userId,
+        roundsUsed: 0,
+        toolsCalled: [],
+        durationMs: Date.now() - startedAt,
+        outcome: 'no-op',
+      });
       return noop;
     }
 
@@ -421,7 +434,13 @@ async function getAdvisorBriefing(userId) {
       .maybeSingle();
 
     if (isCacheValid(cached, activeFingerprint)) {
-      console.log('[advisor-agent]', { userId, roundsUsed: 0, toolsCalled: [], durationMs: Date.now() - startedAt, outcome: 'cache-hit' });
+      console.log('[advisor-agent]', {
+        userId,
+        roundsUsed: 0,
+        toolsCalled: [],
+        durationMs: Date.now() - startedAt,
+        outcome: 'cache-hit',
+      });
       return cached.structured_output;
     }
 
@@ -455,7 +474,11 @@ async function getAdvisorBriefing(userId) {
       .select('structured_output')
       .eq('user_id', userId)
       .maybeSingle();
-    console.log('[advisor-agent]', { userId, durationMs: Date.now() - startedAt, outcome: 'error' });
+    console.log('[advisor-agent]', {
+      userId,
+      durationMs: Date.now() - startedAt,
+      outcome: 'error',
+    });
     return fallback ? fallback.structured_output : null;
   }
 }

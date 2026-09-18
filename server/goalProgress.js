@@ -57,7 +57,8 @@ function computeGoalProjections({ saved, target, targetTimeframeMonths, goalCrea
     // is this month) - a "per month" figure stops meaning anything at
     // that point, same reasoning projectFinishDate's own null-when-no-
     // pace return already applies to a different edge case.
-    monthly_savings_needed: deadlinePassed || monthsRemaining < 1 ? remaining : round2(remaining / monthsRemaining),
+    monthly_savings_needed:
+      deadlinePassed || monthsRemaining < 1 ? remaining : round2(remaining / monthsRemaining),
     deadline_passed: deadlinePassed,
   };
 }
@@ -153,15 +154,21 @@ function computeGoalBalanceProgress({ goal, accounts, now = new Date() }) {
 // shape for GET /goal/progress and every server-side consumer that used to
 // read "the" goal singular.
 async function getGoalsProgress(userId) {
-  const [{ data: goals, error: goalsError }, { data: accounts, error: accountsError }] = await Promise.all([
-    supabaseAdmin
-      .from('user_goals')
-      .select('id, goal_type, target_amount, target_timeframe_months, notes, account_ids, created_at')
-      .eq('user_id', userId)
-      .is('archived_at', null)
-      .order('created_at', { ascending: true }),
-    supabaseAdmin.from('accounts').select('id, available_balance, current_balance').eq('user_id', userId),
-  ]);
+  const [{ data: goals, error: goalsError }, { data: accounts, error: accountsError }] =
+    await Promise.all([
+      supabaseAdmin
+        .from('user_goals')
+        .select(
+          'id, goal_type, target_amount, target_timeframe_months, notes, account_ids, created_at'
+        )
+        .eq('user_id', userId)
+        .is('archived_at', null)
+        .order('created_at', { ascending: true }),
+      supabaseAdmin
+        .from('accounts')
+        .select('id, available_balance, current_balance')
+        .eq('user_id', userId),
+    ]);
   if (goalsError) throw goalsError;
   if (accountsError) throw accountsError;
 
@@ -178,15 +185,21 @@ async function getGoalsProgress(userId) {
 // comment) - once every old caller is migrated, this can take over the
 // getGoalProgress name.
 async function getGoalBalanceProgressById(userId, goalId) {
-  const [{ data: goal, error: goalError }, { data: accounts, error: accountsError }] = await Promise.all([
-    supabaseAdmin
-      .from('user_goals')
-      .select('id, goal_type, target_amount, target_timeframe_months, notes, account_ids, created_at')
-      .eq('user_id', userId)
-      .eq('id', goalId)
-      .maybeSingle(),
-    supabaseAdmin.from('accounts').select('id, available_balance, current_balance').eq('user_id', userId),
-  ]);
+  const [{ data: goal, error: goalError }, { data: accounts, error: accountsError }] =
+    await Promise.all([
+      supabaseAdmin
+        .from('user_goals')
+        .select(
+          'id, goal_type, target_amount, target_timeframe_months, notes, account_ids, created_at'
+        )
+        .eq('user_id', userId)
+        .eq('id', goalId)
+        .maybeSingle(),
+      supabaseAdmin
+        .from('accounts')
+        .select('id, available_balance, current_balance')
+        .eq('user_id', userId),
+    ]);
   if (goalError) throw goalError;
   if (accountsError) throw accountsError;
   if (!goal) return null;

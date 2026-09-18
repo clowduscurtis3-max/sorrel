@@ -117,7 +117,14 @@ async function getRecurringMonthComparison(userId, { now = new Date() } = {}) {
     sumRecurringSpend(userId, toDateStr(priorPeriodStart), toDateStr(priorPeriodEnd)),
   ]);
 
-  return { available: true, ...computeRecurringSpendDelta({ currentTotal, priorTotal }) };
+  return {
+    available: true,
+    ...computeRecurringSpendDelta({ currentTotal, priorTotal }),
+  };
 }
 
-module.exports = { computeRecurringSpendDelta, computeComparisonWindow, getRecurringMonthComparison };
+module.exports = {
+  computeRecurringSpendDelta,
+  computeComparisonWindow,
+  getRecurringMonthComparison,
+};

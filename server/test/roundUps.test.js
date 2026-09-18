@@ -40,8 +40,14 @@ test('computeRoundUpTotal: a negative amount in a spend category (a refund/credi
 });
 
 test('computeRoundUpTotal: empty or missing transactions produces a real zero, not an error', () => {
-  assert.deepEqual(computeRoundUpTotal([]), { total_round_ups: 0, transaction_count: 0 });
-  assert.deepEqual(computeRoundUpTotal(undefined), { total_round_ups: 0, transaction_count: 0 });
+  assert.deepEqual(computeRoundUpTotal([]), {
+    total_round_ups: 0,
+    transaction_count: 0,
+  });
+  assert.deepEqual(computeRoundUpTotal(undefined), {
+    total_round_ups: 0,
+    transaction_count: 0,
+  });
 });
 
 test('computeRoundUpTotal: an invalid amount (NaN, non-number) is skipped rather than corrupting the total', () => {

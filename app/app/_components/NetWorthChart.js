@@ -60,12 +60,16 @@ function formatXLabel(dateStr, useDayGranularity) {
 // elsewhere (alerts.js/subscriptionAudit.js's own UTC calendar-date
 // comparisons) rather than comparing against local-time "now".
 function monthsAgoUtc(now, months) {
-  const firstOfTargetMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - months, 1));
+  const firstOfTargetMonth = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - months, 1)
+  );
   const daysInTargetMonth = new Date(
     Date.UTC(firstOfTargetMonth.getUTCFullYear(), firstOfTargetMonth.getUTCMonth() + 1, 0)
   ).getUTCDate();
   const day = Math.min(now.getUTCDate(), daysInTargetMonth);
-  return new Date(Date.UTC(firstOfTargetMonth.getUTCFullYear(), firstOfTargetMonth.getUTCMonth(), day));
+  return new Date(
+    Date.UTC(firstOfTargetMonth.getUTCFullYear(), firstOfTargetMonth.getUTCMonth(), day)
+  );
 }
 
 // Evenly-spaced index subsample including the first and last point, so the
@@ -134,7 +138,10 @@ export default function NetWorthChart({ history }) {
       ? `${linePath} L ${coords[coords.length - 1].x} ${CHART_HEIGHT - CHART_PAD_BOTTOM} L ${coords[0].x} ${CHART_HEIGHT - CHART_PAD_BOTTOM} Z`
       : null;
 
-  const yTicks = Array.from({ length: Y_TICKS }, (_, i) => minVal + ((maxVal - minVal) * i) / (Y_TICKS - 1));
+  const yTicks = Array.from(
+    { length: Y_TICKS },
+    (_, i) => minVal + ((maxVal - minVal) * i) / (Y_TICKS - 1)
+  );
   const xLabelIndices = subsampleIndices(points.length, 5);
   const spanDays =
     points.length > 1
@@ -150,14 +157,21 @@ export default function NetWorthChart({ history }) {
 
   // Insight line - only shown with a real before/after to compare (never
   // fabricates a $0/no-change claim off a single data point).
-  const insightDiff = points.length >= 2 ? points[points.length - 1].net_worth - points[0].net_worth : null;
-  const rangeLabel =
-    { '1M': 'the last month', '3M': 'the last 3 months', '6M': 'the last 6 months', '1Y': 'the last year', ALL: 'this period' }[
-      rangeKey
-    ];
+  const insightDiff =
+    points.length >= 2 ? points[points.length - 1].net_worth - points[0].net_worth : null;
+  const rangeLabel = {
+    '1M': 'the last month',
+    '3M': 'the last 3 months',
+    '6M': 'the last 6 months',
+    '1Y': 'the last year',
+    ALL: 'this period',
+  }[rangeKey];
 
   const bubbleWidth = 96;
-  const bubbleLeft = Math.min(Math.max(activeCoord.x - bubbleWidth / 2, 0), Math.max(chartWidth - bubbleWidth, 0));
+  const bubbleLeft = Math.min(
+    Math.max(activeCoord.x - bubbleWidth / 2, 0),
+    Math.max(chartWidth - bubbleWidth, 0)
+  );
 
   return (
     <View>
@@ -173,10 +187,7 @@ export default function NetWorthChart({ history }) {
             ))}
         </View>
 
-        <View
-          style={styles.chartArea}
-          onLayout={(e) => setChartWidth(e.nativeEvent.layout.width)}
-        >
+        <View style={styles.chartArea} onLayout={(e) => setChartWidth(e.nativeEvent.layout.width)}>
           {chartWidth > 0 && (
             <>
               <Svg width={chartWidth} height={CHART_HEIGHT}>
@@ -205,10 +216,14 @@ export default function NetWorthChart({ history }) {
                 />
               ))}
 
-              <View style={[styles.bubble, { left: bubbleLeft, top: Math.max(activeCoord.y - 30, 0) }]}>
+              <View
+                style={[styles.bubble, { left: bubbleLeft, top: Math.max(activeCoord.y - 30, 0) }]}
+              >
                 <Text style={styles.bubbleText}>
                   {activePoint.net_worth < 0 ? '-' : ''}$
-                  {Math.abs(activePoint.net_worth).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                  {Math.abs(activePoint.net_worth).toLocaleString('en-US', {
+                    maximumFractionDigits: 0,
+                  })}
                 </Text>
               </View>
             </>
@@ -232,7 +247,8 @@ export default function NetWorthChart({ history }) {
         <View style={styles.insightRow}>
           <Text style={styles.insightText}>
             Your net worth has {insightDiff >= 0 ? 'improved' : 'declined'} $
-            {Math.abs(insightDiff).toLocaleString('en-US', { maximumFractionDigits: 0 })} over {rangeLabel}.
+            {Math.abs(insightDiff).toLocaleString('en-US', { maximumFractionDigits: 0 })} over{' '}
+            {rangeLabel}.
           </Text>
         </View>
       )}
@@ -262,97 +278,97 @@ function RangeTabs({ rangeKey, onSelect }) {
 
 function buildStyles(colors) {
   return StyleSheet.create({
-  chartRow: {
-    flexDirection: 'row',
-    marginTop: 12,
-  },
-  yAxis: {
-    width: 42,
-    height: CHART_HEIGHT,
-    justifyContent: 'space-between',
-    paddingTop: CHART_PAD_TOP,
-    paddingBottom: CHART_PAD_BOTTOM,
-  },
-  yLabel: {
-    fontSize: 10,
-    color: colors.muted,
-  },
-  chartArea: {
-    flex: 1,
-    height: CHART_HEIGHT,
-  },
-  hitTarget: {
-    position: 'absolute',
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-  },
-  bubble: {
-    position: 'absolute',
-    minWidth: 96,
-    backgroundColor: colors.darkest,
-    borderRadius: 10,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    alignItems: 'center',
-  },
-  bubbleText: {
-    color: colors.background,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  xAxisRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginLeft: 42,
-    marginTop: 4,
-  },
-  xLabel: {
-    fontSize: 10,
-    color: colors.muted,
-  },
-  tabsRow: {
-    flexDirection: 'row',
-    backgroundColor: colors.background,
-    borderRadius: 10,
-    padding: 3,
-    marginTop: 12,
-  },
-  tab: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  tabActive: {
-    backgroundColor: colors.card,
-  },
-  tabText: {
-    fontSize: 12,
-    color: colors.muted,
-  },
-  tabTextActive: {
-    color: colors.darkest,
-    fontWeight: '700',
-  },
-  insightRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 12,
-    backgroundColor: colors.background,
-    borderRadius: 10,
-    padding: 10,
-  },
-  insightText: {
-    flex: 1,
-    fontSize: 13,
-    color: colors.darkest,
-  },
-  emptyText: {
-    fontSize: 13,
-    color: colors.muted,
-    marginTop: 8,
-  },
+    chartRow: {
+      flexDirection: 'row',
+      marginTop: 12,
+    },
+    yAxis: {
+      width: 42,
+      height: CHART_HEIGHT,
+      justifyContent: 'space-between',
+      paddingTop: CHART_PAD_TOP,
+      paddingBottom: CHART_PAD_BOTTOM,
+    },
+    yLabel: {
+      fontSize: 10,
+      color: colors.muted,
+    },
+    chartArea: {
+      flex: 1,
+      height: CHART_HEIGHT,
+    },
+    hitTarget: {
+      position: 'absolute',
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+    },
+    bubble: {
+      position: 'absolute',
+      minWidth: 96,
+      backgroundColor: colors.darkest,
+      borderRadius: 10,
+      paddingVertical: 4,
+      paddingHorizontal: 8,
+      alignItems: 'center',
+    },
+    bubbleText: {
+      color: colors.background,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    xAxisRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      marginLeft: 42,
+      marginTop: 4,
+    },
+    xLabel: {
+      fontSize: 10,
+      color: colors.muted,
+    },
+    tabsRow: {
+      flexDirection: 'row',
+      backgroundColor: colors.background,
+      borderRadius: 10,
+      padding: 3,
+      marginTop: 12,
+    },
+    tab: {
+      flex: 1,
+      alignItems: 'center',
+      paddingVertical: 6,
+      borderRadius: 8,
+    },
+    tabActive: {
+      backgroundColor: colors.card,
+    },
+    tabText: {
+      fontSize: 12,
+      color: colors.muted,
+    },
+    tabTextActive: {
+      color: colors.darkest,
+      fontWeight: '700',
+    },
+    insightRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: 12,
+      backgroundColor: colors.background,
+      borderRadius: 10,
+      padding: 10,
+    },
+    insightText: {
+      flex: 1,
+      fontSize: 13,
+      color: colors.darkest,
+    },
+    emptyText: {
+      fontSize: 13,
+      color: colors.muted,
+      marginTop: 8,
+    },
   });
 }

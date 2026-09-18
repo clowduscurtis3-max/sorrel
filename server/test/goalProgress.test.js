@@ -3,7 +3,11 @@ require('./setupEnv');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { computeGoalProjections, computeGoalBalanceProgress, AVG_DAYS_PER_MONTH } = require('../goalProgress');
+const {
+  computeGoalProjections,
+  computeGoalBalanceProgress,
+  AVG_DAYS_PER_MONTH,
+} = require('../goalProgress');
 
 function monthsAgo(now, months) {
   return new Date(now.getTime() - months * AVG_DAYS_PER_MONTH * 86400000);
@@ -81,7 +85,12 @@ test('computeGoalProjections: negative saved_amount (spending has outpaced incom
 // computeBalanceProgress math, plus the goal-specific framing on top.
 
 function account(overrides) {
-  return { id: 'acc-1', available_balance: 1000, current_balance: 1000, ...overrides };
+  return {
+    id: 'acc-1',
+    available_balance: 1000,
+    current_balance: 1000,
+    ...overrides,
+  };
 }
 
 function goal(overrides) {
@@ -98,7 +107,10 @@ function goal(overrides) {
 }
 
 test('computeGoalBalanceProgress: no accounts linked yet is an honest, distinct state - not a fabricated $0', () => {
-  const result = computeGoalBalanceProgress({ goal: goal({ account_ids: [] }), accounts: [account()] });
+  const result = computeGoalBalanceProgress({
+    goal: goal({ account_ids: [] }),
+    accounts: [account()],
+  });
   assert.equal(result.no_accounts_linked, true);
   assert.equal(result.saved_amount, 0);
   assert.match(result.message, /No accounts are linked/);
@@ -109,7 +121,10 @@ test('computeGoalBalanceProgress: sums only the linked accounts, no pace/project
     account({ id: 'acc-1', available_balance: 2000, current_balance: 2000 }),
     account({ id: 'acc-2', available_balance: 9999, current_balance: 9999 }), // not linked
   ];
-  const result = computeGoalBalanceProgress({ goal: goal({ account_ids: ['acc-1'] }), accounts });
+  const result = computeGoalBalanceProgress({
+    goal: goal({ account_ids: ['acc-1'] }),
+    accounts,
+  });
   assert.equal(result.saved_amount, 2000);
   assert.equal(result.percent_complete, 40);
   assert.equal(result.on_pace, undefined);

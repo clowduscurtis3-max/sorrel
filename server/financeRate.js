@@ -89,7 +89,11 @@ function computeEstimatedPayment({ totalPrice, termMonths, annualRatePercent }) 
 async function getCurrentRate(seriesId) {
   const cached = rateCache.get(seriesId);
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
-    return { rate: cached.rate, as_of_date: cached.as_of_date, series_id: cached.series_id };
+    return {
+      rate: cached.rate,
+      as_of_date: cached.as_of_date,
+      series_id: cached.series_id,
+    };
   }
 
   const apiKey = process.env.FRED_API_KEY;
@@ -110,7 +114,7 @@ async function getCurrentRate(seriesId) {
     res = await fetch(`${FRED_OBSERVATIONS_URL}?${params}`);
   } catch (err) {
     logError('financeRate: FRED request failed', err);
-    throw new Error('FRED request failed');
+    throw new Error('FRED request failed', { cause: err });
   }
   if (!res.ok) {
     logError('financeRate: FRED returned a non-OK status', new Error(String(res.status)));
@@ -121,11 +125,19 @@ async function getCurrentRate(seriesId) {
   const observation = data?.observations?.[0];
   const rate = observation ? parseFloat(observation.value) : NaN;
   if (!observation || !Number.isFinite(rate) || rate <= 0) {
-    logError('financeRate: FRED returned no usable rate observation', new Error(JSON.stringify(observation)));
+    logError(
+      'financeRate: FRED returned no usable rate observation',
+      new Error(JSON.stringify(observation))
+    );
     throw new Error('FRED returned no usable rate observation');
   }
 
-  const result = { rate, as_of_date: observation.date, series_id: seriesId, fetchedAt: Date.now() };
+  const result = {
+    rate,
+    as_of_date: observation.date,
+    series_id: seriesId,
+    fetchedAt: Date.now(),
+  };
   rateCache.set(seriesId, result);
   return { rate, as_of_date: observation.date, series_id: seriesId };
 }

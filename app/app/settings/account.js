@@ -1,5 +1,15 @@
 import { useCallback, useMemo, useState } from 'react';
-import { View, Text, Pressable, TextInput, ActivityIndicator, Alert, Switch, ScrollView, StyleSheet } from 'react-native';
+import {
+  View,
+  Text,
+  Pressable,
+  TextInput,
+  ActivityIndicator,
+  Alert,
+  Switch,
+  ScrollView,
+  StyleSheet,
+} from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
@@ -12,7 +22,12 @@ import {
   getSessionTimeoutMinutes,
   setSessionTimeoutMinutes,
 } from '../_lib/sessionTimeoutPreference';
-import { listVerifiedTotpFactors, enrollTotp, verifyTotpEnrollment, unenrollTotp } from '../_lib/mfa';
+import {
+  listVerifiedTotpFactors,
+  enrollTotp,
+  verifyTotpEnrollment,
+  unenrollTotp,
+} from '../_lib/mfa';
 import SettingsScreenChrome from '../_components/SettingsScreenChrome';
 import PrimaryButton from '../_components/PrimaryButton';
 
@@ -358,7 +373,10 @@ export default function AccountSecuritySettings() {
 
   return (
     <SettingsScreenChrome title="Account & Security" onBack={() => router.back()}>
-      <ScrollView style={accountSecurityStyles.bodyScroll} contentContainerStyle={accountSecurityStyles.body}>
+      <ScrollView
+        style={accountSecurityStyles.bodyScroll}
+        contentContainerStyle={accountSecurityStyles.body}
+      >
         <View style={[styles.card, accountSecurityStyles.cardMargin]}>
           <Text style={styles.cardTitle}>Display name</Text>
           <Text style={[styles.smallText, accountSecurityStyles.description]}>
@@ -410,7 +428,9 @@ export default function AccountSecuritySettings() {
                   </View>
                   <Text style={accountSecurityStyles.iconRowText}>
                     Signed in with username:{'\n'}
-                    <Text style={accountSecurityStyles.iconRowTextBold}>{usernameStatus.username}</Text>
+                    <Text style={accountSecurityStyles.iconRowTextBold}>
+                      {usernameStatus.username}
+                    </Text>
                   </Text>
                 </View>
                 {showChangePasswordForm ? (
@@ -443,7 +463,9 @@ export default function AccountSecuritySettings() {
                       <Pressable
                         onPress={() => setShowChangePasswordFields((v) => !v)}
                         accessibilityRole="button"
-                        accessibilityLabel={showChangePasswordFields ? 'Hide password' : 'Show password'}
+                        accessibilityLabel={
+                          showChangePasswordFields ? 'Hide password' : 'Show password'
+                        }
                       >
                         <MaterialIcons
                           name={showChangePasswordFields ? 'visibility-off' : 'visibility'}
@@ -452,7 +474,9 @@ export default function AccountSecuritySettings() {
                         />
                       </Pressable>
                     </View>
-                    {changePasswordError && <Text style={styles.errorText}>{changePasswordError}</Text>}
+                    {changePasswordError && (
+                      <Text style={styles.errorText}>{changePasswordError}</Text>
+                    )}
                     {changingPassword ? (
                       <ActivityIndicator style={accountSecurityStyles.addAccountSpacing} />
                     ) : (
@@ -551,13 +575,18 @@ export default function AccountSecuritySettings() {
               </>
             ) : (
               <Pressable
-                style={[accountSecurityStyles.outlineButton, accountSecurityStyles.outlineButtonFull]}
+                style={[
+                  accountSecurityStyles.outlineButton,
+                  accountSecurityStyles.outlineButtonFull,
+                ]}
                 onPress={() => setShowUsernameForm(true)}
                 accessibilityRole="button"
                 accessibilityLabel="Set up username and password (optional)"
               >
                 <MaterialIcons name="badge" size={16} color={colors.primary} />
-                <Text style={accountSecurityStyles.outlineButtonText}>SET UP USERNAME & PASSWORD (OPTIONAL)</Text>
+                <Text style={accountSecurityStyles.outlineButtonText}>
+                  SET UP USERNAME & PASSWORD (OPTIONAL)
+                </Text>
               </Pressable>
             )}
           </View>
@@ -571,7 +600,9 @@ export default function AccountSecuritySettings() {
                   <View style={accountSecurityStyles.iconCircle}>
                     <MaterialIcons name="verified-user" size={18} color={colors.dark} />
                   </View>
-                  <Text style={accountSecurityStyles.iconRowText}>Two-factor authentication is on</Text>
+                  <Text style={accountSecurityStyles.iconRowText}>
+                    Two-factor authentication is on
+                  </Text>
                 </View>
                 {mfaError && <Text style={styles.errorText}>{mfaError}</Text>}
                 {disablingMfa ? (
@@ -630,13 +661,18 @@ export default function AccountSecuritySettings() {
             ) : (
               <>
                 <Pressable
-                  style={[accountSecurityStyles.outlineButton, accountSecurityStyles.outlineButtonFull]}
+                  style={[
+                    accountSecurityStyles.outlineButton,
+                    accountSecurityStyles.outlineButtonFull,
+                  ]}
                   onPress={startMfaEnrollment}
                   accessibilityRole="button"
                   accessibilityLabel="Set up two-factor authentication (optional)"
                 >
                   <MaterialIcons name="verified-user" size={16} color={colors.primary} />
-                  <Text style={accountSecurityStyles.outlineButtonText}>SET UP TWO-FACTOR AUTHENTICATION (OPTIONAL)</Text>
+                  <Text style={accountSecurityStyles.outlineButtonText}>
+                    SET UP TWO-FACTOR AUTHENTICATION (OPTIONAL)
+                  </Text>
                 </Pressable>
                 {mfaError && <Text style={styles.errorText}>{mfaError}</Text>}
               </>
@@ -644,12 +680,16 @@ export default function AccountSecuritySettings() {
           </View>
         )}
 
-        <View style={[styles.card, accountSecurityStyles.cardMargin, accountSecurityStyles.faceIdRow]}>
+        <View
+          style={[styles.card, accountSecurityStyles.cardMargin, accountSecurityStyles.faceIdRow]}
+        >
           <View style={[accountSecurityStyles.iconRow, accountSecurityStyles.iconRowGrow]}>
             <View style={accountSecurityStyles.iconCircle}>
               <MaterialIcons name="fingerprint" size={18} color={colors.dark} />
             </View>
-            <Text style={accountSecurityStyles.iconRowText}>Require Face ID / Fingerprint to unlock</Text>
+            <Text style={accountSecurityStyles.iconRowText}>
+              Require Face ID / Fingerprint to unlock
+            </Text>
           </View>
           <Switch
             value={biometricLockEnabled}
@@ -687,8 +727,8 @@ export default function AccountSecuritySettings() {
         <View style={[styles.card, accountSecurityStyles.cardMargin]}>
           <Text style={styles.cardTitle}>Sync now</Text>
           <Text style={[styles.smallText, accountSecurityStyles.description]}>
-            Manually check your linked banks for new transactions right now, instead of
-            waiting for the next automatic sync.
+            Manually check your linked banks for new transactions right now, instead of waiting for
+            the next automatic sync.
           </Text>
           {syncError && <Text style={styles.errorText}>{syncError}</Text>}
           {syncingNow ? (
@@ -711,12 +751,15 @@ export default function AccountSecuritySettings() {
         <View style={[styles.card, accountSecurityStyles.cardMargin]}>
           <Text style={styles.cardTitle}>Delete account</Text>
           <Text style={[styles.smallText, accountSecurityStyles.description]}>
-            Permanently deletes your account and everything tied to it - linked banks,
-            transactions, budgets, goals, everything. This can't be undone.
+            Permanently deletes your account and everything tied to it - linked banks, transactions,
+            budgets, goals, everything. This can't be undone.
           </Text>
           {!showDeleteConfirm ? (
             <Pressable
-              style={[accountSecurityStyles.destructiveButton, accountSecurityStyles.addAccountSpacing]}
+              style={[
+                accountSecurityStyles.destructiveButton,
+                accountSecurityStyles.addAccountSpacing,
+              ]}
               onPress={() => setShowDeleteConfirm(true)}
               accessibilityRole="button"
               accessibilityLabel="Delete account"
@@ -745,12 +788,17 @@ export default function AccountSecuritySettings() {
                 <ActivityIndicator style={accountSecurityStyles.addAccountSpacing} />
               ) : (
                 <Pressable
-                  style={[accountSecurityStyles.destructiveButton, accountSecurityStyles.addAccountSpacing]}
+                  style={[
+                    accountSecurityStyles.destructiveButton,
+                    accountSecurityStyles.addAccountSpacing,
+                  ]}
                   onPress={handleDeleteAccount}
                   accessibilityRole="button"
                   accessibilityLabel="Permanently delete account"
                 >
-                  <Text style={accountSecurityStyles.destructiveButtonText}>PERMANENTLY DELETE</Text>
+                  <Text style={accountSecurityStyles.destructiveButtonText}>
+                    PERMANENTLY DELETE
+                  </Text>
                 </Pressable>
               )}
               <Pressable
@@ -775,150 +823,150 @@ export default function AccountSecuritySettings() {
 // via useMemo inside the component (keyed on colors).
 function buildAccountSecurityStyles(colors) {
   return StyleSheet.create({
-  bodyScroll: {
-    flex: 1,
-  },
-  body: {
-    paddingTop: 8,
-    paddingBottom: 40,
-  },
-  description: {
-    textAlign: 'left',
-  },
-  picker: {
-    marginTop: 8,
-  },
-  // Both needed directly on the Picker/Picker.Item themselves, not just
-  // the wrapping View - confirmed on-device, 2026-09-05/06 (see
-  // settings/goal.js's identical styles for the full on-device history):
-  // the ancestor View's own color/backgroundColor reaches neither the
-  // closed box's text nor the open dropdown list's own rendering.
-  pickerControl: {
-    color: colors.darkest,
-    backgroundColor: colors.background,
-  },
-  pickerItem: {
-    color: colors.darkest,
-    backgroundColor: colors.background,
-  },
-  cardMargin: {
-    marginHorizontal: 16,
-    marginBottom: 12,
-  },
-  iconRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  linkedEmailRow: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.sage,
-  },
-  iconRowGrow: {
-    flex: 1,
-  },
-  iconCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iconRowText: {
-    flex: 1,
-    fontSize: 13,
-    color: colors.dark,
-    lineHeight: 18,
-  },
-  iconRowTextBold: {
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  formFieldRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: colors.background,
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    marginTop: 8,
-  },
-  formFieldInput: {
-    flex: 1,
-    fontSize: 14,
-    color: colors.darkest,
-  },
-  mfaSecret: {
-    fontSize: 16,
-    fontWeight: '700',
-    letterSpacing: 1.5,
-    color: colors.darkest,
-    backgroundColor: colors.background,
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  faceIdRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  outlineButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.sage,
-    backgroundColor: colors.background,
-    borderRadius: 22,
-    paddingVertical: 10,
-    minHeight: 40,
-  },
-  outlineButtonFull: {
-    marginTop: 4,
-  },
-  outlineButtonText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.primary,
-    letterSpacing: 0.3,
-  },
-  // Same visual pattern as settings/budget.js's own "Regenerate entire
-  // budget" destructive button, for consistency across Settings screens.
-  destructiveButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.error,
-    backgroundColor: colors.background,
-    borderRadius: 22,
-    paddingVertical: 10,
-    minHeight: 40,
-  },
-  destructiveButtonText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.error,
-    letterSpacing: 0.3,
-  },
-  addAccountSpacing: {
-    marginTop: 4,
-  },
-  textLink: {
-    fontSize: 13,
-    color: colors.muted,
-    textAlign: 'center',
-    marginTop: 4,
-  },
+    bodyScroll: {
+      flex: 1,
+    },
+    body: {
+      paddingTop: 8,
+      paddingBottom: 40,
+    },
+    description: {
+      textAlign: 'left',
+    },
+    picker: {
+      marginTop: 8,
+    },
+    // Both needed directly on the Picker/Picker.Item themselves, not just
+    // the wrapping View - confirmed on-device, 2026-09-05/06 (see
+    // settings/goal.js's identical styles for the full on-device history):
+    // the ancestor View's own color/backgroundColor reaches neither the
+    // closed box's text nor the open dropdown list's own rendering.
+    pickerControl: {
+      color: colors.darkest,
+      backgroundColor: colors.background,
+    },
+    pickerItem: {
+      color: colors.darkest,
+      backgroundColor: colors.background,
+    },
+    cardMargin: {
+      marginHorizontal: 16,
+      marginBottom: 12,
+    },
+    iconRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    linkedEmailRow: {
+      marginTop: 12,
+      paddingTop: 12,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.sage,
+    },
+    iconRowGrow: {
+      flex: 1,
+    },
+    iconCircle: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    iconRowText: {
+      flex: 1,
+      fontSize: 13,
+      color: colors.dark,
+      lineHeight: 18,
+    },
+    iconRowTextBold: {
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    formFieldRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      marginTop: 8,
+    },
+    formFieldInput: {
+      flex: 1,
+      fontSize: 14,
+      color: colors.darkest,
+    },
+    mfaSecret: {
+      fontSize: 16,
+      fontWeight: '700',
+      letterSpacing: 1.5,
+      color: colors.darkest,
+      backgroundColor: colors.background,
+      borderRadius: 10,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      marginTop: 8,
+      textAlign: 'center',
+    },
+    faceIdRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    outlineButton: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.sage,
+      backgroundColor: colors.background,
+      borderRadius: 22,
+      paddingVertical: 10,
+      minHeight: 40,
+    },
+    outlineButtonFull: {
+      marginTop: 4,
+    },
+    outlineButtonText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.primary,
+      letterSpacing: 0.3,
+    },
+    // Same visual pattern as settings/budget.js's own "Regenerate entire
+    // budget" destructive button, for consistency across Settings screens.
+    destructiveButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.error,
+      backgroundColor: colors.background,
+      borderRadius: 22,
+      paddingVertical: 10,
+      minHeight: 40,
+    },
+    destructiveButtonText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.error,
+      letterSpacing: 0.3,
+    },
+    addAccountSpacing: {
+      marginTop: 4,
+    },
+    textLink: {
+      fontSize: 13,
+      color: colors.muted,
+      textAlign: 'center',
+      marginTop: 4,
+    },
   });
 }

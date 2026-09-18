@@ -66,7 +66,10 @@ function clusterByAmount(transactions) {
     // app/App.js), so a negative repAmount * AMOUNT_TOLERANCE_RATIO would
     // otherwise be a negative threshold that no positive gap could ever
     // satisfy, silently breaking recurring-income detection.
-    if (last && Math.abs(t.amount - last.repAmount) <= Math.abs(last.repAmount) * AMOUNT_TOLERANCE_RATIO) {
+    if (
+      last &&
+      Math.abs(t.amount - last.repAmount) <= Math.abs(last.repAmount) * AMOUNT_TOLERANCE_RATIO
+    ) {
       last.items.push(t);
       last.repAmount = median(last.items.map((i) => i.amount));
     } else {
@@ -168,7 +171,12 @@ function applyOverrides(seriesRows, overrides, userId, now = new Date()) {
         typical_amount: edit.override_typical_amount ?? row.typical_amount,
         debt_type: edit.override_debt_type ?? row.debt_type,
         next_expected_date: intervalChanged
-          ? toDateOnly(new Date(new Date(`${row.last_seen_date}T00:00:00Z`).getTime() + INTERVAL_DAYS[interval] * MS_PER_DAY))
+          ? toDateOnly(
+              new Date(
+                new Date(`${row.last_seen_date}T00:00:00Z`).getTime() +
+                  INTERVAL_DAYS[interval] * MS_PER_DAY
+              )
+            )
           : row.next_expected_date,
       };
     });
@@ -249,7 +257,12 @@ async function detectRecurringTransactions(userId) {
     const merchantKey = normalizeMerchantKey(t.merchant_name || t.name);
     if (!merchantKey) continue;
     const key = `${merchantKey} ${t.account_id}`;
-    if (!byMerchantAndAccount.has(key)) byMerchantAndAccount.set(key, { merchantKey, accountId: t.account_id, items: [] });
+    if (!byMerchantAndAccount.has(key))
+      byMerchantAndAccount.set(key, {
+        merchantKey,
+        accountId: t.account_id,
+        items: [],
+      });
     byMerchantAndAccount.get(key).items.push(t);
   }
 
@@ -392,7 +405,8 @@ async function detectRecurringTransactions(userId) {
   );
   for (const row of mergedSeriesRows) {
     const override = overridesByKey.get(row.merchant_key);
-    if (!override || (override.override_category == null && override.override_debt_type == null)) continue;
+    if (!override || (override.override_category == null && override.override_debt_type == null))
+      continue;
     const transactionIds = transactionIdsBySeriesKey.get(row.merchant_key) || [];
     if (transactionIds.length === 0) continue;
 

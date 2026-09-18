@@ -1,5 +1,9 @@
 const supabaseAdmin = require('./supabaseAdmin');
-const { summarizeSpending, currentMonthRange, SELF_TRANSFER_PRIMARY_CATEGORIES } = require('./spendingAverages');
+const {
+  summarizeSpending,
+  currentMonthRange,
+  SELF_TRANSFER_PRIMARY_CATEGORIES,
+} = require('./spendingAverages');
 
 function round2(n) {
   return Math.round(n * 100) / 100;
@@ -44,7 +48,9 @@ async function getIncomeSummary(userId) {
 
   const { data: transactions, error } = await supabaseAdmin
     .from('transactions')
-    .select('transaction_id, date, name, merchant_name, amount, category, personal_finance_category')
+    .select(
+      'transaction_id, date, name, merchant_name, amount, category, personal_finance_category'
+    )
     .eq('user_id', userId);
   if (error) throw error;
 

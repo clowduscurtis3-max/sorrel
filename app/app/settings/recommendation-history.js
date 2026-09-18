@@ -1,5 +1,13 @@
 import { useCallback, useMemo, useState } from 'react';
-import { View, Text, Pressable, ActivityIndicator, ScrollView, StyleSheet, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  Pressable,
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  Alert,
+} from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { apiFetch, apiErrorMessage, formatDecimal, formatDateMDY } from '../_lib/api';
@@ -113,8 +121,8 @@ export default function RecommendationHistorySettings() {
         <ScrollView style={historyStyles.bodyScroll} contentContainerStyle={historyStyles.body}>
           <Text style={[styles.smallText, historyStyles.description]}>
             Sorrel keeps a record of whether you've accepted or adjusted its budget and goal
-            suggestions, so recommendations can eventually build on what's actually worked for
-            you. This is informational only - nothing here changes your budget or goals.
+            suggestions, so recommendations can eventually build on what's actually worked for you.
+            This is informational only - nothing here changes your budget or goals.
           </Text>
 
           {error && <Text style={styles.errorText}>{error}</Text>}
@@ -140,17 +148,23 @@ export default function RecommendationHistorySettings() {
 
           {events && events.length === 0 ? (
             <Text style={[styles.smallText, historyStyles.description]}>
-              No decisions recorded yet - this fills in as you accept or adjust a budget
-              rebalance, budget insight cuts, an emergency fund target, or a goal's realistic
-              date.
+              No decisions recorded yet - this fills in as you accept or adjust a budget rebalance,
+              budget insight cuts, an emergency fund target, or a goal's realistic date.
             </Text>
           ) : (
             (events || []).map((event, index) => {
-              const meta = TYPE_META[event.recommendation_type] || { label: event.recommendation_type, icon: 'help-outline' };
+              const meta = TYPE_META[event.recommendation_type] || {
+                label: event.recommendation_type,
+                icon: 'help-outline',
+              };
               return (
                 <View
                   key={event.id}
-                  style={[styles.card, historyStyles.eventCard, index > 0 && historyStyles.eventCardMargin]}
+                  style={[
+                    styles.card,
+                    historyStyles.eventCard,
+                    index > 0 && historyStyles.eventCardMargin,
+                  ]}
                 >
                   <View style={historyStyles.eventHeaderRow}>
                     <View style={historyStyles.eventIconCircle}>
@@ -169,7 +183,9 @@ export default function RecommendationHistorySettings() {
                   <Text style={historyStyles.eventDescription}>
                     {describeRecommendationEvent(event)}
                   </Text>
-                  <Text style={historyStyles.eventDate}>{formatDateMDY(event.created_at.slice(0, 10))}</Text>
+                  <Text style={historyStyles.eventDate}>
+                    {formatDateMDY(event.created_at.slice(0, 10))}
+                  </Text>
                 </View>
               );
             })

@@ -31,7 +31,11 @@ function extensionForMimeType(mimeType) {
 // a silent null standing in for "nothing was said."
 async function transcribeAudio(buffer, mimeType) {
   const formData = new FormData();
-  formData.append('file', new Blob([buffer], { type: mimeType }), `recording.${extensionForMimeType(mimeType)}`);
+  formData.append(
+    'file',
+    new Blob([buffer], { type: mimeType }),
+    `recording.${extensionForMimeType(mimeType)}`
+  );
   formData.append('model', MODEL);
 
   let response;
@@ -43,7 +47,7 @@ async function transcribeAudio(buffer, mimeType) {
     });
   } catch (err) {
     logError('Transcription request failed (network):', err);
-    throw new Error('Transcription request failed');
+    throw new Error('Transcription request failed', { cause: err });
   }
 
   if (!response.ok) {
@@ -51,7 +55,9 @@ async function transcribeAudio(buffer, mimeType) {
     // no reason to contain the audio/transcript, but logging only the
     // status keeps this call to the same minimal-surface standard as
     // safeLog.js's handling of every other external API in this project.
-    logError('Transcription request failed:', { message: `OpenAI returned ${response.status}` });
+    logError('Transcription request failed:', {
+      message: `OpenAI returned ${response.status}`,
+    });
     throw new Error('Transcription request failed');
   }
 

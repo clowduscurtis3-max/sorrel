@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Pressable, StyleSheet } from 'react-native';
+import { Pressable, StyleSheet } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   useSharedValue,
@@ -30,7 +30,19 @@ import { readableTextColor } from '../_lib/styles';
 // dependency for the drag/wiggle itself.
 const SLOT_HEIGHT = 76;
 
-function Row({ itemKey, node, index, editing, onLongPress, onEditingChange, onDragUpdate, onDragEnd, onDelete, colors, showDelete }) {
+function Row({
+  itemKey,
+  node,
+  index,
+  editing,
+  onLongPress,
+  onEditingChange,
+  onDragUpdate,
+  onDragEnd,
+  onDelete,
+  colors,
+  showDelete,
+}) {
   const translateY = useSharedValue(index * SLOT_HEIGHT);
   const isDragging = useSharedValue(false);
   const wiggle = useSharedValue(0);
@@ -133,7 +145,10 @@ function Row({ itemKey, node, index, editing, onLongPress, onEditingChange, onDr
         .onEnd(() => {
           'worklet';
           isDragging.value = false;
-          translateY.value = withSpring(indexShared.value * SLOT_HEIGHT, { damping: 20, stiffness: 200 });
+          translateY.value = withSpring(indexShared.value * SLOT_HEIGHT, {
+            damping: 20,
+            stiffness: 200,
+          });
           runOnJS(handleDragEnd)();
         }),
     [] // eslint-disable-line react-hooks/exhaustive-deps
@@ -153,7 +168,7 @@ function Row({ itemKey, node, index, editing, onLongPress, onEditingChange, onDr
         'worklet';
         runOnJS(handleEditingChange)(false);
       }),
-    [] // eslint-disable-line react-hooks/exhaustive-deps
+    []
   );
 
   const longPress = useMemo(
@@ -162,7 +177,7 @@ function Row({ itemKey, node, index, editing, onLongPress, onEditingChange, onDr
         'worklet';
         runOnJS(handleLongPress)();
       }),
-    [] // eslint-disable-line react-hooks/exhaustive-deps
+    []
   );
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -199,7 +214,14 @@ function Row({ itemKey, node, index, editing, onLongPress, onEditingChange, onDr
 // can share one edit-mode toggle - entering edit mode on any row's long
 // press puts every list on the screen into edit mode together, matching
 // the iOS home-screen behavior this is modeled on.
-export default function DraggableCardList({ items, onReorder, onDelete, editing, onEditingChange, showDelete = true }) {
+export default function DraggableCardList({
+  items,
+  onReorder,
+  onDelete,
+  editing,
+  onEditingChange,
+  showDelete = true,
+}) {
   const { colors } = useTheme();
   const [liveOrder, setLiveOrder] = useState(items.map((i) => i.key));
 

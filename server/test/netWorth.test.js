@@ -16,7 +16,13 @@ function account(overrides) {
 
 test('#1 a single depository account is its own net worth', () => {
   const result = computeNetWorth({
-    accounts: [account({ type: 'depository', current_balance: 1000, available_balance: 900 })],
+    accounts: [
+      account({
+        type: 'depository',
+        current_balance: 1000,
+        available_balance: 900,
+      }),
+    ],
   });
   assert.equal(result.assets, 900);
   assert.equal(result.liabilities, 0);
@@ -111,18 +117,66 @@ test('#7 zero-balance accounts contribute zero, not excluded, and do not throw',
 test('#8 a mixed asset/liability set matches hand-computed real Sandbox data (Plaid Checking/Saving/CD/HSA/Cash Mgmt/Money Market + 2 credit + 2 investment + 2 loan)', () => {
   const result = computeNetWorth({
     accounts: [
-      account({ type: 'depository', current_balance: 110, available_balance: 100 }),
-      account({ type: 'depository', current_balance: 210, available_balance: 200 }),
-      account({ type: 'depository', current_balance: 1000, available_balance: null }),
-      account({ type: 'depository', current_balance: 6009, available_balance: 6009 }),
-      account({ type: 'depository', current_balance: 12060, available_balance: 12060 }),
-      account({ type: 'depository', current_balance: 43200, available_balance: 43200 }),
-      account({ type: 'credit', current_balance: 410, available_balance: null }),
-      account({ type: 'credit', current_balance: 5020, available_balance: 4980 }),
-      account({ type: 'investment', current_balance: 320.76, available_balance: null }),
-      account({ type: 'investment', current_balance: 23631.9805, available_balance: null }),
-      account({ type: 'loan', current_balance: 65262, available_balance: null }),
-      account({ type: 'loan', current_balance: 56302.06, available_balance: null }),
+      account({
+        type: 'depository',
+        current_balance: 110,
+        available_balance: 100,
+      }),
+      account({
+        type: 'depository',
+        current_balance: 210,
+        available_balance: 200,
+      }),
+      account({
+        type: 'depository',
+        current_balance: 1000,
+        available_balance: null,
+      }),
+      account({
+        type: 'depository',
+        current_balance: 6009,
+        available_balance: 6009,
+      }),
+      account({
+        type: 'depository',
+        current_balance: 12060,
+        available_balance: 12060,
+      }),
+      account({
+        type: 'depository',
+        current_balance: 43200,
+        available_balance: 43200,
+      }),
+      account({
+        type: 'credit',
+        current_balance: 410,
+        available_balance: null,
+      }),
+      account({
+        type: 'credit',
+        current_balance: 5020,
+        available_balance: 4980,
+      }),
+      account({
+        type: 'investment',
+        current_balance: 320.76,
+        available_balance: null,
+      }),
+      account({
+        type: 'investment',
+        current_balance: 23631.9805,
+        available_balance: null,
+      }),
+      account({
+        type: 'loan',
+        current_balance: 65262,
+        available_balance: null,
+      }),
+      account({
+        type: 'loan',
+        current_balance: 56302.06,
+        available_balance: null,
+      }),
     ],
   });
   // Hand-computed: depository (available-preferred) 100+200+1000+6009+12060+43200 = 62569
@@ -139,7 +193,13 @@ test('#9 a credit account never uses available_balance for liability math (avail
   // - using `available` here would have reported ~$4,980 of debt instead
   // of the real $5,020 owed, understating liabilities.
   const result = computeNetWorth({
-    accounts: [account({ type: 'credit', current_balance: 5020, available_balance: 4980 })],
+    accounts: [
+      account({
+        type: 'credit',
+        current_balance: 5020,
+        available_balance: 4980,
+      }),
+    ],
   });
   assert.equal(result.liabilities, 5020);
 });
@@ -164,7 +224,11 @@ test('#11 a missing/non-finite balance is treated as no contribution, never NaN,
   // fixed to count these too, same visibility this counter exists for.
   const result = computeNetWorth({
     accounts: [
-      account({ type: 'depository', current_balance: null, available_balance: null }),
+      account({
+        type: 'depository',
+        current_balance: null,
+        available_balance: null,
+      }),
       account({ type: 'credit', current_balance: undefined }),
     ],
   });
@@ -178,8 +242,16 @@ test('#11 a missing/non-finite balance is treated as no contribution, never NaN,
 test('#13 the same real-world account linked under two Items (matching persistent_account_id) is only counted once', () => {
   const result = computeNetWorth({
     accounts: [
-      account({ type: 'depository', available_balance: 5000, persistent_account_id: 'real-acct-1' }),
-      account({ type: 'depository', available_balance: 5000, persistent_account_id: 'real-acct-1' }),
+      account({
+        type: 'depository',
+        available_balance: 5000,
+        persistent_account_id: 'real-acct-1',
+      }),
+      account({
+        type: 'depository',
+        available_balance: 5000,
+        persistent_account_id: 'real-acct-1',
+      }),
       account({ type: 'depository', available_balance: 300 }), // no signal - not deduped
     ],
   });
@@ -201,8 +273,16 @@ test('#14 accounts with no persistent_account_id are never deduped against each 
 test('#15 a non-USD account is excluded rather than summed as if it were USD', () => {
   const result = computeNetWorth({
     accounts: [
-      account({ type: 'depository', available_balance: 5000, iso_currency_code: 'USD' }),
-      account({ type: 'depository', available_balance: 3000, iso_currency_code: 'CAD' }),
+      account({
+        type: 'depository',
+        available_balance: 5000,
+        iso_currency_code: 'USD',
+      }),
+      account({
+        type: 'depository',
+        available_balance: 3000,
+        iso_currency_code: 'CAD',
+      }),
     ],
   });
   assert.equal(result.assets, 5000);
@@ -219,7 +299,12 @@ test('#16 a missing iso_currency_code is treated as USD, not excluded', () => {
 
 test('#12 an empty account list reports a clean zero, not an error', () => {
   const result = computeNetWorth({ accounts: [] });
-  assert.deepEqual(result, { assets: 0, liabilities: 0, net_worth: 0, excluded_account_count: 0 });
+  assert.deepEqual(result, {
+    assets: 0,
+    liabilities: 0,
+    net_worth: 0,
+    excluded_account_count: 0,
+  });
 });
 
 test('getLocalDateString: real IANA timezone produces a YYYY-MM-DD date', () => {

@@ -1,5 +1,14 @@
 import { useCallback, useMemo, useState } from 'react';
-import { View, Text, Pressable, Switch, Share, ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
+import {
+  View,
+  Text,
+  Pressable,
+  Switch,
+  Share,
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+} from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
@@ -38,7 +47,13 @@ const EXPORTS = [
 // card list, which has no such exception) just for this one case.
 const REORDERABLE_TABS = ['index', 'budget', 'recurring', 'goal'];
 const ALL_TABS = [...REORDERABLE_TABS, 'account'];
-const TAB_TITLES = { index: 'Home', budget: 'Budget', recurring: 'Recurring', goal: 'Goal', account: 'Account' };
+const TAB_TITLES = {
+  index: 'Home',
+  budget: 'Budget',
+  recurring: 'Recurring',
+  goal: 'Goal',
+  account: 'Account',
+};
 const TAB_ICONS = {
   index: 'home',
   budget: 'pie-chart',
@@ -155,7 +170,10 @@ export default function GeneralSettings() {
   return (
     <SettingsScreenChrome title="General" onBack={() => router.back()}>
       <SettingsFetchGate loaded={settings !== null} error={error} onRetry={fetchSettings}>
-        <ScrollView style={generalSettingsStyles.bodyScroll} contentContainerStyle={generalSettingsStyles.body}>
+        <ScrollView
+          style={generalSettingsStyles.bodyScroll}
+          contentContainerStyle={generalSettingsStyles.body}
+        >
           {error && <Text style={styles.errorText}>{error}</Text>}
 
           {/* Appearance override (2026-09-13): a plain on-device preference
@@ -171,8 +189,7 @@ export default function GeneralSettings() {
               <View style={generalSettingsStyles.toggleTextCol}>
                 <Text style={generalSettingsStyles.toggleLabel}>Automatic</Text>
                 <Text style={[styles.smallText, generalSettingsStyles.description]}>
-                  Switches with your device's clock - light 8am-8pm, dark
-                  8pm-8am.
+                  Switches with your device's clock - light 8am-8pm, dark 8pm-8am.
                 </Text>
               </View>
               <Switch
@@ -289,8 +306,8 @@ export default function GeneralSettings() {
           <View style={[styles.card, generalSettingsStyles.card]}>
             <Text style={styles.cardTitle}>Data export</Text>
             <Text style={[styles.smallText, generalSettingsStyles.description]}>
-              Export your data as a CSV file via your device's share sheet (Save to
-              Files, Mail, etc.).
+              Export your data as a CSV file via your device's share sheet (Save to Files, Mail,
+              etc.).
             </Text>
             {exportError && <Text style={styles.errorText}>{exportError}</Text>}
             {EXPORTS.map((exportItem, index) => (
@@ -327,120 +344,120 @@ export default function GeneralSettings() {
 // via useMemo inside the component (keyed on colors).
 function buildGeneralSettingsStyles(colors) {
   return StyleSheet.create({
-  bodyScroll: {
-    flex: 1,
-  },
-  body: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 40,
-    gap: 12,
-  },
-  card: {
-    gap: 8,
-  },
-  description: {
-    textAlign: 'left',
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  toggleTextCol: {
-    flex: 1,
-    gap: 2,
-  },
-  toggleLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-  typeToggleRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 4,
-  },
-  typeToggleOption: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-    borderWidth: 1.5,
-  },
-  typeToggleText: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  dragArea: {
-    marginTop: 4,
-  },
-  tabRow: {
-    height: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  tabName: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-  accountFixedRow: {
-    marginTop: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    backgroundColor: colors.card,
-  },
-  hiddenSection: {
-    marginTop: 8,
-    gap: 4,
-  },
-  hiddenTitle: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    color: colors.muted,
-    marginBottom: 4,
-  },
-  hiddenRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    paddingHorizontal: 4,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.sage,
-  },
-  hiddenRowText: {
-    fontSize: 14,
-    color: colors.dark,
-  },
-  exportRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-  },
-  exportRowDivider: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.sage,
-  },
-  picker: {
-    marginTop: 4,
-  },
-  pickerControl: {
-    color: colors.darkest,
-    backgroundColor: colors.background,
-  },
-  pickerItem: {
-    color: colors.darkest,
-    backgroundColor: colors.background,
-  },
+    bodyScroll: {
+      flex: 1,
+    },
+    body: {
+      paddingHorizontal: 16,
+      paddingTop: 8,
+      paddingBottom: 40,
+      gap: 12,
+    },
+    card: {
+      gap: 8,
+    },
+    description: {
+      textAlign: 'left',
+    },
+    toggleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    toggleTextCol: {
+      flex: 1,
+      gap: 2,
+    },
+    toggleLabel: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+    typeToggleRow: {
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: 4,
+    },
+    typeToggleOption: {
+      flex: 1,
+      paddingVertical: 12,
+      borderRadius: 22,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'transparent',
+      borderWidth: 1.5,
+    },
+    typeToggleText: {
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    dragArea: {
+      marginTop: 4,
+    },
+    tabRow: {
+      height: '100%',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    tabName: {
+      flex: 1,
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+    accountFixedRow: {
+      marginTop: 8,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 12,
+      backgroundColor: colors.card,
+    },
+    hiddenSection: {
+      marginTop: 8,
+      gap: 4,
+    },
+    hiddenTitle: {
+      fontSize: 11,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+      color: colors.muted,
+      marginBottom: 4,
+    },
+    hiddenRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: 10,
+      paddingHorizontal: 4,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.sage,
+    },
+    hiddenRowText: {
+      fontSize: 14,
+      color: colors.dark,
+    },
+    exportRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: 10,
+    },
+    exportRowDivider: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.sage,
+    },
+    picker: {
+      marginTop: 4,
+    },
+    pickerControl: {
+      color: colors.darkest,
+      backgroundColor: colors.background,
+    },
+    pickerItem: {
+      color: colors.darkest,
+      backgroundColor: colors.background,
+    },
   });
 }

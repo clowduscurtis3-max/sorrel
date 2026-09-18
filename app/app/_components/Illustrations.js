@@ -180,7 +180,15 @@ export function CarIllustration({ size = 96 }) {
   const { colors } = useTheme();
   return (
     <Svg width={size} height={size * 0.7} viewBox="0 0 96 68">
-      <Line x1="8" y1="52" x2="88" y2="52" stroke={colors.sage} strokeWidth="2" strokeLinecap="round" />
+      <Line
+        x1="8"
+        y1="52"
+        x2="88"
+        y2="52"
+        stroke={colors.sage}
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
       <Path
         d="M16 44 L22 28 C24 24 28 22 33 22 L58 22 C63 22 67 24 70 28 L80 44 Z"
         fill={colors.accent}
@@ -199,8 +207,22 @@ export function CarIllustration({ size = 96 }) {
         stroke={colors.primary}
         strokeWidth="1"
       />
-      <Circle cx="30" cy="46" r="7" fill={colors.darkest} stroke={colors.primary} strokeWidth="1.5" />
-      <Circle cx="66" cy="46" r="7" fill={colors.darkest} stroke={colors.primary} strokeWidth="1.5" />
+      <Circle
+        cx="30"
+        cy="46"
+        r="7"
+        fill={colors.darkest}
+        stroke={colors.primary}
+        strokeWidth="1.5"
+      />
+      <Circle
+        cx="66"
+        cy="46"
+        r="7"
+        fill={colors.darkest}
+        stroke={colors.primary}
+        strokeWidth="1.5"
+      />
     </Svg>
   );
 }
@@ -211,7 +233,15 @@ export function MountainIllustration({ size = 96 }) {
   const { colors } = useTheme();
   return (
     <Svg width={size} height={size * 0.7} viewBox="0 0 96 68">
-      <Line x1="8" y1="56" x2="88" y2="56" stroke={colors.sage} strokeWidth="2" strokeLinecap="round" />
+      <Line
+        x1="8"
+        y1="56"
+        x2="88"
+        y2="56"
+        stroke={colors.sage}
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
       <Polygon
         points="14,56 30,30 46,56"
         fill={colors.sage}
@@ -224,7 +254,15 @@ export function MountainIllustration({ size = 96 }) {
         stroke={colors.primary}
         strokeWidth="1.5"
       />
-      <Line x1="58" y1="18" x2="58" y2="8" stroke={colors.primary} strokeWidth="1.5" strokeLinecap="round" />
+      <Line
+        x1="58"
+        y1="18"
+        x2="58"
+        y2="8"
+        stroke={colors.primary}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
       <Polygon points="58,8 68,11.5 58,15" fill={colors.primary} />
       <Path
         d="M20 56 L20 48 M20 48 L16 51 M20 48 L24 51"

@@ -141,87 +141,87 @@ export default function TabsLayout() {
           <ActivityIndicator size="large" />
         </View>
       ) : (
-      <Tabs
-        initialRouteName={defaultLandingTab}
-        screenOptions={({ route }) => ({
-          // headerShown: false everywhere (2026-08-24, explicit user
-          // request) - the tab bar's own icon+label already identifies
-          // the screen, so a second native title bar above the content is
-          // redundant on every tab, not just Home (which already had this
-          // for its own reason - a branded header rendered inline). Budget
-          // grew its own in-content "Budget" title as part of its own
-          // redesign the same day, which this also stops duplicating.
-          // `title` below is kept on each Tabs.Screen regardless - it's
-          // still what drives the tab bar's own label text, independent
-          // of whether the header itself is shown.
-          headerShown: false,
-          tabBarActiveTintColor: isNight ? colors.sage : colors.primary,
-          tabBarInactiveTintColor: isNight ? 'rgba(244, 246, 242, 0.45)' : colors.muted,
-          tabBarIcon: ({ color, size }) => (
-            <MaterialIcons name={TAB_ICONS[route.name]} size={size} color={color} />
-          ),
-          // Real labels, not just icons (2026-08-27, direct user feedback -
-          // "they dont have words on them anymore"). tabBarShowLabel/
-          // tabBarLabelStyle are explicit here rather than left to defaults:
-          // the previous height:64 + tabBarItemStyle paddingTop:6 combo left
-          // too little vertical room for icon+label together, so the label
-          // was being clipped off the bottom of the rounded pill entirely -
-          // that clipped-off label area, rendering against whatever sits
-          // behind the floating bar, is also what read as the pill's
-          // "bottom half is black" - a taller bar fixes both at once.
-          tabBarShowLabel: true,
-          tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
-          // Absolutely positioned + inset from all three edges + a large
-          // borderRadius is what actually produces the "floating pill"
-          // look rather than a flat bar - each screen's own ScrollView
-          // content gets matching extra bottom padding (see each tab's
-          // own contentContainerStyle) so the last card can still scroll
-          // fully clear of it instead of sitting behind it.
-          tabBarStyle: {
-            position: 'absolute',
-            left: 16,
-            right: 16,
-            bottom: tabBarBottom,
-            height: 78,
-            paddingTop: 10,
-            paddingBottom: 10,
-            borderRadius: 28,
-            borderTopWidth: 0,
-            // Real bug found (2026-09-11, theme redesign): the old
-            // `night ? colors.darkest : colors.card` ternary relied on
-            // colors.darkest always being dark - but darkest and
-            // background now swap roles at night (see _lib/styles.js's
-            // NIGHT_COLOR_OVERRIDES), so colors.darkest is LIGHT at
-            // night, which would have made this bar light instead of
-            // dark, the opposite of the original design intent.
-            // colors.card alone is already correctly theme-reactive
-            // (light day, dark night) - no ternary needed.
-            backgroundColor: colors.card,
-            elevation: 8,
-            shadowColor: '#000',
-            shadowOpacity: 0.15,
-            shadowRadius: 10,
-            shadowOffset: { width: 0, height: 4 },
-          },
-        })}
-      >
-        {orderedTabNames.map((name) => (
-          <Tabs.Screen
-            key={name}
-            name={name}
-            options={{
-              title: TAB_TITLES[name],
-              // href: null is Expo Router's supported way to remove a
-              // screen from the tab bar UI while keeping it mounted in
-              // the navigator - not conditionally omitting the
-              // <Tabs.Screen> itself, which would change the screen SET
-              // this navigator manages (the exact "stable set of
-              // screens" concern this file's own header comment flags).
-              href: hiddenTabs.includes(name) ? null : undefined,
-            }}
-          />
-        ))}
-      </Tabs>
+        <Tabs
+          initialRouteName={defaultLandingTab}
+          screenOptions={({ route }) => ({
+            // headerShown: false everywhere (2026-08-24, explicit user
+            // request) - the tab bar's own icon+label already identifies
+            // the screen, so a second native title bar above the content is
+            // redundant on every tab, not just Home (which already had this
+            // for its own reason - a branded header rendered inline). Budget
+            // grew its own in-content "Budget" title as part of its own
+            // redesign the same day, which this also stops duplicating.
+            // `title` below is kept on each Tabs.Screen regardless - it's
+            // still what drives the tab bar's own label text, independent
+            // of whether the header itself is shown.
+            headerShown: false,
+            tabBarActiveTintColor: isNight ? colors.sage : colors.primary,
+            tabBarInactiveTintColor: isNight ? 'rgba(244, 246, 242, 0.45)' : colors.muted,
+            tabBarIcon: ({ color, size }) => (
+              <MaterialIcons name={TAB_ICONS[route.name]} size={size} color={color} />
+            ),
+            // Real labels, not just icons (2026-08-27, direct user feedback -
+            // "they dont have words on them anymore"). tabBarShowLabel/
+            // tabBarLabelStyle are explicit here rather than left to defaults:
+            // the previous height:64 + tabBarItemStyle paddingTop:6 combo left
+            // too little vertical room for icon+label together, so the label
+            // was being clipped off the bottom of the rounded pill entirely -
+            // that clipped-off label area, rendering against whatever sits
+            // behind the floating bar, is also what read as the pill's
+            // "bottom half is black" - a taller bar fixes both at once.
+            tabBarShowLabel: true,
+            tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+            // Absolutely positioned + inset from all three edges + a large
+            // borderRadius is what actually produces the "floating pill"
+            // look rather than a flat bar - each screen's own ScrollView
+            // content gets matching extra bottom padding (see each tab's
+            // own contentContainerStyle) so the last card can still scroll
+            // fully clear of it instead of sitting behind it.
+            tabBarStyle: {
+              position: 'absolute',
+              left: 16,
+              right: 16,
+              bottom: tabBarBottom,
+              height: 78,
+              paddingTop: 10,
+              paddingBottom: 10,
+              borderRadius: 28,
+              borderTopWidth: 0,
+              // Real bug found (2026-09-11, theme redesign): the old
+              // `night ? colors.darkest : colors.card` ternary relied on
+              // colors.darkest always being dark - but darkest and
+              // background now swap roles at night (see _lib/styles.js's
+              // NIGHT_COLOR_OVERRIDES), so colors.darkest is LIGHT at
+              // night, which would have made this bar light instead of
+              // dark, the opposite of the original design intent.
+              // colors.card alone is already correctly theme-reactive
+              // (light day, dark night) - no ternary needed.
+              backgroundColor: colors.card,
+              elevation: 8,
+              shadowColor: '#000',
+              shadowOpacity: 0.15,
+              shadowRadius: 10,
+              shadowOffset: { width: 0, height: 4 },
+            },
+          })}
+        >
+          {orderedTabNames.map((name) => (
+            <Tabs.Screen
+              key={name}
+              name={name}
+              options={{
+                title: TAB_TITLES[name],
+                // href: null is Expo Router's supported way to remove a
+                // screen from the tab bar UI while keeping it mounted in
+                // the navigator - not conditionally omitting the
+                // <Tabs.Screen> itself, which would change the screen SET
+                // this navigator manages (the exact "stable set of
+                // screens" concern this file's own header comment flags).
+                href: hiddenTabs.includes(name) ? null : undefined,
+              }}
+            />
+          ))}
+        </Tabs>
       )}
     </AppDataProvider>
   );

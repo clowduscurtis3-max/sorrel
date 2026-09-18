@@ -5,11 +5,15 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "lint": "eslint .",
+    "format": "prettier --write \"**/*.js\"",
+    "format:check": "prettier --check \"**/*.js\""
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "UNLICENSED",
+  "private": true,
   "type": "commonjs",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
@@ -18,5 +22,10 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "plaid": "^45.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.10.0",
+    "prettier": "^3.9.8"
   }
 }

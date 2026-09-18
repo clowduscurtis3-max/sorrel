@@ -47,7 +47,8 @@ test('extractJson: strips comma-separated numbers across multiple fields without
 });
 
 test('extractJson: a real structural comma right after a value is never touched', () => {
-  const input = '{"a": {"budgeted_amount": 100, "reasoning": "x"}, "b": {"budgeted_amount": 200, "reasoning": "y"}}';
+  const input =
+    '{"a": {"budgeted_amount": 100, "reasoning": "x"}, "b": {"budgeted_amount": 200, "reasoning": "y"}}';
   const parsed = JSON.parse(extractJson(input));
   assert.equal(parsed.a.budgeted_amount, 100);
   assert.equal(parsed.b.budgeted_amount, 200);

@@ -35,7 +35,10 @@ function contextWith(overrides = {}) {
   const actuals = overrides.actuals ?? [];
   return {
     now: overrides.now ?? NOW,
-    period: overrides.period ?? { period_start: '2026-08-01', period_end: '2026-08-31' },
+    period: overrides.period ?? {
+      period_start: '2026-08-01',
+      period_end: '2026-08-31',
+    },
     budgets,
     actuals,
     budgetStatus: computeBudgetStatus({ budgets, actuals }),
@@ -63,7 +66,10 @@ test('verifyAmountAgainstConversation: true when the amount appears in a user me
 test('verifyAmountAgainstConversation: false when the amount only appears in an assistant reply, never in anything the user typed', () => {
   const messages = [
     { role: 'user', text: 'what if it cost more?' },
-    { role: 'assistant', text: 'At $999999 this would definitely not be comfortable.' },
+    {
+      role: 'assistant',
+      text: 'At $999999 this would definitely not be comfortable.',
+    },
   ];
   // This is exactly the prompt-injection/model-hallucination shape the
   // guardrail exists to catch: a number Claude itself introduced must never
@@ -88,7 +94,10 @@ test('verifyAmountAgainstConversation: false for a non-finite, zero, or negative
 });
 
 test('verifyTermMonthsAgainstConversation: true when a matching term appears in a user message, various phrasings', () => {
-  assert.equal(verifyTermMonthsAgainstConversation([{ role: 'user', text: '60 months' }], 60), true);
+  assert.equal(
+    verifyTermMonthsAgainstConversation([{ role: 'user', text: '60 months' }], 60),
+    true
+  );
   assert.equal(verifyTermMonthsAgainstConversation([{ role: 'user', text: '5 years' }], 60), true);
   assert.equal(verifyTermMonthsAgainstConversation([{ role: 'user', text: '60' }], 60), true);
 });
@@ -130,16 +139,27 @@ test('extractCandidateRates: recognizes "%" and "percent" phrasings, ignores unr
 });
 
 test('verifyRateAgainstConversation: true only when the rate appears in a user message, same discipline as amount/term verification', () => {
-  assert.equal(verifyRateAgainstConversation([{ role: 'user', text: 'what if I got 6%' }], 6), true);
-  assert.equal(verifyRateAgainstConversation([{ role: 'assistant', text: 'a 6% rate would help' }], 6), false);
-  assert.equal(verifyRateAgainstConversation([{ role: 'user', text: 'what if I got 6%' }], 10), false);
+  assert.equal(
+    verifyRateAgainstConversation([{ role: 'user', text: 'what if I got 6%' }], 6),
+    true
+  );
+  assert.equal(
+    verifyRateAgainstConversation([{ role: 'assistant', text: 'a 6% rate would help' }], 6),
+    false
+  );
+  assert.equal(
+    verifyRateAgainstConversation([{ role: 'user', text: 'what if I got 6%' }], 10),
+    false
+  );
   for (const bad of [-1, NaN, Infinity, null, undefined, '6']) {
     assert.equal(verifyRateAgainstConversation([{ role: 'user', text: '6%' }], bad), false);
   }
 });
 
 test('verifyRateAgainstConversation: a rate present in knownNumbers (e.g. the anchor result) verifies without being retyped', () => {
-  const knownNumbers = numericLeaves({ rate_estimate: { annual_rate_percent: 7.47 } });
+  const knownNumbers = numericLeaves({
+    rate_estimate: { annual_rate_percent: 7.47 },
+  });
   assert.equal(verifyRateAgainstConversation([], 7.47, knownNumbers), true);
 });
 
@@ -155,7 +175,12 @@ test('verifyRateAgainstConversation: a rate present in knownNumbers (e.g. the an
 // ---------------------------------------------------------------------------
 
 test('numericLeaves: collects every finite number from a nested object, as integer cents', () => {
-  const leaves = numericLeaves({ a: 25000, b: { c: 431.89, d: [60, 72] }, e: 'not a number', f: null });
+  const leaves = numericLeaves({
+    a: 25000,
+    b: { c: 431.89, d: [60, 72] },
+    e: 'not a number',
+    f: null,
+  });
   assert.equal(leaves.has(2500000), true); // 25000
   assert.equal(leaves.has(43189), true); // 431.89
   assert.equal(leaves.has(6000), true); // 60
@@ -170,7 +195,10 @@ test('numericLeaves: ignores non-finite values (NaN, Infinity) rather than corru
 });
 
 test('verifyAmountAgainstConversation: an amount that only appears in the anchor result (never typed by the user) verifies via knownNumbers', () => {
-  const anchorResult = { scenario: { amount: 431.89 }, rate_estimate: { total_price: 25000 } };
+  const anchorResult = {
+    scenario: { amount: 431.89 },
+    rate_estimate: { total_price: 25000 },
+  };
   const knownNumbers = numericLeaves(anchorResult);
   const messages = [{ role: 'user', text: 'what if I put $2,500 down' }];
   // 25000 was never typed in THIS conversation - only $2,500 was - but it's
@@ -180,7 +208,10 @@ test('verifyAmountAgainstConversation: an amount that only appears in the anchor
 });
 
 test('verifyAmountAgainstConversation: knownNumbers does not make up for a genuinely fabricated number', () => {
-  const anchorResult = { scenario: { amount: 431.89 }, rate_estimate: { total_price: 25000 } };
+  const anchorResult = {
+    scenario: { amount: 431.89 },
+    rate_estimate: { total_price: 25000 },
+  };
   const knownNumbers = numericLeaves(anchorResult);
   const messages = [{ role: 'user', text: 'what if I put $2,500 down' }];
   assert.equal(verifyAmountAgainstConversation(messages, 999999, knownNumbers), false);
@@ -189,7 +220,14 @@ test('verifyAmountAgainstConversation: knownNumbers does not make up for a genui
 test('verifyTermMonthsAgainstConversation: a term from the anchor result verifies via knownNumbers even if not retyped', () => {
   const anchorResult = { rate_estimate: { term_months: 72 } };
   const knownNumbers = numericLeaves(anchorResult);
-  assert.equal(verifyTermMonthsAgainstConversation([{ role: 'user', text: 'what if I put $2,500 down' }], 72, knownNumbers), true);
+  assert.equal(
+    verifyTermMonthsAgainstConversation(
+      [{ role: 'user', text: 'what if I put $2,500 down' }],
+      72,
+      knownNumbers
+    ),
+    true
+  );
 });
 
 // The exact scenario from the on-device bug report: total price + term
@@ -204,13 +242,22 @@ test('executeTool estimate_financing_payment: total_price and term_months from t
   const context = contextWith();
   const anchorResult = {
     scenario: { amount: 431.89, category: 'Transportation' },
-    rate_estimate: { total_price: 25000, term_months: 72, annual_rate_percent: 7.47 },
+    rate_estimate: {
+      total_price: 25000,
+      term_months: 72,
+      annual_rate_percent: 7.47,
+    },
   };
   const knownNumbers = numericLeaves(anchorResult);
   const messages = [{ role: 'user', text: 'what if I put $2,500 down' }];
   const outcome = await executeTool(
     'estimate_financing_payment',
-    { category: 'Shopping', total_price: 25000, down_payment: 2500, term_months: 72 },
+    {
+      category: 'Shopping',
+      total_price: 25000,
+      down_payment: 2500,
+      term_months: 72,
+    },
     { context, messages, today: '2026-08-22', knownNumbers }
   );
   assert.equal(outcome.ok, true);
@@ -237,7 +284,12 @@ test('executeTool estimate_financing_payment: a verified hypothetical rate is ge
   );
   const sixPercent = await executeTool(
     'estimate_financing_payment',
-    { category: 'Shopping', total_price: 2000, term_months: 12, annual_rate_percent: 6 },
+    {
+      category: 'Shopping',
+      total_price: 2000,
+      term_months: 12,
+      annual_rate_percent: 6,
+    },
     { context, messages, today: '2026-08-22' }
   );
   assert.equal(zeroRate.ok, true);
@@ -260,7 +312,12 @@ test('executeTool estimate_financing_payment: a rate that was never actually sta
   const messages = [{ role: 'user', text: 'finance a $2,000 couch over 12 months' }];
   const outcome = await executeTool(
     'estimate_financing_payment',
-    { category: 'Shopping', total_price: 2000, term_months: 12, annual_rate_percent: 6 },
+    {
+      category: 'Shopping',
+      total_price: 2000,
+      term_months: 12,
+      annual_rate_percent: 6,
+    },
     { context, messages, today: '2026-08-22' }
   );
   assert.equal(outcome.ok, false);
@@ -346,7 +403,11 @@ test('executeTool find_max_comfortable_amount: takes no user-stated amount, so n
   const outcome = await executeTool(
     'find_max_comfortable_amount',
     { category: 'Dining' },
-    { context, messages: [{ role: 'user', text: 'how much could I spend instead?' }], today: '2026-08-22' }
+    {
+      context,
+      messages: [{ role: 'user', text: 'how much could I spend instead?' }],
+      today: '2026-08-22',
+    }
   );
   assert.equal(outcome.ok, true);
   assert.equal(outcome.result.available, true);
@@ -466,7 +527,12 @@ test('executeTool estimate_financing_payment: a verified down payment is subtrac
   ];
   const outcome = await executeTool(
     'estimate_financing_payment',
-    { category: 'Shopping', total_price: 2000, down_payment: 500, term_months: 12 },
+    {
+      category: 'Shopping',
+      total_price: 2000,
+      down_payment: 500,
+      term_months: 12,
+    },
     { context, messages, today: '2026-08-22' }
   );
   assert.equal(outcome.ok, true);
@@ -481,7 +547,12 @@ test('executeTool estimate_financing_payment: a down payment that was never actu
   const messages = [{ role: 'user', text: 'finance a $2,000 couch over 12 months' }];
   const outcome = await executeTool(
     'estimate_financing_payment',
-    { category: 'Shopping', total_price: 2000, down_payment: 500, term_months: 12 },
+    {
+      category: 'Shopping',
+      total_price: 2000,
+      down_payment: 500,
+      term_months: 12,
+    },
     { context, messages, today: '2026-08-22' }
   );
   assert.equal(outcome.ok, false);
@@ -496,7 +567,12 @@ test('executeTool estimate_financing_payment: a down payment covering the full p
   ];
   const outcome = await executeTool(
     'estimate_financing_payment',
-    { category: 'Shopping', total_price: 2000, down_payment: 2000, term_months: 12 },
+    {
+      category: 'Shopping',
+      total_price: 2000,
+      down_payment: 2000,
+      term_months: 12,
+    },
     { context, messages, today: '2026-08-22' }
   );
   assert.equal(outcome.ok, false);
@@ -517,7 +593,12 @@ test('executeTool estimate_financing_payment: a verified trade-in value reduces 
   ];
   const outcome = await executeTool(
     'estimate_financing_payment',
-    { category: 'Shopping', total_price: 2000, trade_in_value: 500, term_months: 12 },
+    {
+      category: 'Shopping',
+      total_price: 2000,
+      trade_in_value: 500,
+      term_months: 12,
+    },
     { context, messages, today: '2026-08-22' }
   );
   assert.equal(outcome.ok, true);
@@ -531,11 +612,20 @@ test('executeTool estimate_financing_payment: down payment and trade-in stack to
   const context = contextWith();
   const messages = [
     { role: 'user', text: 'finance a $25,000 car over 60 months' },
-    { role: 'user', text: 'what if I put $2,500 down and traded in my old car for $5,000' },
+    {
+      role: 'user',
+      text: 'what if I put $2,500 down and traded in my old car for $5,000',
+    },
   ];
   const outcome = await executeTool(
     'estimate_financing_payment',
-    { category: 'Shopping', total_price: 25000, down_payment: 2500, trade_in_value: 5000, term_months: 60 },
+    {
+      category: 'Shopping',
+      total_price: 25000,
+      down_payment: 2500,
+      trade_in_value: 5000,
+      term_months: 60,
+    },
     { context, messages, today: '2026-08-22' }
   );
   assert.equal(outcome.ok, true);
@@ -549,7 +639,12 @@ test('executeTool estimate_financing_payment: a trade-in value that was never ac
   const messages = [{ role: 'user', text: 'finance a $2,000 couch over 12 months' }];
   const outcome = await executeTool(
     'estimate_financing_payment',
-    { category: 'Shopping', total_price: 2000, trade_in_value: 500, term_months: 12 },
+    {
+      category: 'Shopping',
+      total_price: 2000,
+      trade_in_value: 500,
+      term_months: 12,
+    },
     { context, messages, today: '2026-08-22' }
   );
   assert.equal(outcome.ok, false);
@@ -560,11 +655,20 @@ test('executeTool estimate_financing_payment: down payment plus trade-in togethe
   const context = contextWith();
   const messages = [
     { role: 'user', text: 'finance a $2,000 couch over 12 months' },
-    { role: 'user', text: 'what if I put $1,000 down and traded something in for $1,000' },
+    {
+      role: 'user',
+      text: 'what if I put $1,000 down and traded something in for $1,000',
+    },
   ];
   const outcome = await executeTool(
     'estimate_financing_payment',
-    { category: 'Shopping', total_price: 2000, down_payment: 1000, trade_in_value: 1000, term_months: 12 },
+    {
+      category: 'Shopping',
+      total_price: 2000,
+      down_payment: 1000,
+      trade_in_value: 1000,
+      term_months: 12,
+    },
     { context, messages, today: '2026-08-22' }
   );
   assert.equal(outcome.ok, false);
@@ -572,7 +676,11 @@ test('executeTool estimate_financing_payment: down payment plus trade-in togethe
 });
 
 test('executeTool: an unknown tool name is rejected rather than silently ignored', async () => {
-  const outcome = await executeTool('delete_all_transactions', {}, { context: contextWith(), messages: [], today: '2026-08-22' });
+  const outcome = await executeTool(
+    'delete_all_transactions',
+    {},
+    { context: contextWith(), messages: [], today: '2026-08-22' }
+  );
   assert.equal(outcome.ok, false);
   assert.match(outcome.error, /unknown_tool/);
 });

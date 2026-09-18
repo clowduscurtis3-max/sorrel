@@ -65,7 +65,10 @@ function computeAccountsSummary({ accounts }) {
         )
       : null;
 
-  return { accounts: list, total_depository_available: totalDepositoryAvailable };
+  return {
+    accounts: list,
+    total_depository_available: totalDepositoryAvailable,
+  };
 }
 
 // Postgres error code for a unique-constraint violation - used below to
@@ -157,7 +160,9 @@ async function refreshAccountBalances(userId, plaidItemId, accessToken) {
       );
       const { error: retryError } = await supabaseAdmin
         .from('accounts')
-        .upsert([{ ...row, persistent_account_id: null }], { onConflict: 'user_id,plaid_account_id' });
+        .upsert([{ ...row, persistent_account_id: null }], {
+          onConflict: 'user_id,plaid_account_id',
+        });
       if (retryError) throw retryError;
     } else if (rowError) {
       throw rowError;
@@ -202,4 +207,8 @@ async function getAccountsSummary(userId) {
   return computeAccountsSummary({ accounts: withInstitution });
 }
 
-module.exports = { computeAccountsSummary, refreshAccountBalances, getAccountsSummary };
+module.exports = {
+  computeAccountsSummary,
+  refreshAccountBalances,
+  getAccountsSummary,
+};

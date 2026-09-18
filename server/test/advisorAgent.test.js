@@ -15,9 +15,12 @@ const {
 
 const VALID = {
   headline: 'Groceries is trending over budget this month.',
-  summary: "You're spending faster than planned in Groceries, with about a week left in the period.",
+  summary:
+    "You're spending faster than planned in Groceries, with about a week left in the period.",
   key_findings: ['Groceries is $60 over its $300 budget with 7 days left this month.'],
-  recommended_actions: ['Slowing down grocery spending for the rest of the month would bring it back in line.'],
+  recommended_actions: [
+    'Slowing down grocery spending for the rest of the month would bring it back in line.',
+  ],
   facts_used: ['get_budget_insight'],
   confidence: 'high',
   needs_clarification: false,
@@ -40,12 +43,12 @@ test('parseBriefing: rejects an empty key_findings array - a real finding is alw
 });
 
 test('parseBriefing: rejects a missing summary', () => {
-  const { summary, ...rest } = VALID;
+  const { summary: _summary, ...rest } = VALID;
   assert.equal(parseBriefing(JSON.stringify(rest)), null);
 });
 
 test('parseBriefing: rejects a missing headline', () => {
-  const { headline, ...rest } = VALID;
+  const { headline: _headline, ...rest } = VALID;
   assert.equal(parseBriefing(JSON.stringify(rest)), null);
 });
 
@@ -89,7 +92,14 @@ function makeClient({ toolUseRounds = 0 } = {}) {
         calls += 1;
         if (tools && calls <= toolUseRounds) {
           return {
-            content: [{ type: 'tool_use', id: `t${calls}`, name: 'get_budget_insight', input: {} }],
+            content: [
+              {
+                type: 'tool_use',
+                id: `t${calls}`,
+                name: 'get_budget_insight',
+                input: {},
+              },
+            ],
           };
         }
         return { content: [{ type: 'text', text: JSON.stringify(VALID) }] };
@@ -100,7 +110,11 @@ function makeClient({ toolUseRounds = 0 } = {}) {
 
 test('runAdvisorInvestigation: basic investigation - no tool call needed, answers immediately', async () => {
   const client = makeClient({ toolUseRounds: 0 });
-  const result = await runAdvisorInvestigation({ userId: 'user-1', activeEvents: [], client });
+  const result = await runAdvisorInvestigation({
+    userId: 'user-1',
+    activeEvents: [],
+    client,
+  });
   assert.deepEqual(result, VALID);
   assert.equal(client.calls(), 1);
 });
@@ -112,7 +126,12 @@ test('runAdvisorInvestigation: multi-step investigation - one tool round, then a
     calledTools.push(name);
     return { ok: true, result: { fake: true } };
   };
-  const result = await runAdvisorInvestigation({ userId: 'user-1', activeEvents: [], client, executeToolFn });
+  const result = await runAdvisorInvestigation({
+    userId: 'user-1',
+    activeEvents: [],
+    client,
+    executeToolFn,
+  });
   assert.deepEqual(result, VALID);
   assert.equal(client.calls(), 2);
   assert.deepEqual(calledTools, ['get_budget_insight']);
@@ -124,7 +143,12 @@ test('runAdvisorInvestigation: iteration limit - a client that always wants anot
   // final round with tools:undefined.
   const client = makeClient({ toolUseRounds: 99 });
   const executeToolFn = async () => ({ ok: true, result: {} });
-  const result = await runAdvisorInvestigation({ userId: 'user-1', activeEvents: [], client, executeToolFn });
+  const result = await runAdvisorInvestigation({
+    userId: 'user-1',
+    activeEvents: [],
+    client,
+    executeToolFn,
+  });
   // The forced final round is called with tools:undefined, so the fake
   // client's own `tools &&` guard is false regardless of toolUseRounds -
   // it returns the text/VALID branch, proving the loop reached and used
@@ -135,16 +159,32 @@ test('runAdvisorInvestigation: iteration limit - a client that always wants anot
 
 test('runAdvisorInvestigation: a tool failure is reported to the model as is_error, not thrown', async () => {
   const client = makeClient({ toolUseRounds: 1 });
-  const executeToolFn = async () => ({ ok: false, error: 'This information is temporarily unavailable.' });
-  const result = await runAdvisorInvestigation({ userId: 'user-1', activeEvents: [], client, executeToolFn });
+  const executeToolFn = async () => ({
+    ok: false,
+    error: 'This information is temporarily unavailable.',
+  });
+  const result = await runAdvisorInvestigation({
+    userId: 'user-1',
+    activeEvents: [],
+    client,
+    executeToolFn,
+  });
   assert.deepEqual(result, VALID);
 });
 
 test('runAdvisorInvestigation: an unparseable final answer returns null rather than a fabricated result', async () => {
   const client = {
-    messages: { create: async () => ({ content: [{ type: 'text', text: 'not valid json' }] }) },
+    messages: {
+      create: async () => ({
+        content: [{ type: 'text', text: 'not valid json' }],
+      }),
+    },
   };
-  const result = await runAdvisorInvestigation({ userId: 'user-1', activeEvents: [], client });
+  const result = await runAdvisorInvestigation({
+    userId: 'user-1',
+    activeEvents: [],
+    client,
+  });
   assert.equal(result, null);
 });
 
@@ -153,13 +193,19 @@ test('runAdvisorInvestigation: an unparseable final answer returns null rather t
 // prompt compliance isn't 100% and this deterministic backstop is load-
 // bearing, not redundant with the prompt.
 test('stripJargon: replaces banned jargon words with their plain-language equivalent', () => {
-  assert.equal(stripJargon('You have zero capacity to fund this.'), 'You have zero room to fund this.');
+  assert.equal(
+    stripJargon('You have zero capacity to fund this.'),
+    'You have zero room to fund this.'
+  );
   assert.equal(stripJargon('This is discretionary spending.'), 'This is extra spending.');
 });
 
 test('stripJargon: does not touch unrelated words that merely contain a banned substring', () => {
   // "capacity" must not match inside an unrelated word - whole-word only.
-  assert.equal(stripJargon('Overcapacity is not a real word here.'), 'Overcapacity is not a real word here.');
+  assert.equal(
+    stripJargon('Overcapacity is not a real word here.'),
+    'Overcapacity is not a real word here.'
+  );
 });
 
 test('parseBriefing: applies the jargon backstop to every string field, not just headline', () => {
@@ -186,28 +232,51 @@ test('parseBriefing: applies the jargon backstop to every string field, not just
 // These tests reproduce that exact scenario against the fix.
 
 function makeEvent(overrides) {
-  return { id: 'evt-1', event_type: 'low_balance', data: { balance: 100 }, ...overrides };
+  return {
+    id: 'evt-1',
+    event_type: 'low_balance',
+    data: { balance: 100 },
+    ...overrides,
+  };
 }
 
 test('activeEventsFingerprint: identical event sets produce the same fingerprint', () => {
-  const events = [makeEvent({ id: 'b', event_type: 'savings_reminder', data: {} }), makeEvent({ id: 'a' })];
-  assert.equal(activeEventsFingerprint(events), activeEventsFingerprint(events.map((e) => ({ ...e }))));
+  const events = [
+    makeEvent({ id: 'b', event_type: 'savings_reminder', data: {} }),
+    makeEvent({ id: 'a' }),
+  ];
+  assert.equal(
+    activeEventsFingerprint(events),
+    activeEventsFingerprint(events.map((e) => ({ ...e })))
+  );
 });
 
 test('activeEventsFingerprint: a change to a NON-top event still changes the fingerprint - the real bug this fixes', () => {
   // B (savings_reminder) is newer/index-0, matching the exact scenario
   // from the audit: A (low_balance) is older but the one that actually
   // worsens.
-  const eventB = { id: 'b', event_type: 'savings_reminder', data: { amount: 50 } };
+  const eventB = {
+    id: 'b',
+    event_type: 'savings_reminder',
+    data: { amount: 50 },
+  };
   const eventA = { id: 'a', event_type: 'low_balance', data: { balance: 100 } };
   const before = activeEventsFingerprint([eventB, eventA]);
 
   // A worsens in place - same id, same event_type, different data - the
   // way a reopened/updated ongoing condition actually behaves.
-  const eventAWorse = { id: 'a', event_type: 'low_balance', data: { balance: 12 } };
+  const eventAWorse = {
+    id: 'a',
+    event_type: 'low_balance',
+    data: { balance: 12 },
+  };
   const after = activeEventsFingerprint([eventB, eventAWorse]);
 
-  assert.notEqual(before, after, 'a change to any active event must invalidate the cache, not just the top-ranked one');
+  assert.notEqual(
+    before,
+    after,
+    'a change to any active event must invalidate the cache, not just the top-ranked one'
+  );
 });
 
 test('activeEventsFingerprint: an unrelated field change on the top event still changes the fingerprint', () => {
@@ -240,7 +309,18 @@ test('isCacheValid: no cached row at all is honestly a cache miss, never a crash
 // spuriously invalidating the cache and forcing a real, billed Claude
 // call for no actual change.
 test('activeEventsFingerprint: is order-independent - a tie-order flip from the DB never changes the fingerprint', () => {
-  const eventA = { id: 'aaaa', event_type: 'low_balance', data: { balance: 40 } };
-  const eventB = { id: 'bbbb', event_type: 'overspend_pace', data: { amount: 12 } };
-  assert.equal(activeEventsFingerprint([eventA, eventB]), activeEventsFingerprint([eventB, eventA]));
+  const eventA = {
+    id: 'aaaa',
+    event_type: 'low_balance',
+    data: { balance: 40 },
+  };
+  const eventB = {
+    id: 'bbbb',
+    event_type: 'overspend_pace',
+    data: { amount: 12 },
+  };
+  assert.equal(
+    activeEventsFingerprint([eventA, eventB]),
+    activeEventsFingerprint([eventB, eventA])
+  );
 });

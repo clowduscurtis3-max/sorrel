@@ -204,14 +204,20 @@ app.get('/health', (req, res) => res.json({ ok: true }));
 app.post('/auth/signup', async (req, res) => {
   const { username, password, email } = req.body || {};
   try {
-    const tokens = await signup({ username, password, email, allowedEmails: ALLOWED_EMAILS });
+    const tokens = await signup({
+      username,
+      password,
+      email,
+      allowedEmails: ALLOWED_EMAILS,
+    });
     res.json(tokens);
   } catch (err) {
     if (err instanceof EmailNotAllowedError) return res.status(403).json({ error: err.message });
     // An account already exists for this email (created via Google Sign-In).
     // Deliberately NOT auto-linking here anymore - see usernameAuth.js's
     // signup() comment for the account-takeover this used to allow.
-    if (err instanceof EmailAlreadyRegisteredError) return res.status(409).json({ error: err.message });
+    if (err instanceof EmailAlreadyRegisteredError)
+      return res.status(409).json({ error: err.message });
     if (
       err instanceof UsernameTakenError ||
       err instanceof InvalidUsernameError ||
@@ -337,7 +343,8 @@ app.post('/link-token', requireUser, async (req, res) => {
       // same clear guidance already given for an unreadable token.
       if (item.status !== 'active') {
         return res.status(409).json({
-          error: 'This connection has already been disconnected - add it again as a new connection instead.',
+          error:
+            'This connection has already been disconnected - add it again as a new connection instead.',
           code: 'NEEDS_DISCONNECT_AND_ADD',
         });
       }
@@ -355,7 +362,8 @@ app.post('/link-token', requireUser, async (req, res) => {
           // implicit "re-link" that quietly starts a new Item under the
           // hood.
           return res.status(409).json({
-            error: 'This connection cannot be repaired directly and needs to be disconnected and re-added.',
+            error:
+              'This connection cannot be repaired directly and needs to be disconnected and re-added.',
             code: 'NEEDS_DISCONNECT_AND_ADD',
           });
         }
@@ -445,21 +453,28 @@ app.post('/exchange-token', requireUser, async (req, res) => {
       }
       if (data.status !== 'active') {
         return res.status(409).json({
-          error: 'This connection has already been disconnected - add it again as a new connection instead.',
+          error:
+            'This connection has already been disconnected - add it again as a new connection instead.',
           code: 'NEEDS_DISCONNECT_AND_ADD',
         });
       }
       existingItem = data;
     }
 
-    const exchange = await plaidClient.itemPublicTokenExchange({ public_token });
+    const exchange = await plaidClient.itemPublicTokenExchange({
+      public_token,
+    });
     const { access_token, item_id } = exchange.data;
 
     if (existingItem) {
       if (existingItem.item_id === item_id) {
         const { error } = await supabaseAdmin
           .from('plaid_items')
-          .update({ access_token: encrypt(access_token), status: 'active', needs_relink: false })
+          .update({
+            access_token: encrypt(access_token),
+            status: 'active',
+            needs_relink: false,
+          })
           .eq('id', existingItem.id);
         if (error) throw error;
 
@@ -492,7 +507,9 @@ app.post('/exchange-token', requireUser, async (req, res) => {
     // non-fatal above) - matches every Item that existed before this
     // column did, and a transactions-capable Item is the overwhelmingly
     // common case regardless.
-    const products = itemMeta?.data?.item?.products?.length ? itemMeta.data.item.products : ['transactions'];
+    const products = itemMeta?.data?.item?.products?.length
+      ? itemMeta.data.item.products
+      : ['transactions'];
     const institutionId = itemMeta?.data?.item?.institution_id || null;
     let institutionName = null;
     let institutionLogo = null;
@@ -613,7 +630,10 @@ app.delete('/plaid-items/:id', requireUser, async (req, res) => {
       if (txDeleteError) throw txDeleteError;
     }
 
-    const { error: deleteError } = await supabaseAdmin.from('plaid_items').delete().eq('id', item.id);
+    const { error: deleteError } = await supabaseAdmin
+      .from('plaid_items')
+      .delete()
+      .eq('id', item.id);
     if (deleteError) throw deleteError;
 
     try {
@@ -678,7 +698,9 @@ app.get('/plaid-items', requireUser, async (req, res) => {
   try {
     const { data: items, error } = await supabaseAdmin
       .from('plaid_items')
-      .select('id, institution_id, institution_name, institution_logo, status, needs_relink, created_at')
+      .select(
+        'id, institution_id, institution_name, institution_logo, status, needs_relink, created_at'
+      )
       .eq('user_id', req.userId)
       .order('created_at', { ascending: true });
     if (error) throw error;
@@ -708,10 +730,7 @@ app.get('/plaid-items', requireUser, async (req, res) => {
 // case is now detected by budget.js's describeGoal() checking for a
 // missing target_amount/notes rather than by a dedicated 'general' type
 // value, so backfilled rows still degrade correctly.
-const GOAL_TYPES = [
-  'debt',
-  'savings',
-];
+const GOAL_TYPES = ['debt', 'savings'];
 
 // Phase 42 (multi-goal tracking, 2026-09-08): user_goals moved from one
 // row per user to N. GET /goal now returns every active (not archived)
@@ -754,7 +773,9 @@ app.post('/goal', requireUser, async (req, res) => {
     target_timeframe_months != null &&
     (!Number.isInteger(target_timeframe_months) || target_timeframe_months <= 0)
   ) {
-    return res.status(400).json({ error: 'target_timeframe_months must be a positive whole number' });
+    return res.status(400).json({
+      error: 'target_timeframe_months must be a positive whole number',
+    });
   }
   if (account_ids != null && !Array.isArray(account_ids)) {
     return res.status(400).json({ error: 'account_ids must be an array' });
@@ -828,7 +849,10 @@ app.post('/goal/:id/archive', requireUser, async (req, res) => {
   try {
     const { data: updated, error } = await supabaseAdmin
       .from('user_goals')
-      .update({ archived_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .update({
+        archived_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
       .eq('id', req.params.id)
       .eq('user_id', req.userId)
       .select('id')
@@ -919,7 +943,10 @@ app.post('/goal/:id/accept-realistic-date', requireUser, async (req, res) => {
 
     const { error: updateError } = await supabaseAdmin
       .from('user_goals')
-      .update({ target_timeframe_months: newTimeframeMonths, updated_at: new Date().toISOString() })
+      .update({
+        target_timeframe_months: newTimeframeMonths,
+        updated_at: new Date().toISOString(),
+      })
       .eq('id', goal.id)
       .eq('user_id', req.userId);
     if (updateError) throw updateError;
@@ -929,7 +956,10 @@ app.post('/goal/:id/accept-realistic-date', requireUser, async (req, res) => {
     try {
       await recomputeNotificationEvents(req.userId);
     } catch (err) {
-      logError('Failed to recompute notification events after accepting a realistic goal date (non-fatal):', err);
+      logError(
+        'Failed to recompute notification events after accepting a realistic goal date (non-fatal):',
+        err
+      );
     }
     try {
       await logRecommendationEvent({
@@ -947,7 +977,11 @@ app.post('/goal/:id/accept-realistic-date', requireUser, async (req, res) => {
       logError('Failed to log goal_timeframe_extend recommendation event (non-fatal):', err);
     }
 
-    res.json({ success: true, target_timeframe_months: newTimeframeMonths, target_date: allocation.realistic_date });
+    res.json({
+      success: true,
+      target_timeframe_months: newTimeframeMonths,
+      target_date: allocation.realistic_date,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to accept realistic date' });
@@ -1020,12 +1054,17 @@ app.post('/goal/calculator', requireUser, async (req, res) => {
     !Number.isFinite(hypothetical_monthly_amount) ||
     hypothetical_monthly_amount <= 0
   ) {
-    return res.status(400).json({ error: 'hypothetical_monthly_amount must be a finite number greater than zero' });
+    return res.status(400).json({
+      error: 'hypothetical_monthly_amount must be a finite number greater than zero',
+    });
   }
   try {
     const goalProgress = await getGoalBalanceProgressById(req.userId, goal_id);
     if (!goalProgress) return res.status(404).json({ error: 'Goal not found' });
-    const result = calculateGoalPace({ goalProgress, hypotheticalMonthlyAmount: hypothetical_monthly_amount });
+    const result = calculateGoalPace({
+      goalProgress,
+      hypotheticalMonthlyAmount: hypothetical_monthly_amount,
+    });
     res.json({ result });
   } catch (err) {
     console.error(err);
@@ -1049,12 +1088,17 @@ app.post('/goal/milestones', requireUser, async (req, res) => {
     !Number.isFinite(hypothetical_monthly_amount) ||
     hypothetical_monthly_amount <= 0
   ) {
-    return res.status(400).json({ error: 'hypothetical_monthly_amount must be a finite number greater than zero' });
+    return res.status(400).json({
+      error: 'hypothetical_monthly_amount must be a finite number greater than zero',
+    });
   }
   try {
     const goalProgress = await getGoalBalanceProgressById(req.userId, goal_id);
     if (!goalProgress) return res.status(404).json({ error: 'Goal not found' });
-    const result = computeGoalMilestones({ goalProgress, hypotheticalMonthlyAmount: hypothetical_monthly_amount });
+    const result = computeGoalMilestones({
+      goalProgress,
+      hypotheticalMonthlyAmount: hypothetical_monthly_amount,
+    });
     res.json({ result });
   } catch (err) {
     console.error(err);
@@ -1183,7 +1227,11 @@ app.post('/admin/backfill-budget-history', requireUser, async (req, res) => {
 app.post('/notifications/register-device', requireUser, async (req, res) => {
   const { expo_push_token, platform, timezone } = req.body || {};
   try {
-    await registerDevice(req.userId, { expoPushToken: expo_push_token, platform, timezone });
+    await registerDevice(req.userId, {
+      expoPushToken: expo_push_token,
+      platform,
+      timezone,
+    });
     res.json({ ok: true });
   } catch (err) {
     if (err.message === 'INVALID_PUSH_TOKEN' || err.message === 'INVALID_PLATFORM') {
@@ -1227,7 +1275,9 @@ app.get('/notifications/events', requireUser, async (req, res) => {
   try {
     const { data: events, error } = await supabaseAdmin
       .from('notification_events')
-      .select('id, event_type, category, period_start, status, title, body, data, created_at, sent_at, resolved_at')
+      .select(
+        'id, event_type, category, period_start, status, title, body, data, created_at, sent_at, resolved_at'
+      )
       .eq('user_id', req.userId)
       .is('dismissed_at', null)
       .order('created_at', { ascending: false });
@@ -1274,7 +1324,9 @@ app.post('/admin/detect-notification-events', requireUser, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: err.message || 'Failed to recompute notification events' });
+    res.status(500).json({
+      error: err.message || 'Failed to recompute notification events',
+    });
   }
 });
 
@@ -1368,7 +1420,7 @@ async function syncUserData(userId, { skipSync = false } = {}) {
           console.error(
             'Stored Plaid token failed to decrypt for Item',
             item.id,
-            '- needs re-link. Skipping this Item, syncing the user\'s other Items normally.'
+            "- needs re-link. Skipping this Item, syncing the user's other Items normally."
           );
           return;
         }
@@ -1393,7 +1445,9 @@ async function syncUserData(userId, { skipSync = false } = {}) {
       const hasTransactions = (item.products || ['transactions']).includes('transactions');
       try {
         await Promise.all([
-          hasTransactions ? syncTransactionsLocked(item.id, userId, accessToken, item.cursor) : Promise.resolve(),
+          hasTransactions
+            ? syncTransactionsLocked(item.id, userId, accessToken, item.cursor)
+            : Promise.resolve(),
           refreshAccountBalances(userId, item.id, accessToken).catch((err) => {
             logError(`Account balance refresh failed for Item ${item.id} (non-fatal):`, err);
           }),
@@ -1417,7 +1471,8 @@ async function syncUserData(userId, { skipSync = false } = {}) {
             .from('plaid_items')
             .update({ needs_relink: true })
             .eq('id', item.id);
-          if (flagError) logError(`Failed to flag Item ${item.id} as needing re-link (non-fatal):`, flagError);
+          if (flagError)
+            logError(`Failed to flag Item ${item.id} as needing re-link (non-fatal):`, flagError);
         }
         throw err;
       }
@@ -1595,7 +1650,12 @@ app.post('/admin/recategorize', requireUser, async (req, res) => {
 // could drift from the original. `excludeTransactionId` is optional
 // (null when there's no specific transaction this edit originated from,
 // as with a rule edited straight from Settings).
-async function applyMerchantCategoryRetroactively(userId, merchantKey, category, excludeTransactionId) {
+async function applyMerchantCategoryRetroactively(
+  userId,
+  merchantKey,
+  category,
+  excludeTransactionId
+) {
   let query = supabaseAdmin
     .from('transactions')
     .select('transaction_id, merchant_name, name, category_reasoning')
@@ -1644,7 +1704,9 @@ async function applyMerchantCategoryRetroactively(userId, merchantKey, category,
 app.patch('/transactions/:transaction_id/category', requireUser, async (req, res) => {
   const { category } = req.body;
   if (!FRIENDLY_CATEGORIES.includes(category)) {
-    return res.status(400).json({ error: `category must be one of: ${FRIENDLY_CATEGORIES.join(', ')}` });
+    return res.status(400).json({
+      error: `category must be one of: ${FRIENDLY_CATEGORIES.join(', ')}`,
+    });
   }
 
   try {
@@ -1666,17 +1728,15 @@ app.patch('/transactions/:transaction_id/category', requireUser, async (req, res
     const merchantKey = normalizeMerchantKey(data[0].merchant_name || data[0].name);
     let retroactivelyUpdated = 0;
     if (merchantKey) {
-      const { error: prefError } = await supabaseAdmin
-        .from('merchant_category_preferences')
-        .upsert(
-          {
-            user_id: req.userId,
-            merchant_key: merchantKey,
-            category,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'user_id,merchant_key' }
-        );
+      const { error: prefError } = await supabaseAdmin.from('merchant_category_preferences').upsert(
+        {
+          user_id: req.userId,
+          merchant_key: merchantKey,
+          category,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id,merchant_key' }
+      );
       // Non-fatal: the correction to *this* transaction already succeeded
       // and was returned to the user - failing to remember the preference
       // for next time shouldn't surface as an error on this request.
@@ -1763,18 +1823,28 @@ app.patch('/merchant-preferences', requireUser, async (req, res) => {
     return res.status(400).json({ error: 'merchant_key is required' });
   }
   if (!FRIENDLY_CATEGORIES.includes(category)) {
-    return res.status(400).json({ error: `category must be one of: ${FRIENDLY_CATEGORIES.join(', ')}` });
+    return res.status(400).json({
+      error: `category must be one of: ${FRIENDLY_CATEGORIES.join(', ')}`,
+    });
   }
   try {
-    const { error } = await supabaseAdmin
-      .from('merchant_category_preferences')
-      .upsert(
-        { user_id: req.userId, merchant_key, category, updated_at: new Date().toISOString() },
-        { onConflict: 'user_id,merchant_key' }
-      );
+    const { error } = await supabaseAdmin.from('merchant_category_preferences').upsert(
+      {
+        user_id: req.userId,
+        merchant_key,
+        category,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id,merchant_key' }
+    );
     if (error) throw error;
 
-    const retroactivelyUpdated = await applyMerchantCategoryRetroactively(req.userId, merchant_key, category, null);
+    const retroactivelyUpdated = await applyMerchantCategoryRetroactively(
+      req.userId,
+      merchant_key,
+      category,
+      null
+    );
     res.json({ success: true, retroactively_updated: retroactivelyUpdated });
   } catch (err) {
     console.error(err);
@@ -1908,7 +1978,9 @@ app.post('/budget/reset-category', requireUser, async (req, res) => {
   try {
     const { category } = req.body || {};
     if (!SPEND_CATEGORIES.includes(category)) {
-      return res.status(400).json({ error: `category must be one of: ${SPEND_CATEGORIES.join(', ')}` });
+      return res.status(400).json({
+        error: `category must be one of: ${SPEND_CATEGORIES.join(', ')}`,
+      });
     }
     const budget = await resetCategoryToAI(req.userId, category);
     try {
@@ -2039,7 +2111,9 @@ app.get('/budget/alerts', requireUser, async (req, res) => {
     const { period_start } = currentMonthRange();
     const { data: alerts, error } = await supabaseAdmin
       .from('budget_alerts')
-      .select('category, budgeted_amount, actual_amount, projected_amount, message, suggested_action')
+      .select(
+        'category, budgeted_amount, actual_amount, projected_amount, message, suggested_action'
+      )
       .eq('user_id', req.userId)
       .eq('period_start', period_start)
       .order('category');
@@ -2174,7 +2248,9 @@ app.get('/settings', requireUser, async (req, res) => {
 app.patch('/settings', requireUser, async (req, res) => {
   const { section, patch } = req.body || {};
   if (!SETTINGS_SECTIONS.includes(section)) {
-    return res.status(400).json({ error: `section must be one of: ${SETTINGS_SECTIONS.join(', ')}` });
+    return res.status(400).json({
+      error: `section must be one of: ${SETTINGS_SECTIONS.join(', ')}`,
+    });
   }
   if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) {
     return res.status(400).json({ error: 'patch must be an object' });
@@ -2263,7 +2339,8 @@ app.post('/scenarios/suggestion-split', requireUser, async (req, res) => {
 // itself, not duplicated here.
 app.post('/home-affordability', requireUser, async (req, res) => {
   try {
-    const { home_price, down_payment, state, loan_term_years, annual_rate_percent } = req.body || {};
+    const { home_price, down_payment, state, loan_term_years, annual_rate_percent } =
+      req.body || {};
     if (!Number.isFinite(home_price) || !Number.isFinite(down_payment) || !state) {
       return res.status(400).json({ error: 'home_price, down_payment, and state are required' });
     }
@@ -2450,7 +2527,9 @@ function sanitizeClarificationContext(raw, userId) {
     finance_term_months_stated: isValidFinanceTermMonths(raw?.finance_term_months_stated)
       ? raw.finance_term_months_stated
       : null,
-    awaiting: ['financing_confirmation', 'total_price', 'finance_term', 'promo_term'].includes(raw?.awaiting)
+    awaiting: ['financing_confirmation', 'total_price', 'finance_term', 'promo_term'].includes(
+      raw?.awaiting
+    )
       ? raw.awaiting
       : null,
   };
@@ -2501,7 +2580,8 @@ async function respondWithVehicleFinanceEstimate(req, res, now, today, { totalPr
   // out-the-door total - tax/title/license get added on top (see
   // ESTIMATED_TTL_RATE_PERCENT's own comment) before financing math runs,
   // so the monthly payment reflects what's actually likely to be financed.
-  const estimatedOutTheDoorPrice = Math.round(totalPrice * (1 + ESTIMATED_TTL_RATE_PERCENT / 100) * 100) / 100;
+  const estimatedOutTheDoorPrice =
+    Math.round(totalPrice * (1 + ESTIMATED_TTL_RATE_PERCENT / 100) * 100) / 100;
 
   const estimatedPayment = computeEstimatedPayment({
     totalPrice: estimatedOutTheDoorPrice,
@@ -2646,7 +2726,11 @@ function respondWithContext(res, userId, payload) {
       ...payload,
       context: {
         ...payload.context,
-        total_price_stated: signTotalPrice(userId, payload.context.total_price_stated, payload.context.category),
+        total_price_stated: signTotalPrice(
+          userId,
+          payload.context.total_price_stated,
+          payload.context.category
+        ),
       },
     };
   }
@@ -2747,11 +2831,14 @@ app.post('/affordability/query', requireUser, async (req, res) => {
     return res.status(400).json({ error: 'text is required' });
   }
   if (text.length > MAX_AFFORDABILITY_QUERY_LENGTH) {
-    return res
-      .status(400)
-      .json({ error: `text must be ${MAX_AFFORDABILITY_QUERY_LENGTH} characters or fewer` });
+    return res.status(400).json({
+      error: `text must be ${MAX_AFFORDABILITY_QUERY_LENGTH} characters or fewer`,
+    });
   }
-  if (context !== undefined && (typeof context !== 'object' || context === null || Array.isArray(context))) {
+  if (
+    context !== undefined &&
+    (typeof context !== 'object' || context === null || Array.isArray(context))
+  ) {
     return res.status(400).json({ error: 'context must be an object if provided' });
   }
 
@@ -2844,7 +2931,11 @@ app.post('/affordability/query', requireUser, async (req, res) => {
       }
 
       const totalPrice = clarificationBase.total_price_stated;
-      const estimatedPayment = computeEstimatedPayment({ totalPrice, termMonths, annualRatePercent: 0 });
+      const estimatedPayment = computeEstimatedPayment({
+        totalPrice,
+        termMonths,
+        annualRatePercent: 0,
+      });
 
       return respondWithAffordabilityResult(req, res, {
         now,
@@ -2900,7 +2991,10 @@ app.post('/affordability/query', requireUser, async (req, res) => {
       // first message ("finance a $35,000 car over 60 months") skip the
       // finance_term question entirely later in this flow, instead of
       // re-asking something the user already said.
-      parsed = { ...parsed, finance_term_months_stated: parseFinanceTermMonths(text) };
+      parsed = {
+        ...parsed,
+        finance_term_months_stated: parseFinanceTermMonths(text),
+      };
     }
 
     if (parsed.intent === 'unsupported') {
@@ -2948,7 +3042,10 @@ app.post('/affordability/query', requireUser, async (req, res) => {
         return respondWithContext(res, req.userId, {
           status: 'needs_financing_confirmation',
           message: 'Will this be financed?',
-          context: { ...clarificationContext, awaiting: 'financing_confirmation' },
+          context: {
+            ...clarificationContext,
+            awaiting: 'financing_confirmation',
+          },
         });
       }
       // Financing already established (explicit language up front, e.g.
@@ -2986,7 +3083,10 @@ app.post('/affordability/query', requireUser, async (req, res) => {
         recurrence: 'once', // this intent asks about a single amount, not an ongoing commitment
       });
       if (!maxResult.available) {
-        return res.json({ status: 'insufficient_data', detail: maxResult.detail });
+        return res.json({
+          status: 'insufficient_data',
+          detail: maxResult.detail,
+        });
       }
       // Deliberately no explainScenario call here - unlike
       // affordability_check above, this isn't reusing an existing Phase 5
@@ -3011,7 +3111,11 @@ app.post('/affordability/query', requireUser, async (req, res) => {
         targetAmount: parsed.amount_stated,
       });
       if (!projection.available) {
-        return res.json({ status: 'insufficient_data', reason: projection.reason, detail: projection.detail });
+        return res.json({
+          status: 'insufficient_data',
+          reason: projection.reason,
+          detail: projection.detail,
+        });
       }
       // Structured facts only - template phrasing is a UI concern, same
       // split this codebase already uses for describeComparisonDifference
@@ -3062,7 +3166,8 @@ const MAX_CHAT_MESSAGES = 60; // ~30 user turns - generous headroom over the
 const MAX_CHAT_MESSAGE_LENGTH = 2000;
 
 function validateChatMessages(messages) {
-  if (!Array.isArray(messages) || messages.length === 0) return 'messages must be a non-empty array';
+  if (!Array.isArray(messages) || messages.length === 0)
+    return 'messages must be a non-empty array';
   if (messages.length > MAX_CHAT_MESSAGES) return `messages must be ${MAX_CHAT_MESSAGES} or fewer`;
   for (const m of messages) {
     if (!m || (m.role !== 'user' && m.role !== 'assistant')) {
@@ -3075,7 +3180,8 @@ function validateChatMessages(messages) {
       return `each message must be ${MAX_CHAT_MESSAGE_LENGTH} characters or fewer`;
     }
   }
-  if (messages[messages.length - 1].role !== 'user') return 'the last message must be from the user';
+  if (messages[messages.length - 1].role !== 'user')
+    return 'the last message must be from the user';
   return null;
 }
 
@@ -3097,9 +3203,9 @@ app.post('/affordability/chat', requireUser, async (req, res) => {
   // as every other signed value in this file - invalid/missing/expired all
   // collapse to the same 400, not a silent fallback to trusting it anyway.
   if (!verifyObjectIntegrity(req.userId, anchorResult)) {
-    return res
-      .status(400)
-      .json({ error: 'anchor_result is invalid or has expired - start again from a fresh check.' });
+    return res.status(400).json({
+      error: 'anchor_result is invalid or has expired - start again from a fresh check.',
+    });
   }
   const messagesError = validateChatMessages(messages);
   if (messagesError) {
@@ -3115,7 +3221,11 @@ app.post('/affordability/chat', requireUser, async (req, res) => {
     // it's a meaningless opaque token to the model, not part of the real
     // financial facts it's meant to reason from.
     const { _integrity, ...anchorResultForPrompt } = anchorResult;
-    const { text, new_result: newResult, too_long: tooLong } = await runAffordabilityChatTurn({
+    const {
+      text,
+      new_result: newResult,
+      too_long: tooLong,
+    } = await runAffordabilityChatTurn({
       anchorResult: anchorResultForPrompt,
       messages,
       context,
@@ -3175,7 +3285,11 @@ app.post(
 // adjust, or reject it. Safe to call repeatedly (e.g. as the user types).
 app.post('/budget/rebalance-proposal', requireUser, async (req, res) => {
   const { category, budgeted_amount } = req.body;
-  if (typeof budgeted_amount !== 'number' || !Number.isFinite(budgeted_amount) || budgeted_amount < 0) {
+  if (
+    typeof budgeted_amount !== 'number' ||
+    !Number.isFinite(budgeted_amount) ||
+    budgeted_amount < 0
+  ) {
     return res.status(400).json({ error: 'budgeted_amount must be a finite, non-negative number' });
   }
   try {
@@ -3412,7 +3526,9 @@ app.get('/recurring/manage/merchants', requireUser, async (req, res) => {
       byMerchant.get(key).occurrence_count += 1;
     }
 
-    const merchants = [...byMerchant.values()].sort((a, b) => a.display_name.localeCompare(b.display_name));
+    const merchants = [...byMerchant.values()].sort((a, b) =>
+      a.display_name.localeCompare(b.display_name)
+    );
     res.json({ merchants });
   } catch (err) {
     console.error(err);
@@ -3451,14 +3567,20 @@ app.post('/recurring/manage/overrides', requireUser, async (req, res) => {
     return res.status(400).json({ error: 'merchant_key must be a string or null' });
   }
   if (override_category != null && !FRIENDLY_CATEGORIES.includes(override_category)) {
-    return res.status(400).json({ error: `override_category must be one of: ${FRIENDLY_CATEGORIES.join(', ')}` });
+    return res.status(400).json({
+      error: `override_category must be one of: ${FRIENDLY_CATEGORIES.join(', ')}`,
+    });
   }
   if (override_interval != null && !INTERVAL_NAMES.includes(override_interval)) {
-    return res.status(400).json({ error: `override_interval must be one of: ${INTERVAL_NAMES.join(', ')}` });
+    return res.status(400).json({
+      error: `override_interval must be one of: ${INTERVAL_NAMES.join(', ')}`,
+    });
   }
   if (
     override_typical_amount != null &&
-    (typeof override_typical_amount !== 'number' || !Number.isFinite(override_typical_amount) || override_typical_amount <= 0)
+    (typeof override_typical_amount !== 'number' ||
+      !Number.isFinite(override_typical_amount) ||
+      override_typical_amount <= 0)
   ) {
     return res.status(400).json({ error: 'override_typical_amount must be a positive number' });
   }
@@ -3481,16 +3603,24 @@ app.post('/recurring/manage/overrides', requireUser, async (req, res) => {
   const isNewManualAdd = !merchant_key && !id;
   if (isNewManualAdd) {
     if (!override_display_name || typeof override_display_name !== 'string') {
-      return res.status(400).json({ error: 'override_display_name is required for a manually-added recurring charge' });
+      return res.status(400).json({
+        error: 'override_display_name is required for a manually-added recurring charge',
+      });
     }
     if (!override_interval) {
-      return res.status(400).json({ error: 'override_interval is required for a manually-added recurring charge' });
+      return res.status(400).json({
+        error: 'override_interval is required for a manually-added recurring charge',
+      });
     }
     if (override_typical_amount == null) {
-      return res.status(400).json({ error: 'override_typical_amount is required for a manually-added recurring charge' });
+      return res.status(400).json({
+        error: 'override_typical_amount is required for a manually-added recurring charge',
+      });
     }
     if (!manual_next_expected_date) {
-      return res.status(400).json({ error: 'manual_next_expected_date is required for a manually-added recurring charge' });
+      return res.status(400).json({
+        error: 'manual_next_expected_date is required for a manually-added recurring charge',
+      });
     }
   }
 
@@ -3509,12 +3639,15 @@ app.post('/recurring/manage/overrides', requireUser, async (req, res) => {
     const patch = { updated_at: new Date().toISOString() };
     if (account_id !== undefined) patch.account_id = account_id || null;
     if (dismissed !== undefined) patch.dismissed = !!dismissed;
-    if (override_display_name !== undefined) patch.override_display_name = override_display_name || null;
+    if (override_display_name !== undefined)
+      patch.override_display_name = override_display_name || null;
     if (override_category !== undefined) patch.override_category = override_category || null;
     if (override_interval !== undefined) patch.override_interval = override_interval || null;
-    if (override_typical_amount !== undefined) patch.override_typical_amount = override_typical_amount ?? null;
+    if (override_typical_amount !== undefined)
+      patch.override_typical_amount = override_typical_amount ?? null;
     if (override_debt_type !== undefined) patch.override_debt_type = override_debt_type || null;
-    if (manual_next_expected_date !== undefined) patch.manual_next_expected_date = manual_next_expected_date || null;
+    if (manual_next_expected_date !== undefined)
+      patch.manual_next_expected_date = manual_next_expected_date || null;
 
     if (merchant_key) {
       // No single-statement partial upsert exists that both inserts a
@@ -3530,7 +3663,10 @@ app.post('/recurring/manage/overrides', requireUser, async (req, res) => {
       if (existingError) throw existingError;
 
       if (existing) {
-        const { error } = await supabaseAdmin.from('recurring_overrides').update(patch).eq('id', existing.id);
+        const { error } = await supabaseAdmin
+          .from('recurring_overrides')
+          .update(patch)
+          .eq('id', existing.id);
         if (error) throw error;
       } else {
         const { error } = await supabaseAdmin
@@ -3630,7 +3766,9 @@ async function attachAccountInfo(userId, transactions) {
   if (itemsError) throw itemsError;
 
   const itemNameById = Object.fromEntries((items || []).map((i) => [i.id, i.institution_name]));
-  const itemIdByAccountId = Object.fromEntries((accounts || []).map((a) => [a.plaid_account_id, a.plaid_item_id]));
+  const itemIdByAccountId = Object.fromEntries(
+    (accounts || []).map((a) => [a.plaid_account_id, a.plaid_item_id])
+  );
 
   let unresolvedCount = 0;
   const result = transactions.map((t) => {
@@ -3669,10 +3807,7 @@ async function attachAccountInfo(userId, transactions) {
 // new matches so they stay stable, and attaches each matched receipt's
 // itemized line items onto its transaction for the response.
 async function attachMatchedReceipts(userId, transactions) {
-  const { data: receipts } = await supabaseAdmin
-    .from('receipts')
-    .select('*')
-    .eq('user_id', userId);
+  const { data: receipts } = await supabaseAdmin.from('receipts').select('*').eq('user_id', userId);
   if (!receipts || receipts.length === 0) return transactions;
 
   const newMatches = matchReceiptsToTransactions(receipts, transactions);
@@ -3706,8 +3841,7 @@ async function attachMatchedReceipts(userId, transactions) {
   const itemsByTransactionId = {};
   for (const r of receipts) {
     const txId =
-      r.matched_transaction_id ??
-      confirmedMatches.find((m) => m.receiptId === r.id)?.transactionId;
+      r.matched_transaction_id ?? confirmedMatches.find((m) => m.receiptId === r.id)?.transactionId;
     if (txId) itemsByTransactionId[txId] = r.items;
   }
 
@@ -3922,10 +4056,7 @@ app.get('/gmail/status', requireUser, async (req, res) => {
 });
 
 app.post('/gmail/unlink', requireUser, async (req, res) => {
-  const { error } = await supabaseAdmin
-    .from('gmail_accounts')
-    .delete()
-    .eq('user_id', req.userId);
+  const { error } = await supabaseAdmin.from('gmail_accounts').delete().eq('user_id', req.userId);
   if (error) return res.status(500).json({ error: 'Failed to unlink' });
   res.json({ success: true });
 });
@@ -4004,7 +4135,10 @@ async function scanForReceipts(userId, account) {
       refreshed = await refreshAccessToken(decrypt(account.refresh_token));
     } catch (err) {
       if (err instanceof GoogleTokenRevokedError) {
-        await supabaseAdmin.from('gmail_accounts').update({ needs_relink: true }).eq('user_id', userId);
+        await supabaseAdmin
+          .from('gmail_accounts')
+          .update({ needs_relink: true })
+          .eq('user_id', userId);
       }
       throw err;
     }
@@ -4016,9 +4150,7 @@ async function scanForReceipts(userId, account) {
       .from('gmail_accounts')
       .update({
         access_token: encrypt(accessToken),
-        expires_at: new Date(
-          Date.now() + refreshed.expires_in * 1000
-        ).toISOString(),
+        expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString(),
         needs_relink: false,
       })
       .eq('user_id', userId);
@@ -4048,9 +4180,7 @@ async function scanForReceipts(userId, account) {
   const emails = [];
   for (let i = 0; i < newCandidates.length; i += BATCH_SIZE) {
     const batch = newCandidates.slice(i, i + BATCH_SIZE);
-    const results = await Promise.all(
-      batch.map((c) => getMessage(accessToken, c.id))
-    );
+    const results = await Promise.all(batch.map((c) => getMessage(accessToken, c.id)));
     emails.push(...results);
   }
 
@@ -4212,7 +4342,10 @@ async function runNetWorthSnapshots() {
       ]);
       precomputed = { accounts, timezone };
     } catch (err) {
-      logError(`Failed to prefetch accounts/timezone for user ${userId} (net worth/balance snapshots skipped this tick):`, err);
+      logError(
+        `Failed to prefetch accounts/timezone for user ${userId} (net worth/balance snapshots skipped this tick):`,
+        err
+      );
       continue;
     }
 

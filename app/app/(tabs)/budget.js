@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Button, Pressable, ActivityIndicator, TextInput, ScrollView, StyleSheet, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  Button,
+  Pressable,
+  ActivityIndicator,
+  TextInput,
+  ScrollView,
+  StyleSheet,
+  Alert,
+} from 'react-native';
 // Reverted from react-native-gesture-handler's ScrollView back to plain
 // React Native (2026-08-19). It was switched to RNGH's version in Phase 13
 // because this tab then nested a Gesture.Pan() (the old NumberScrollWheel)
@@ -32,8 +42,17 @@ import {
 import { useTheme } from '../_lib/theme';
 import { useAppData } from '../_lib/appData';
 import { iconForCategory } from '../_lib/categoryIcons';
-import { statusForCategory, computeSpendStats, computePace, computeMonthProgress } from '../_lib/homeSummary';
-import { describeFundingImpactLine, goalDisplayName, showDiscretionaryShortfallAlert } from '../_lib/goalFunding';
+import {
+  statusForCategory,
+  computeSpendStats,
+  computePace,
+  computeMonthProgress,
+} from '../_lib/homeSummary';
+import {
+  describeFundingImpactLine,
+  goalDisplayName,
+  showDiscretionaryShortfallAlert,
+} from '../_lib/goalFunding';
 import AffordabilityQuery from '../_components/AffordabilityQuery';
 import PrimaryButton from '../_components/PrimaryButton';
 import BudgetInsightModal from '../_components/BudgetInsightModal';
@@ -499,14 +518,28 @@ export default function Budget() {
       'Reset this category?',
       `This clears your manually-set amount for ${category} and lets the AI suggest a fresh one from your current spending.`,
       [
-        { text: 'Cancel', style: 'cancel', onPress: () => { resetPendingRef.current = false; } },
-        { text: 'Reset to AI-Suggested', style: 'destructive', onPress: () => resetCategoryToAI(category) },
+        {
+          text: 'Cancel',
+          style: 'cancel',
+          onPress: () => {
+            resetPendingRef.current = false;
+          },
+        },
+        {
+          text: 'Reset to AI-Suggested',
+          style: 'destructive',
+          onPress: () => resetCategoryToAI(category),
+        },
       ],
       // Android can also dismiss this by tapping outside the dialog or the
       // back button, which fires neither button's onPress above - without
       // this, that path would leave resetPendingRef stuck true forever,
       // permanently disabling the link until the app restarts.
-      { onDismiss: () => { resetPendingRef.current = false; } }
+      {
+        onDismiss: () => {
+          resetPendingRef.current = false;
+        },
+      }
     );
   }
 
@@ -619,7 +652,8 @@ export default function Budget() {
     ? computeMonthProgress(budgetStatus.period_start, budgetStatus.period_end)
     : null;
   const pace = monthProgress ? computePace(budgetStatus, monthProgress) : null;
-  const spentPercent = spendStats.budgeted > 0 ? Math.round((spendStats.spent / spendStats.budgeted) * 100) : null;
+  const spentPercent =
+    spendStats.budgeted > 0 ? Math.round((spendStats.spent / spendStats.budgeted) * 100) : null;
   const hasAnyBudget = rows.some((s) => s.budgeted != null);
   const showCategoryReasoning = budgetSettings.show_category_reasoning !== false;
   const showInsightPill = budgetSettings.show_insight_pill !== false;
@@ -653,7 +687,7 @@ export default function Budget() {
         </View>
       )}
 
-      {viewingCategory !== null && (
+      {viewingCategory !== null &&
         (() => {
           const row = rows.find((s) => s.category === viewingCategory);
           return (
@@ -670,9 +704,7 @@ export default function Budget() {
                 >
                   <MaterialIcons name="arrow-back" size={26} color={colors.darkest} />
                 </Pressable>
-                <Text style={budgetLocalStyles.categoryDetailTitle}>
-                  {viewingCategory}
-                </Text>
+                <Text style={budgetLocalStyles.categoryDetailTitle}>{viewingCategory}</Text>
                 <View style={budgetLocalStyles.categoryDetailBackButton} />
               </View>
 
@@ -680,78 +712,86 @@ export default function Budget() {
                 style={budgetLocalStyles.categoryDetailScreen}
                 contentContainerStyle={budgetLocalStyles.categoryDetailScreenContent}
               >
-                  {row && (
-                    <View style={[styles.card, budgetLocalStyles.categoryDetailSummaryCard]}>
-                      <Text style={budgetLocalStyles.categoryDetailSpent}>
-                        {row.budgeted == null
-                          ? `$${formatDecimal(row.actual)} spent`
-                          : `$${formatDecimal(row.actual)} of $${formatDecimal(row.budgeted)}`}
-                      </Text>
-                      {row.budgeted != null && (
-                        <Text
-                          style={[
-                            budgetLocalStyles.categoryDetailRemaining,
-                            { color: row.remaining < 0 ? colors.error : colors.positive },
-                          ]}
-                        >
-                          {row.remaining < 0 ? '-' : ''}${formatDecimal(Math.abs(row.remaining))}{' '}
-                          {row.remaining < 0 ? 'over' : 'left'}
-                        </Text>
-                      )}
-                      {row.reasoning && (
-                        <Text style={budgetLocalStyles.reasoningText}>{row.reasoning}</Text>
-                      )}
-                      {row.is_user_set &&
-                        (applyingBudgetEdit ? (
-                          <ActivityIndicator style={budgetLocalStyles.categoryDetailActionSpacing} />
-                        ) : (
-                          <Pressable
-                            style={budgetLocalStyles.categoryDetailResetButton}
-                            onPress={() => confirmResetCategoryToAI(viewingCategory)}
-                            accessibilityRole="button"
-                            accessibilityLabel="Reset to AI-suggested"
-                          >
-                            <MaterialIcons name="auto-awesome" size={16} color={colors.primary} />
-                            <Text style={budgetLocalStyles.categoryDetailResetButtonText}>
-                              RESET TO AI-SUGGESTED
-                            </Text>
-                          </Pressable>
-                        ))}
-                    </View>
-                  )}
-
-                  <Text style={budgetLocalStyles.categoryDetailSectionLabel}>
-                    TRANSACTIONS {categoryTransactions ? `(${categoryTransactions.length})` : ''}
-                  </Text>
-
-                  {categoryTxError ? (
-                    <Text style={styles.errorText}>{categoryTxError}</Text>
-                  ) : categoryTransactions === null ? (
-                    <ActivityIndicator />
-                  ) : categoryTransactions.length === 0 ? (
-                    <Text style={styles.smallText}>
-                      No transactions in this category this period.
+                {row && (
+                  <View style={[styles.card, budgetLocalStyles.categoryDetailSummaryCard]}>
+                    <Text style={budgetLocalStyles.categoryDetailSpent}>
+                      {row.budgeted == null
+                        ? `$${formatDecimal(row.actual)} spent`
+                        : `$${formatDecimal(row.actual)} of $${formatDecimal(row.budgeted)}`}
                     </Text>
-                  ) : (
-                    categoryTransactions.map((t) => (
-                      <View key={t.transaction_id} style={[styles.card, budgetLocalStyles.categoryDetailTxRow]}>
-                        <View style={budgetLocalStyles.categoryIconCircle}>
-                          <MaterialIcons name={iconForCategory(t.category)} size={16} color={colors.dark} />
-                        </View>
-                        <View style={budgetLocalStyles.categoryDetailTxTextCol}>
-                          <Text style={budgetLocalStyles.categoryDetailTxName} numberOfLines={1}>
-                            {t.merchant_name || t.name}
+                    {row.budgeted != null && (
+                      <Text
+                        style={[
+                          budgetLocalStyles.categoryDetailRemaining,
+                          { color: row.remaining < 0 ? colors.error : colors.positive },
+                        ]}
+                      >
+                        {row.remaining < 0 ? '-' : ''}${formatDecimal(Math.abs(row.remaining))}{' '}
+                        {row.remaining < 0 ? 'over' : 'left'}
+                      </Text>
+                    )}
+                    {row.reasoning && (
+                      <Text style={budgetLocalStyles.reasoningText}>{row.reasoning}</Text>
+                    )}
+                    {row.is_user_set &&
+                      (applyingBudgetEdit ? (
+                        <ActivityIndicator style={budgetLocalStyles.categoryDetailActionSpacing} />
+                      ) : (
+                        <Pressable
+                          style={budgetLocalStyles.categoryDetailResetButton}
+                          onPress={() => confirmResetCategoryToAI(viewingCategory)}
+                          accessibilityRole="button"
+                          accessibilityLabel="Reset to AI-suggested"
+                        >
+                          <MaterialIcons name="auto-awesome" size={16} color={colors.primary} />
+                          <Text style={budgetLocalStyles.categoryDetailResetButtonText}>
+                            RESET TO AI-SUGGESTED
                           </Text>
-                        </View>
-                        <Text style={budgetLocalStyles.categoryDetailTxAmount}>{formatAmount(t.amount)}</Text>
+                        </Pressable>
+                      ))}
+                  </View>
+                )}
+
+                <Text style={budgetLocalStyles.categoryDetailSectionLabel}>
+                  TRANSACTIONS {categoryTransactions ? `(${categoryTransactions.length})` : ''}
+                </Text>
+
+                {categoryTxError ? (
+                  <Text style={styles.errorText}>{categoryTxError}</Text>
+                ) : categoryTransactions === null ? (
+                  <ActivityIndicator />
+                ) : categoryTransactions.length === 0 ? (
+                  <Text style={styles.smallText}>
+                    No transactions in this category this period.
+                  </Text>
+                ) : (
+                  categoryTransactions.map((t) => (
+                    <View
+                      key={t.transaction_id}
+                      style={[styles.card, budgetLocalStyles.categoryDetailTxRow]}
+                    >
+                      <View style={budgetLocalStyles.categoryIconCircle}>
+                        <MaterialIcons
+                          name={iconForCategory(t.category)}
+                          size={16}
+                          color={colors.dark}
+                        />
                       </View>
-                    ))
-                  )}
+                      <View style={budgetLocalStyles.categoryDetailTxTextCol}>
+                        <Text style={budgetLocalStyles.categoryDetailTxName} numberOfLines={1}>
+                          {t.merchant_name || t.name}
+                        </Text>
+                      </View>
+                      <Text style={budgetLocalStyles.categoryDetailTxAmount}>
+                        {formatAmount(t.amount)}
+                      </Text>
+                    </View>
+                  ))
+                )}
               </ScrollView>
             </>
           );
-        })()
-      )}
+        })()}
 
       {/* Deliberately NOT gated on viewingCategory (an earlier version of
           this screen was, and missed it): `error` is shared by several
@@ -767,54 +807,59 @@ export default function Budget() {
         </View>
       )}
 
-      {viewingCategory === null && (loadingBudget ? (
-        <View style={styles.centered}>
-          <ActivityIndicator />
-        </View>
-      ) : (
-        // TopEdgeFade restored 2026-09-16 (see Illustrations.js's own
-        // header comment) - without it, scrolled content hit the top of
-        // the screen with a hard cut instead of fading into the flat
-        // container background behind it.
-        <TopEdgeFade height={90}>
-        <ScrollView
-          ref={scrollRef}
-          style={budgetLocalStyles.screen}
-          contentContainerStyle={{ paddingBottom: 260 }}
-        >
-          <View style={budgetLocalStyles.headerRow}>
-            <Text style={budgetLocalStyles.title}>Budget</Text>
-            {showInsightPill && (
-              <Pressable
-                style={budgetLocalStyles.insightsPill}
-                onPress={() => (insight ? setInsightModalVisible(true) : scrollRef.current?.scrollTo({ y: 0, animated: true }))}
-                accessibilityRole="button"
-                // Visible label always stays "INSIGHTS" (found on-device: the
-                // full pill_text sentence got cut off, unreadable) - the
-                // accessibility label still carries the real insight for
-                // screen readers, since that's read aloud in full rather
-                // than needing to fit in a fixed-width pill.
-                accessibilityLabel={insight ? insight.pill_text : 'Jump to Can I afford this?'}
-              >
-                <MaterialIcons name="auto-awesome" size={14} color={colors.primary} />
-                <Text style={budgetLocalStyles.insightsPillText}>INSIGHTS</Text>
-              </Pressable>
-            )}
+      {viewingCategory === null &&
+        (loadingBudget ? (
+          <View style={styles.centered}>
+            <ActivityIndicator />
           </View>
+        ) : (
+          // TopEdgeFade restored 2026-09-16 (see Illustrations.js's own
+          // header comment) - without it, scrolled content hit the top of
+          // the screen with a hard cut instead of fading into the flat
+          // container background behind it.
+          <TopEdgeFade height={90}>
+            <ScrollView
+              ref={scrollRef}
+              style={budgetLocalStyles.screen}
+              contentContainerStyle={{ paddingBottom: 260 }}
+            >
+              <View style={budgetLocalStyles.headerRow}>
+                <Text style={budgetLocalStyles.title}>Budget</Text>
+                {showInsightPill && (
+                  <Pressable
+                    style={budgetLocalStyles.insightsPill}
+                    onPress={() =>
+                      insight
+                        ? setInsightModalVisible(true)
+                        : scrollRef.current?.scrollTo({ y: 0, animated: true })
+                    }
+                    accessibilityRole="button"
+                    // Visible label always stays "INSIGHTS" (found on-device: the
+                    // full pill_text sentence got cut off, unreadable) - the
+                    // accessibility label still carries the real insight for
+                    // screen readers, since that's read aloud in full rather
+                    // than needing to fit in a fixed-width pill.
+                    accessibilityLabel={insight ? insight.pill_text : 'Jump to Can I afford this?'}
+                  >
+                    <MaterialIcons name="auto-awesome" size={14} color={colors.primary} />
+                    <Text style={budgetLocalStyles.insightsPillText}>INSIGHTS</Text>
+                  </Pressable>
+                )}
+              </View>
 
-          {/* Phase 5 Step 3 / Phase 13: "Can I afford this?" - decided in
+              {/* Phase 5 Step 3 / Phase 13: "Can I afford this?" - decided in
               Phase 7 to live in this tab, since it's fundamentally a
               budget/goal-impact question, not a fifth destination of its
               own; Phase 13 consolidated Home's voice/text version onto this
               same spot rather than keeping two separate front doors. */}
-          <AffordabilityQuery />
+              <AffordabilityQuery />
 
-          {/* Full-width divider between the affordability question and the
+              {/* Full-width divider between the affordability question and the
               budget-status list below it, per direct user request
               (2026-08-20) - the two were visually running together. */}
-          <View style={budgetLocalStyles.sectionDivider} />
+              <View style={budgetLocalStyles.sectionDivider} />
 
-          {/* Generate/regenerate prompt - was a dark card (2026-08-24
+              {/* Generate/regenerate prompt - was a dark card (2026-08-24
               restyle); real bug found live during the theme redesign
               (2026-09-11): its backgroundColor: colors.darkest flips to
               LIGHT at night (darkest and background swap roles - see
@@ -824,47 +869,61 @@ export default function Budget() {
               instead of chasing a "correct" dark-at-night color for it -
               no card/background/icon/watermark at all now, just text and
               a button, same generateBudget() call either way. */}
-          <View style={budgetLocalStyles.generateSection}>
-            <Text style={budgetLocalStyles.generateTitle}>Let Sorrel do the heavy lifting.</Text>
-            <Text style={budgetLocalStyles.generateSubtitle}>
-              We'll analyze your spending and suggest a smarter budget for you.
-            </Text>
-            {generatingBudget ? (
-              <ActivityIndicator />
-            ) : (
-              <PrimaryButton
-                title={hasAnyBudget ? 'Regenerate budget' : 'Generate budget'}
-                onPress={generateBudget}
-              />
-            )}
-          </View>
+              <View style={budgetLocalStyles.generateSection}>
+                <Text style={budgetLocalStyles.generateTitle}>
+                  Let Sorrel do the heavy lifting.
+                </Text>
+                <Text style={budgetLocalStyles.generateSubtitle}>
+                  We'll analyze your spending and suggest a smarter budget for you.
+                </Text>
+                {generatingBudget ? (
+                  <ActivityIndicator />
+                ) : (
+                  <PrimaryButton
+                    title={hasAnyBudget ? 'Regenerate budget' : 'Generate budget'}
+                    onPress={generateBudget}
+                  />
+                )}
+              </View>
 
-          {/* Stat tiles - same visual language and same underlying pure
+              {/* Stat tiles - same visual language and same underlying pure
               functions (_lib/homeSummary.js) as Home's own stat row, so
               the two screens can never quietly disagree about what "spent
               so far"/"pace"/"days left" mean. */}
-          {budgetStatus && (
-            <View style={[styles.card, budgetLocalStyles.statRow]}>
-              <View style={budgetLocalStyles.statTile}>
-                <MaterialIcons name="account-balance-wallet" size={18} color={colors.dark} />
-                <Text style={budgetLocalStyles.statLabel}>TOTAL BUDGET</Text>
-                <Text style={budgetLocalStyles.statValue}>${formatDecimal(spendStats.budgeted)}</Text>
-              </View>
-              <View style={budgetLocalStyles.statDivider} />
-              <View style={budgetLocalStyles.statTile}>
-                <MaterialIcons name="pie-chart" size={18} color={colors.dark} />
-                <Text style={budgetLocalStyles.statLabel}>SPENT SO FAR</Text>
-                <Text style={[budgetLocalStyles.statValue, spentPercent > 100 && { color: colors.error }]}>
-                  ${formatDecimal(spendStats.spent)}
-                </Text>
-                {spentPercent != null && (
-                  <Text style={[budgetLocalStyles.statSub, spentPercent > 100 && { color: colors.error }]}>
-                    {spentPercent}% of budget
-                  </Text>
-                )}
-              </View>
-              <View style={budgetLocalStyles.statDivider} />
-              {/* Income tile (2026-09-14, direct user request) - "expected"
+              {budgetStatus && (
+                <View style={[styles.card, budgetLocalStyles.statRow]}>
+                  <View style={budgetLocalStyles.statTile}>
+                    <MaterialIcons name="account-balance-wallet" size={18} color={colors.dark} />
+                    <Text style={budgetLocalStyles.statLabel}>TOTAL BUDGET</Text>
+                    <Text style={budgetLocalStyles.statValue}>
+                      ${formatDecimal(spendStats.budgeted)}
+                    </Text>
+                  </View>
+                  <View style={budgetLocalStyles.statDivider} />
+                  <View style={budgetLocalStyles.statTile}>
+                    <MaterialIcons name="pie-chart" size={18} color={colors.dark} />
+                    <Text style={budgetLocalStyles.statLabel}>SPENT SO FAR</Text>
+                    <Text
+                      style={[
+                        budgetLocalStyles.statValue,
+                        spentPercent > 100 && { color: colors.error },
+                      ]}
+                    >
+                      ${formatDecimal(spendStats.spent)}
+                    </Text>
+                    {spentPercent != null && (
+                      <Text
+                        style={[
+                          budgetLocalStyles.statSub,
+                          spentPercent > 100 && { color: colors.error },
+                        ]}
+                      >
+                        {spentPercent}% of budget
+                      </Text>
+                    )}
+                  </View>
+                  <View style={budgetLocalStyles.statDivider} />
+                  {/* Income tile (2026-09-14, direct user request) - "expected"
                   is the same 90-day trailing average already driving budget
                   generation/goal-funding capacity elsewhere in this app
                   (server/incomeSummary.js's own header explains why - one
@@ -872,132 +931,137 @@ export default function Budget() {
                   "actual" is real Income-category spend already landed
                   this period. Mirrors SPENT SO FAR's own "$X / of $Y"
                   shape rather than inventing a new tile format. */}
-              <Pressable
-                style={budgetLocalStyles.statTile}
-                onPress={() => setShowIncomeDetail(true)}
-                accessibilityRole="button"
-                accessibilityLabel="View what's counted as income"
-              >
-                <MaterialIcons name="payments" size={18} color={colors.dark} />
-                <Text style={budgetLocalStyles.statLabel}>INCOME</Text>
-                <Text style={budgetLocalStyles.statValue}>
-                  {incomeSummary ? `$${formatDecimal(incomeSummary.actual_income_this_period)}` : '—'}
-                </Text>
-                {incomeSummary && (
-                  <Text style={budgetLocalStyles.statSub}>
-                    of ${formatDecimal(incomeSummary.expected_monthly_income)} expected
-                  </Text>
-                )}
-              </Pressable>
-              <View style={budgetLocalStyles.statDivider} />
-              <View style={budgetLocalStyles.statTile}>
-                <MaterialIcons name="show-chart" size={18} color={colors.dark} />
-                <Text style={budgetLocalStyles.statLabel}>PROJECTED SPEND</Text>
-                <Text
-                  style={[budgetLocalStyles.statValue, pace && !pace.isAhead && { color: colors.error }]}
-                >
-                  {pace ? `$${formatDecimal(pace.projected)}` : '—'}
-                </Text>
-                <Text
-                  style={[
-                    budgetLocalStyles.statSub,
-                    pace && { color: pace.isAhead ? colors.positive : colors.error },
-                  ]}
-                >
-                  {pace
-                    ? `$${formatDecimal(pace.aheadBy)} ${pace.isAhead ? 'under' : 'over'} budget`
-                    : 'not enough data'}
-                </Text>
-              </View>
-              {/* Days Left tile removed 2026-09-15, direct user request
+                  <Pressable
+                    style={budgetLocalStyles.statTile}
+                    onPress={() => setShowIncomeDetail(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel="View what's counted as income"
+                  >
+                    <MaterialIcons name="payments" size={18} color={colors.dark} />
+                    <Text style={budgetLocalStyles.statLabel}>INCOME</Text>
+                    <Text style={budgetLocalStyles.statValue}>
+                      {incomeSummary
+                        ? `$${formatDecimal(incomeSummary.actual_income_this_period)}`
+                        : '—'}
+                    </Text>
+                    {incomeSummary && (
+                      <Text style={budgetLocalStyles.statSub}>
+                        of ${formatDecimal(incomeSummary.expected_monthly_income)} expected
+                      </Text>
+                    )}
+                  </Pressable>
+                  <View style={budgetLocalStyles.statDivider} />
+                  <View style={budgetLocalStyles.statTile}>
+                    <MaterialIcons name="show-chart" size={18} color={colors.dark} />
+                    <Text style={budgetLocalStyles.statLabel}>PROJECTED SPEND</Text>
+                    <Text
+                      style={[
+                        budgetLocalStyles.statValue,
+                        pace && !pace.isAhead && { color: colors.error },
+                      ]}
+                    >
+                      {pace ? `$${formatDecimal(pace.projected)}` : '—'}
+                    </Text>
+                    <Text
+                      style={[
+                        budgetLocalStyles.statSub,
+                        pace && { color: pace.isAhead ? colors.positive : colors.error },
+                      ]}
+                    >
+                      {pace
+                        ? `$${formatDecimal(pace.aheadBy)} ${pace.isAhead ? 'under' : 'over'} budget`
+                        : 'not enough data'}
+                    </Text>
+                  </View>
+                  {/* Days Left tile removed 2026-09-15, direct user request
                   ("a bit redundant, not necessary") - Days Left/month
                   name is already visible elsewhere on this screen
                   (the period label on each history card, etc.), and
                   removing it also brought this row back down to 4
                   tiles instead of 5, avoiding the crowding that
                   prompted this same request. */}
-            </View>
-          )}
+                </View>
+              )}
 
-          {/* Phase 11: "View spending history" - moved right under the
+              {/* Phase 11: "View spending history" - moved right under the
               at-a-glance stat tiles (2026-08-27, direct user feedback -
               was buried below the whole category list). Collapsed by
               default, same toggle-in-place/refetch-on-open pattern as
               every other secondary section on this screen. */}
-          <Pressable
-            style={[styles.card, budgetLocalStyles.historyToggle]}
-            onPress={toggleHistory}
-            accessibilityRole="button"
-            accessibilityLabel={showHistory ? 'Hide spending history' : 'View spending history'}
-          >
-            <MaterialIcons name="history" size={18} color={colors.primary} />
-            <Text style={budgetLocalStyles.historyToggleText}>
-              {showHistory ? 'Hide spending history' : 'View spending history'}
-            </Text>
-            <MaterialIcons
-              name={showHistory ? 'expand-less' : 'expand-more'}
-              size={20}
-              color={colors.muted}
-            />
-          </Pressable>
+              <Pressable
+                style={[styles.card, budgetLocalStyles.historyToggle]}
+                onPress={toggleHistory}
+                accessibilityRole="button"
+                accessibilityLabel={showHistory ? 'Hide spending history' : 'View spending history'}
+              >
+                <MaterialIcons name="history" size={18} color={colors.primary} />
+                <Text style={budgetLocalStyles.historyToggleText}>
+                  {showHistory ? 'Hide spending history' : 'View spending history'}
+                </Text>
+                <MaterialIcons
+                  name={showHistory ? 'expand-less' : 'expand-more'}
+                  size={20}
+                  color={colors.muted}
+                />
+              </Pressable>
 
-          {showHistory && (
-            <View style={budgetLocalStyles.historySection}>
-              {loadingHistory ? (
-                <ActivityIndicator />
-              ) : historyError ? (
-                <Text style={styles.errorText}>{historyError}</Text>
-              ) : !budgetHistory || budgetHistory.periods.length === 0 ? (
-                <Text style={styles.smallText}>No spending history yet.</Text>
-              ) : (
-                <>
-                  {budgetHistory.trends.length > 0 && (
-                    <View style={budgetLocalStyles.trendsCard}>
-                      {budgetHistory.trends.map((t) => (
-                        <View key={t.category} style={budgetLocalStyles.trendRow}>
-                          <MaterialIcons
-                            name={t.direction === 'rising' ? 'trending-up' : 'trending-down'}
-                            size={16}
-                            color={t.direction === 'rising' ? colors.error : colors.positive}
-                          />
-                          <Text style={budgetLocalStyles.trendText}>{t.message}</Text>
+              {showHistory && (
+                <View style={budgetLocalStyles.historySection}>
+                  {loadingHistory ? (
+                    <ActivityIndicator />
+                  ) : historyError ? (
+                    <Text style={styles.errorText}>{historyError}</Text>
+                  ) : !budgetHistory || budgetHistory.periods.length === 0 ? (
+                    <Text style={styles.smallText}>No spending history yet.</Text>
+                  ) : (
+                    <>
+                      {budgetHistory.trends.length > 0 && (
+                        <View style={budgetLocalStyles.trendsCard}>
+                          {budgetHistory.trends.map((t) => (
+                            <View key={t.category} style={budgetLocalStyles.trendRow}>
+                              <MaterialIcons
+                                name={t.direction === 'rising' ? 'trending-up' : 'trending-down'}
+                                size={16}
+                                color={t.direction === 'rising' ? colors.error : colors.positive}
+                              />
+                              <Text style={budgetLocalStyles.trendText}>{t.message}</Text>
+                            </View>
+                          ))}
                         </View>
-                      ))}
-                    </View>
-                  )}
+                      )}
 
-                  {[...budgetHistory.periods].reverse().map((period) => {
-                    const stats = computeSpendStats(period);
-                    const isExpanded = expandedPeriod === period.period_start;
-                    const review = periodReviews[period.period_start];
-                    return (
-                      <Pressable
-                        key={period.period_start}
-                        style={[styles.card, budgetLocalStyles.historyPeriodCard]}
-                        onPress={() => togglePeriod(period)}
-                        accessibilityRole="button"
-                        accessibilityLabel={`${isExpanded ? 'Hide' : 'View'} ${periodLabel(period.period_start)} breakdown`}
-                      >
-                        <View style={budgetLocalStyles.historyPeriodTopRow}>
-                          <Text style={budgetLocalStyles.historyPeriodLabel}>
-                            {periodLabel(period.period_start)}
-                          </Text>
-                          <MaterialIcons
-                            name={isExpanded ? 'expand-less' : 'expand-more'}
-                            size={18}
-                            color={colors.muted}
-                          />
-                        </View>
-                        <View style={budgetLocalStyles.historyPeriodRow}>
-                          <Text style={budgetLocalStyles.historyPeriodStat}>
-                            Budgeted ${formatDecimal(stats.budgeted)}
-                          </Text>
-                          <Text style={budgetLocalStyles.historyPeriodStat}>
-                            Spent ${formatDecimal(stats.spent)}
-                          </Text>
-                        </View>
+                      {[...budgetHistory.periods].reverse().map((period) => {
+                        const stats = computeSpendStats(period);
+                        const isExpanded = expandedPeriod === period.period_start;
+                        const review = periodReviews[period.period_start];
+                        return (
+                          <Pressable
+                            key={period.period_start}
+                            style={[styles.card, budgetLocalStyles.historyPeriodCard]}
+                            onPress={() => togglePeriod(period)}
+                            accessibilityRole="button"
+                            accessibilityLabel={`${isExpanded ? 'Hide' : 'View'} ${periodLabel(period.period_start)} breakdown`}
+                          >
+                            <View style={budgetLocalStyles.historyPeriodTopRow}>
+                              <Text style={budgetLocalStyles.historyPeriodLabel}>
+                                {periodLabel(period.period_start)}
+                              </Text>
+                              <MaterialIcons
+                                name={isExpanded ? 'expand-less' : 'expand-more'}
+                                size={18}
+                                color={colors.muted}
+                              />
+                            </View>
+                            <View style={budgetLocalStyles.historyPeriodRow}>
+                              <Text style={budgetLocalStyles.historyPeriodStat}>
+                                Budgeted ${formatDecimal(stats.budgeted)}
+                              </Text>
+                              <Text style={budgetLocalStyles.historyPeriodStat}>
+                                Spent ${formatDecimal(stats.spent)}
+                              </Text>
+                            </View>
 
-                        {/* Month drilldown (2026-09-15, direct user
+                            {/* Month drilldown (2026-09-15, direct user
                             request): a miniature version of this same
                             screen's own live per-category budgeted/
                             actual/remaining list, for this one closed
@@ -1006,270 +1070,305 @@ export default function Budget() {
                             getPeriodReview, no new compute), read-only
                             (no edit/reset actions - a closed month's
                             budget isn't something to change). */}
-                        {isExpanded && (
-                          <View style={budgetLocalStyles.periodDetail}>
-                            {loadingPeriod === period.period_start ? (
-                              <ActivityIndicator />
-                            ) : periodError ? (
-                              <Text style={styles.errorText}>{periodError}</Text>
-                            ) : !review ? (
-                              <Text style={styles.smallText}>No detail available for this month.</Text>
-                            ) : (
-                              <>
-                                <Text style={budgetLocalStyles.periodDetailIncome}>
-                                  Income ${formatDecimal(review.income)}
-                                </Text>
-                                {review.status.map((s) => (
-                                  <Pressable
-                                    key={s.category}
-                                    style={budgetLocalStyles.periodDetailRow}
-                                    onPress={() =>
-                                      setHistoryDrilldown({
-                                        category: s.category,
-                                        periodStart: period.period_start,
-                                        periodEnd: period.period_end,
-                                        label: periodLabel(period.period_start),
-                                      })
-                                    }
-                                    accessibilityRole="button"
-                                    accessibilityLabel={`See ${s.category} transactions for ${periodLabel(period.period_start)}`}
-                                  >
-                                    <Text style={budgetLocalStyles.periodDetailCategory} numberOfLines={1}>
-                                      {s.category}
+                            {isExpanded && (
+                              <View style={budgetLocalStyles.periodDetail}>
+                                {loadingPeriod === period.period_start ? (
+                                  <ActivityIndicator />
+                                ) : periodError ? (
+                                  <Text style={styles.errorText}>{periodError}</Text>
+                                ) : !review ? (
+                                  <Text style={styles.smallText}>
+                                    No detail available for this month.
+                                  </Text>
+                                ) : (
+                                  <>
+                                    <Text style={budgetLocalStyles.periodDetailIncome}>
+                                      Income ${formatDecimal(review.income)}
                                     </Text>
-                                    <Text style={budgetLocalStyles.periodDetailAmount}>
-                                      ${formatDecimal(s.actual)}
-                                      {s.budgeted != null && (
-                                        <Text style={budgetLocalStyles.periodDetailAmountMuted}>
-                                          {' '}
-                                          / ${formatDecimal(s.budgeted)}
-                                        </Text>
-                                      )}
-                                    </Text>
-                                    {s.remaining != null && (
-                                      <Text
-                                        style={[
-                                          budgetLocalStyles.periodDetailRemaining,
-                                          { color: s.remaining < 0 ? colors.error : colors.positive },
-                                        ]}
+                                    {review.status.map((s) => (
+                                      <Pressable
+                                        key={s.category}
+                                        style={budgetLocalStyles.periodDetailRow}
+                                        onPress={() =>
+                                          setHistoryDrilldown({
+                                            category: s.category,
+                                            periodStart: period.period_start,
+                                            periodEnd: period.period_end,
+                                            label: periodLabel(period.period_start),
+                                          })
+                                        }
+                                        accessibilityRole="button"
+                                        accessibilityLabel={`See ${s.category} transactions for ${periodLabel(period.period_start)}`}
                                       >
-                                        {s.remaining < 0 ? '-' : ''}${formatDecimal(Math.abs(s.remaining))}
-                                      </Text>
-                                    )}
-                                  </Pressable>
-                                ))}
-                              </>
+                                        <Text
+                                          style={budgetLocalStyles.periodDetailCategory}
+                                          numberOfLines={1}
+                                        >
+                                          {s.category}
+                                        </Text>
+                                        <Text style={budgetLocalStyles.periodDetailAmount}>
+                                          ${formatDecimal(s.actual)}
+                                          {s.budgeted != null && (
+                                            <Text style={budgetLocalStyles.periodDetailAmountMuted}>
+                                              {' '}
+                                              / ${formatDecimal(s.budgeted)}
+                                            </Text>
+                                          )}
+                                        </Text>
+                                        {s.remaining != null && (
+                                          <Text
+                                            style={[
+                                              budgetLocalStyles.periodDetailRemaining,
+                                              {
+                                                color:
+                                                  s.remaining < 0 ? colors.error : colors.positive,
+                                              },
+                                            ]}
+                                          >
+                                            {s.remaining < 0 ? '-' : ''}$
+                                            {formatDecimal(Math.abs(s.remaining))}
+                                          </Text>
+                                        )}
+                                      </Pressable>
+                                    ))}
+                                  </>
+                                )}
+                              </View>
                             )}
-                          </View>
-                        )}
-                      </Pressable>
-                    );
-                  })}
-                </>
+                          </Pressable>
+                        );
+                      })}
+                    </>
+                  )}
+                </View>
               )}
-            </View>
-          )}
 
-          {rows.map((s) => {
-            const status = statusForCategory(s.category, s.budgeted, alerts);
-            const percent = s.budgeted > 0 ? Math.min(1, s.actual / s.budgeted) : s.budgeted === 0 ? 1 : 0;
-            const isEditing = editingBudgetCategory === s.category;
-            return (
-              // Direct user request: tapping a category should show the
-              // transactions counting toward it plus insight/reasoning and
-              // possible actions. Disabled while this card's own inline
-              // edit section is open (isEditing) so it can't fight the
-              // edit form underneath - the EDIT chip below is its own
-              // nested Pressable, which consumes its own taps before they
-              // ever reach this outer one, same "innermost interactive
-              // element wins" pattern already used elsewhere in this app
-              // (Home Settings' tap-anywhere-to-exit-edit-mode).
-              <Pressable
-                key={s.category}
-                style={[styles.card, budgetLocalStyles.categoryCard]}
-                onPress={() => openCategory(s.category)}
-                disabled={isEditing}
-                accessibilityRole="button"
-                accessibilityLabel={`View ${s.category} transactions`}
-              >
-                  <View style={budgetLocalStyles.categoryTopRow}>
-                    <View style={budgetLocalStyles.categoryIconCircle}>
-                      <MaterialIcons name={iconForCategory(s.category)} size={18} color={colors.dark} />
+              {rows.map((s) => {
+                const status = statusForCategory(s.category, s.budgeted, alerts);
+                const percent =
+                  s.budgeted > 0 ? Math.min(1, s.actual / s.budgeted) : s.budgeted === 0 ? 1 : 0;
+                const isEditing = editingBudgetCategory === s.category;
+                return (
+                  // Direct user request: tapping a category should show the
+                  // transactions counting toward it plus insight/reasoning and
+                  // possible actions. Disabled while this card's own inline
+                  // edit section is open (isEditing) so it can't fight the
+                  // edit form underneath - the EDIT chip below is its own
+                  // nested Pressable, which consumes its own taps before they
+                  // ever reach this outer one, same "innermost interactive
+                  // element wins" pattern already used elsewhere in this app
+                  // (Home Settings' tap-anywhere-to-exit-edit-mode).
+                  <Pressable
+                    key={s.category}
+                    style={[styles.card, budgetLocalStyles.categoryCard]}
+                    onPress={() => openCategory(s.category)}
+                    disabled={isEditing}
+                    accessibilityRole="button"
+                    accessibilityLabel={`View ${s.category} transactions`}
+                  >
+                    <View style={budgetLocalStyles.categoryTopRow}>
+                      <View style={budgetLocalStyles.categoryIconCircle}>
+                        <MaterialIcons
+                          name={iconForCategory(s.category)}
+                          size={18}
+                          color={colors.dark}
+                        />
+                      </View>
+                      <Text style={budgetLocalStyles.categoryName}>{s.category}</Text>
+                      {!isEditing && (
+                        <Pressable
+                          style={budgetLocalStyles.editChip}
+                          onPress={() => startEditBudget(s.category, s.budgeted)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Edit ${s.category} budget`}
+                        >
+                          <Text style={budgetLocalStyles.editChipText}>EDIT</Text>
+                          <MaterialIcons name="chevron-right" size={16} color={colors.darkest} />
+                        </Pressable>
+                      )}
                     </View>
-                    <Text style={budgetLocalStyles.categoryName}>{s.category}</Text>
-                    {!isEditing && (
-                      <Pressable
-                        style={budgetLocalStyles.editChip}
-                        onPress={() => startEditBudget(s.category, s.budgeted)}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Edit ${s.category} budget`}
-                      >
-                        <Text style={budgetLocalStyles.editChipText}>EDIT</Text>
-                        <MaterialIcons name="chevron-right" size={16} color={colors.darkest} />
-                      </Pressable>
+
+                    <Text style={budgetLocalStyles.categorySpentLine}>
+                      {s.budgeted == null
+                        ? `spent $${formatDecimal(s.actual)} `
+                        : `spent $${formatDecimal(s.actual)} of $${formatDecimal(s.budgeted)} `}
+                      {s.budgeted == null ? (
+                        <Text style={budgetLocalStyles.notBudgetedText}>(not budgeted yet)</Text>
+                      ) : (
+                        <Text
+                          style={{
+                            color: s.remaining < 0 ? colors.error : colors.positive,
+                            fontWeight: '600',
+                          }}
+                        >
+                          ({s.remaining < 0 ? '-' : ''}${formatDecimal(Math.abs(s.remaining))} left)
+                        </Text>
+                      )}
+                    </Text>
+
+                    {s.budgeted != null && (
+                      <View style={budgetLocalStyles.progressTrack}>
+                        <View
+                          style={[
+                            budgetLocalStyles.progressFill,
+                            { width: `${percent * 100}%`, backgroundColor: STATUS_COLOR[status] },
+                          ]}
+                        />
+                      </View>
                     )}
-                  </View>
 
-                  <Text style={budgetLocalStyles.categorySpentLine}>
-                    {s.budgeted == null
-                      ? `spent $${formatDecimal(s.actual)} `
-                      : `spent $${formatDecimal(s.actual)} of $${formatDecimal(s.budgeted)} `}
-                    {s.budgeted == null ? (
-                      <Text style={budgetLocalStyles.notBudgetedText}>(not budgeted yet)</Text>
-                    ) : (
-                      <Text
-                        style={{
-                          color: s.remaining < 0 ? colors.error : colors.positive,
-                          fontWeight: '600',
-                        }}
-                      >
-                        ({s.remaining < 0 ? '-' : ''}${formatDecimal(Math.abs(s.remaining))} left)
-                      </Text>
+                    {showCategoryReasoning && s.reasoning && (
+                      <Text style={budgetLocalStyles.reasoningText}>{s.reasoning}</Text>
                     )}
-                  </Text>
 
-                  {s.budgeted != null && (
-                    <View style={budgetLocalStyles.progressTrack}>
-                      <View
-                        style={[
-                          budgetLocalStyles.progressFill,
-                          { width: `${percent * 100}%`, backgroundColor: STATUS_COLOR[status] },
-                        ]}
-                      />
-                    </View>
-                  )}
-
-                  {showCategoryReasoning && s.reasoning && (
-                    <Text style={budgetLocalStyles.reasoningText}>{s.reasoning}</Text>
-                  )}
-
-                  {isEditing &&
-                    (budgetProposal ? (
-                      <View style={budgetLocalStyles.editSection}>
-                        {budgetProposal.summary && (
-                          <Text style={budgetLocalStyles.reasoningText}>{budgetProposal.summary}</Text>
-                        )}
-                        {/* Goal-driven budget funding (2026-09-11): a
+                    {isEditing &&
+                      (budgetProposal ? (
+                        <View style={budgetLocalStyles.editSection}>
+                          {budgetProposal.summary && (
+                            <Text style={budgetLocalStyles.reasoningText}>
+                              {budgetProposal.summary}
+                            </Text>
+                          )}
+                          {/* Goal-driven budget funding (2026-09-11): a
                             decrease frees real discretionary room with no
                             rebalance step to gate it behind - show the
                             impact as soon as it's known, purely
                             informational, never a button to redirect the
                             freed money anywhere. */}
-                        {budgetProposal.delta <= 0 && fundingImpact && (() => {
-                          const freed = fundingImpact.goals.filter((g) => g.delta !== 0).sort((a, b) => b.delta - a.delta);
-                          if (freed.length === 0) return null;
-                          const top = freed[0];
-                          const name = goalDisplayName(
-                            goalsProgress?.find((g) => g.id === top.goal_id)?.goal_type,
-                            goalsProgress?.find((g) => g.id === top.goal_id)?.notes
-                          );
-                          const line = describeFundingImpactLine(top, name, 'freed');
-                          return line ? (
-                            <Text style={budgetLocalStyles.reasoningText}>
-                              {line}
-                              {freed.length > 1 ? ` (and ${freed.length - 1} other goal${freed.length > 2 ? 's' : ''})` : ''}
-                            </Text>
-                          ) : null;
-                        })()}
-                        {budgetAdjustments.map((a, i) => (
-                          <View key={a.category} style={budgetLocalStyles.adjustmentRow}>
-                            <Text style={budgetLocalStyles.categoryName}>{a.category}</Text>
-                            <Text style={budgetLocalStyles.reasoningText}>{a.reasoning}</Text>
-                            <TextInput
-                              style={styles.input}
-                              keyboardType="numeric"
-                              value={String(a.budgeted_amount)}
-                              onChangeText={(text) => {
-                                const updated = [...budgetAdjustments];
-                                updated[i] = { ...a, budgeted_amount: Number(text) || 0 };
-                                setBudgetAdjustments(updated);
-                              }}
-                            />
-                          </View>
-                        ))}
-                        {/* Goal-driven budget funding (2026-09-11): the
+                          {budgetProposal.delta <= 0 &&
+                            fundingImpact &&
+                            (() => {
+                              const freed = fundingImpact.goals
+                                .filter((g) => g.delta !== 0)
+                                .sort((a, b) => b.delta - a.delta);
+                              if (freed.length === 0) return null;
+                              const top = freed[0];
+                              const name = goalDisplayName(
+                                goalsProgress?.find((g) => g.id === top.goal_id)?.goal_type,
+                                goalsProgress?.find((g) => g.id === top.goal_id)?.notes
+                              );
+                              const line = describeFundingImpactLine(top, name, 'freed');
+                              return line ? (
+                                <Text style={budgetLocalStyles.reasoningText}>
+                                  {line}
+                                  {freed.length > 1
+                                    ? ` (and ${freed.length - 1} other goal${freed.length > 2 ? 's' : ''})`
+                                    : ''}
+                                </Text>
+                              ) : null;
+                            })()}
+                          {budgetAdjustments.map((a, i) => (
+                            <View key={a.category} style={budgetLocalStyles.adjustmentRow}>
+                              <Text style={budgetLocalStyles.categoryName}>{a.category}</Text>
+                              <Text style={budgetLocalStyles.reasoningText}>{a.reasoning}</Text>
+                              <TextInput
+                                style={styles.input}
+                                keyboardType="numeric"
+                                value={String(a.budgeted_amount)}
+                                onChangeText={(text) => {
+                                  const updated = [...budgetAdjustments];
+                                  updated[i] = { ...a, budgeted_amount: Number(text) || 0 };
+                                  setBudgetAdjustments(updated);
+                                }}
+                              />
+                            </View>
+                          ))}
+                          {/* Goal-driven budget funding (2026-09-11): the
                             rebalance-covered path ("Apply with these
                             changes") leaves the committed discretionary
                             total unchanged by construction, so nothing to
                             report there - this warning is specific to
                             "Apply without rebalancing," the path that
                             actually uses up real goal-funding room. */}
-                        {budgetProposal.delta > 0 && fundingImpact && (() => {
-                          const worsened = fundingImpact.goals.filter((g) => g.delta < 0).sort((a, b) => a.delta - b.delta);
-                          if (worsened.length === 0) return null;
-                          const top = worsened[0];
-                          const name = goalDisplayName(
-                            goalsProgress?.find((g) => g.id === top.goal_id)?.goal_type,
-                            goalsProgress?.find((g) => g.id === top.goal_id)?.notes
-                          );
-                          const line = describeFundingImpactLine(top, name, 'used');
-                          return line ? (
-                            <Text style={[budgetLocalStyles.reasoningText, budgetLocalStyles.fundingWarningText]}>
-                              {line}
-                              {worsened.length > 1 ? ` (and ${worsened.length - 1} other goal${worsened.length > 2 ? 's' : ''})` : ''}
-                            </Text>
-                          ) : null;
-                        })()}
-                        {applyingBudgetEdit ? (
-                          <ActivityIndicator />
-                        ) : (
-                          <View style={budgetLocalStyles.editButtonsRow}>
-                            {budgetAdjustments.length > 0 && (
+                          {budgetProposal.delta > 0 &&
+                            fundingImpact &&
+                            (() => {
+                              const worsened = fundingImpact.goals
+                                .filter((g) => g.delta < 0)
+                                .sort((a, b) => a.delta - b.delta);
+                              if (worsened.length === 0) return null;
+                              const top = worsened[0];
+                              const name = goalDisplayName(
+                                goalsProgress?.find((g) => g.id === top.goal_id)?.goal_type,
+                                goalsProgress?.find((g) => g.id === top.goal_id)?.notes
+                              );
+                              const line = describeFundingImpactLine(top, name, 'used');
+                              return line ? (
+                                <Text
+                                  style={[
+                                    budgetLocalStyles.reasoningText,
+                                    budgetLocalStyles.fundingWarningText,
+                                  ]}
+                                >
+                                  {line}
+                                  {worsened.length > 1
+                                    ? ` (and ${worsened.length - 1} other goal${worsened.length > 2 ? 's' : ''})`
+                                    : ''}
+                                </Text>
+                              ) : null;
+                            })()}
+                          {applyingBudgetEdit ? (
+                            <ActivityIndicator />
+                          ) : (
+                            <View style={budgetLocalStyles.editButtonsRow}>
+                              {budgetAdjustments.length > 0 && (
+                                <PrimaryButton
+                                  title="Apply with these changes"
+                                  onPress={() => applyBudgetEditNow(true)}
+                                />
+                              )}
                               <PrimaryButton
-                                title="Apply with these changes"
-                                onPress={() => applyBudgetEditNow(true)}
+                                title="Apply without rebalancing"
+                                onPress={() => applyBudgetEditNow(false)}
                               />
-                            )}
-                            <PrimaryButton
-                              title="Apply without rebalancing"
-                              onPress={() => applyBudgetEditNow(false)}
-                            />
-                            <Pressable onPress={cancelEditBudget}>
-                              <Text style={budgetLocalStyles.cancelText}>Cancel</Text>
-                            </Pressable>
-                          </View>
-                        )}
-                      </View>
-                    ) : (
-                      <View style={budgetLocalStyles.editSection}>
-                        <TextInput
-                          style={styles.input}
-                          keyboardType="numeric"
-                          placeholder="New budgeted amount"
-                          placeholderTextColor={colors.placeholder}
-                          value={budgetEditAmount}
-                          onChangeText={setBudgetEditAmount}
-                        />
-                        {loadingProposal || applyingBudgetEdit ? (
-                          <ActivityIndicator />
-                        ) : (
-                          <View style={budgetLocalStyles.editButtonsRow}>
-                            <PrimaryButton title="Review" onPress={reviewBudgetEdit} />
-                            <Pressable onPress={cancelEditBudget}>
-                              <Text style={budgetLocalStyles.cancelText}>Cancel</Text>
-                            </Pressable>
-                            {/* Only shown for a category you've previously set
+                              <Pressable onPress={cancelEditBudget}>
+                                <Text style={budgetLocalStyles.cancelText}>Cancel</Text>
+                              </Pressable>
+                            </View>
+                          )}
+                        </View>
+                      ) : (
+                        <View style={budgetLocalStyles.editSection}>
+                          <TextInput
+                            style={styles.input}
+                            keyboardType="numeric"
+                            placeholder="New budgeted amount"
+                            placeholderTextColor={colors.placeholder}
+                            value={budgetEditAmount}
+                            onChangeText={setBudgetEditAmount}
+                          />
+                          {loadingProposal || applyingBudgetEdit ? (
+                            <ActivityIndicator />
+                          ) : (
+                            <View style={budgetLocalStyles.editButtonsRow}>
+                              <PrimaryButton title="Review" onPress={reviewBudgetEdit} />
+                              <Pressable onPress={cancelEditBudget}>
+                                <Text style={budgetLocalStyles.cancelText}>Cancel</Text>
+                              </Pressable>
+                              {/* Only shown for a category you've previously set
                                 manually - the real fix for the bug hit
                                 2026-09-02 (a value set while testing against
                                 Sandbox accounts survived unchanged after those
                                 accounts were deleted, with no way to hand it
                                 back to the AI). Scoped to this one category,
                                 not a whole-budget reset. */}
-                            {s.is_user_set && (
-                              <Pressable onPress={() => confirmResetCategoryToAI(s.category)}>
-                                <Text style={budgetLocalStyles.resetToAiText}>Reset to AI-suggested</Text>
-                              </Pressable>
-                            )}
-                          </View>
-                        )}
-                      </View>
-                    ))}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-        </TopEdgeFade>
-      ))}
+                              {s.is_user_set && (
+                                <Pressable onPress={() => confirmResetCategoryToAI(s.category)}>
+                                  <Text style={budgetLocalStyles.resetToAiText}>
+                                    Reset to AI-suggested
+                                  </Text>
+                                </Pressable>
+                              )}
+                            </View>
+                          )}
+                        </View>
+                      ))}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </TopEdgeFade>
+        ))}
       <BudgetInsightModal
         visible={insightModalVisible}
         onClose={() => setInsightModalVisible(false)}
@@ -1323,399 +1422,399 @@ function periodLabel(periodStart) {
 // active theme changing.
 function buildBudgetLocalStyles(colors) {
   return StyleSheet.create({
-  // Same values as every other tab's wordmarkStrip (Home/Recurring/Goal) -
-  // kept identical on purpose so the header reads as one consistent piece
-  // across tabs, not five slightly different ones.
-  wordmarkStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 24,
-    paddingTop: 8,
-    paddingBottom: 8,
-  },
-  screen: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 110,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: '700',
-    color: colors.darkest,
-    flexShrink: 0,
-  },
-  insightsPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexShrink: 1,
-    maxWidth: '62%',
-    marginLeft: 10,
-    gap: 6,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.primary,
-    borderRadius: 16,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-  },
-  insightsPillText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.primary,
-    flexShrink: 1,
-  },
-  sectionDivider: {
-    alignSelf: 'stretch',
-    borderBottomWidth: 1,
-    borderBottomColor: colors.sage,
-    marginVertical: 12,
-  },
-  // Simplified 2026-09-11, direct user request (real on-device screenshot
-  // at night: the old dark card's background flipped to bright white,
-  // see this section's own JSX comment) - no card/background/icon/
-  // watermark, just smaller plain text and a button.
-  generateSection: {
-    gap: 6,
-    marginBottom: 16,
-  },
-  generateTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  generateSubtitle: {
-    fontSize: 11,
-    color: colors.muted,
-    marginBottom: 4,
-  },
-  // Sits inside a category card (styles.card, light background), same
-  // context as cancelText right next to it - colors.error (not colors.sage,
-  // which is tuned for the dark generateCard elsewhere on this screen)
-  // matches this app's existing convention for a "clear/remove" link on a
-  // light card (see goal.js's inlineEditorLink).
-  resetToAiText: {
-    fontSize: 13,
-    color: colors.error,
-    fontWeight: '600',
-    textDecorationLine: 'underline',
-    paddingVertical: 6,
-  },
-  statRow: {
-    flexDirection: 'row',
-    marginBottom: 12,
-  },
-  statTile: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 2,
-  },
-  statDivider: {
-    width: StyleSheet.hairlineWidth,
-    backgroundColor: colors.sage,
-    marginHorizontal: 4,
-  },
-  statLabel: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: colors.muted,
-    letterSpacing: 0.3,
-    marginTop: 2,
-    textAlign: 'center',
-  },
-  statValue: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  statSub: {
-    fontSize: 10,
-    color: colors.dark,
-    textAlign: 'center',
-  },
-  // No more status dot (2026-08-27, direct user feedback - "get rid of
-  // those ugly dots... so all the pills can line up") - severity is still
-  // shown via the progress bar's own fill color (STATUS_COLOR, below),
-  // just not duplicated as a second dot that offset every card's left
-  // edge out of alignment with the stat-tiles/history pills above it.
-  categoryCard: {
-    gap: 8,
-    marginBottom: 12,
-  },
-  categoryTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  categoryIconCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  categoryName: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  editChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.background,
-    borderRadius: 8,
-    paddingVertical: 5,
-    paddingHorizontal: 8,
-  },
-  editChipText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  categorySpentLine: {
-    fontSize: 13,
-    color: colors.dark,
-  },
-  notBudgetedText: {
-    color: colors.muted,
-    fontStyle: 'italic',
-  },
-  progressTrack: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.background,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: 6,
-    borderRadius: 3,
-  },
-  reasoningText: {
-    fontSize: 12,
-    color: colors.muted,
-    lineHeight: 17,
-  },
-  fundingWarningText: {
-    color: colors.warningText,
-  },
-  editSection: {
-    gap: 8,
-    marginTop: 4,
-  },
-  adjustmentRow: {
-    gap: 4,
-    paddingVertical: 6,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.sage,
-  },
-  editButtonsRow: {
-    gap: 8,
-    alignItems: 'flex-start',
-  },
-  cancelText: {
-    fontSize: 13,
-    color: colors.muted,
-    fontWeight: '600',
-    paddingVertical: 6,
-  },
-  historyToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 4,
-    marginBottom: 12,
-  },
-  historyToggleText: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.dark,
-  },
-  historySection: {
-    gap: 10,
-    marginTop: 10,
-    marginBottom: 12,
-  },
-  trendsCard: {
-    backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: 12,
-    gap: 8,
-  },
-  trendRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-  },
-  trendText: {
-    flex: 1,
-    fontSize: 13,
-    color: colors.dark,
-  },
-  historyPeriodCard: {
-    gap: 6,
-  },
-  historyPeriodTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  historyPeriodLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  historyPeriodRow: {
-    flexDirection: 'row',
-    gap: 16,
-  },
-  historyPeriodStat: {
-    fontSize: 13,
-    color: colors.dark,
-  },
-  // Month drilldown detail (2026-09-15) - a compact, read-only per-
-  // category list, deliberately smaller/plainer than the live category
-  // cards further down this screen (no icon circle, no edit/reset
-  // actions - a closed month's budget isn't something to change here).
-  periodDetail: {
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.sage,
-    gap: 6,
-  },
-  periodDetailIncome: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.positive,
-    marginBottom: 2,
-  },
-  periodDetailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  periodDetailCategory: {
-    flex: 1,
-    fontSize: 12,
-    color: colors.darkest,
-  },
-  periodDetailAmount: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-  periodDetailAmountMuted: {
-    fontWeight: '400',
-    color: colors.muted,
-  },
-  periodDetailRemaining: {
-    fontSize: 12,
-    fontWeight: '600',
-    minWidth: 60,
-    textAlign: 'right',
-  },
-  // Category detail view (local state swap, not a route - see
-  // viewingCategory's own comment for why). Same header shape as
-  // SettingsScreenChrome/Home's own per-institution drill-down.
-  categoryDetailHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 56,
-    paddingBottom: 12,
-    gap: 12,
-  },
-  categoryDetailBackButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  categoryDetailTitle: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  categoryDetailScreen: {
-    flex: 1,
-  },
-  categoryDetailScreenContent: {
-    paddingTop: 8,
-    paddingBottom: 150,
-  },
-  categoryDetailSummaryCard: {
-    marginHorizontal: 16,
-    marginBottom: 12,
-    gap: 6,
-  },
-  categoryDetailSpent: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.darkest,
-  },
-  categoryDetailRemaining: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  categoryDetailActionSpacing: {
-    marginTop: 4,
-  },
-  categoryDetailResetButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.sage,
-    backgroundColor: colors.background,
-    borderRadius: 22,
-    paddingVertical: 10,
-    marginTop: 4,
-  },
-  categoryDetailResetButtonText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.primary,
-    letterSpacing: 0.3,
-  },
-  categoryDetailSectionLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    color: colors.muted,
-    marginHorizontal: 16,
-    marginBottom: 6,
-  },
-  categoryDetailTxRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginHorizontal: 16,
-    marginBottom: 8,
-    paddingVertical: 4,
-  },
-  categoryDetailTxTextCol: {
-    flex: 1,
-  },
-  categoryDetailTxName: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-  categoryDetailTxAmount: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
+    // Same values as every other tab's wordmarkStrip (Home/Recurring/Goal) -
+    // kept identical on purpose so the header reads as one consistent piece
+    // across tabs, not five slightly different ones.
+    wordmarkStrip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 24,
+      paddingTop: 8,
+      paddingBottom: 8,
+    },
+    screen: {
+      flex: 1,
+      paddingHorizontal: 16,
+      paddingTop: 110,
+    },
+    headerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 16,
+    },
+    title: {
+      fontSize: 26,
+      fontWeight: '700',
+      color: colors.darkest,
+      flexShrink: 0,
+    },
+    insightsPill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexShrink: 1,
+      maxWidth: '62%',
+      marginLeft: 10,
+      gap: 6,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.primary,
+      borderRadius: 16,
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+    },
+    insightsPillText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.primary,
+      flexShrink: 1,
+    },
+    sectionDivider: {
+      alignSelf: 'stretch',
+      borderBottomWidth: 1,
+      borderBottomColor: colors.sage,
+      marginVertical: 12,
+    },
+    // Simplified 2026-09-11, direct user request (real on-device screenshot
+    // at night: the old dark card's background flipped to bright white,
+    // see this section's own JSX comment) - no card/background/icon/
+    // watermark, just smaller plain text and a button.
+    generateSection: {
+      gap: 6,
+      marginBottom: 16,
+    },
+    generateTitle: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    generateSubtitle: {
+      fontSize: 11,
+      color: colors.muted,
+      marginBottom: 4,
+    },
+    // Sits inside a category card (styles.card, light background), same
+    // context as cancelText right next to it - colors.error (not colors.sage,
+    // which is tuned for the dark generateCard elsewhere on this screen)
+    // matches this app's existing convention for a "clear/remove" link on a
+    // light card (see goal.js's inlineEditorLink).
+    resetToAiText: {
+      fontSize: 13,
+      color: colors.error,
+      fontWeight: '600',
+      textDecorationLine: 'underline',
+      paddingVertical: 6,
+    },
+    statRow: {
+      flexDirection: 'row',
+      marginBottom: 12,
+    },
+    statTile: {
+      flex: 1,
+      alignItems: 'center',
+      gap: 2,
+    },
+    statDivider: {
+      width: StyleSheet.hairlineWidth,
+      backgroundColor: colors.sage,
+      marginHorizontal: 4,
+    },
+    statLabel: {
+      fontSize: 9,
+      fontWeight: '700',
+      color: colors.muted,
+      letterSpacing: 0.3,
+      marginTop: 2,
+      textAlign: 'center',
+    },
+    statValue: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    statSub: {
+      fontSize: 10,
+      color: colors.dark,
+      textAlign: 'center',
+    },
+    // No more status dot (2026-08-27, direct user feedback - "get rid of
+    // those ugly dots... so all the pills can line up") - severity is still
+    // shown via the progress bar's own fill color (STATUS_COLOR, below),
+    // just not duplicated as a second dot that offset every card's left
+    // edge out of alignment with the stat-tiles/history pills above it.
+    categoryCard: {
+      gap: 8,
+      marginBottom: 12,
+    },
+    categoryTopRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    categoryIconCircle: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    categoryName: {
+      flex: 1,
+      fontSize: 15,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    editChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.background,
+      borderRadius: 8,
+      paddingVertical: 5,
+      paddingHorizontal: 8,
+    },
+    editChipText: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    categorySpentLine: {
+      fontSize: 13,
+      color: colors.dark,
+    },
+    notBudgetedText: {
+      color: colors.muted,
+      fontStyle: 'italic',
+    },
+    progressTrack: {
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: colors.background,
+      overflow: 'hidden',
+    },
+    progressFill: {
+      height: 6,
+      borderRadius: 3,
+    },
+    reasoningText: {
+      fontSize: 12,
+      color: colors.muted,
+      lineHeight: 17,
+    },
+    fundingWarningText: {
+      color: colors.warningText,
+    },
+    editSection: {
+      gap: 8,
+      marginTop: 4,
+    },
+    adjustmentRow: {
+      gap: 4,
+      paddingVertical: 6,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.sage,
+    },
+    editButtonsRow: {
+      gap: 8,
+      alignItems: 'flex-start',
+    },
+    cancelText: {
+      fontSize: 13,
+      color: colors.muted,
+      fontWeight: '600',
+      paddingVertical: 6,
+    },
+    historyToggle: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: 4,
+      marginBottom: 12,
+    },
+    historyToggleText: {
+      flex: 1,
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.dark,
+    },
+    historySection: {
+      gap: 10,
+      marginTop: 10,
+      marginBottom: 12,
+    },
+    trendsCard: {
+      backgroundColor: colors.card,
+      borderRadius: 12,
+      padding: 12,
+      gap: 8,
+    },
+    trendRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 8,
+    },
+    trendText: {
+      flex: 1,
+      fontSize: 13,
+      color: colors.dark,
+    },
+    historyPeriodCard: {
+      gap: 6,
+    },
+    historyPeriodTopRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    historyPeriodLabel: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    historyPeriodRow: {
+      flexDirection: 'row',
+      gap: 16,
+    },
+    historyPeriodStat: {
+      fontSize: 13,
+      color: colors.dark,
+    },
+    // Month drilldown detail (2026-09-15) - a compact, read-only per-
+    // category list, deliberately smaller/plainer than the live category
+    // cards further down this screen (no icon circle, no edit/reset
+    // actions - a closed month's budget isn't something to change here).
+    periodDetail: {
+      marginTop: 8,
+      paddingTop: 8,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.sage,
+      gap: 6,
+    },
+    periodDetailIncome: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.positive,
+      marginBottom: 2,
+    },
+    periodDetailRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    periodDetailCategory: {
+      flex: 1,
+      fontSize: 12,
+      color: colors.darkest,
+    },
+    periodDetailAmount: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+    periodDetailAmountMuted: {
+      fontWeight: '400',
+      color: colors.muted,
+    },
+    periodDetailRemaining: {
+      fontSize: 12,
+      fontWeight: '600',
+      minWidth: 60,
+      textAlign: 'right',
+    },
+    // Category detail view (local state swap, not a route - see
+    // viewingCategory's own comment for why). Same header shape as
+    // SettingsScreenChrome/Home's own per-institution drill-down.
+    categoryDetailHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      paddingTop: 56,
+      paddingBottom: 12,
+      gap: 12,
+    },
+    categoryDetailBackButton: {
+      width: 40,
+      height: 40,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    categoryDetailTitle: {
+      flex: 1,
+      textAlign: 'center',
+      fontSize: 20,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    categoryDetailScreen: {
+      flex: 1,
+    },
+    categoryDetailScreenContent: {
+      paddingTop: 8,
+      paddingBottom: 150,
+    },
+    categoryDetailSummaryCard: {
+      marginHorizontal: 16,
+      marginBottom: 12,
+      gap: 6,
+    },
+    categoryDetailSpent: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: colors.darkest,
+    },
+    categoryDetailRemaining: {
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    categoryDetailActionSpacing: {
+      marginTop: 4,
+    },
+    categoryDetailResetButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.sage,
+      backgroundColor: colors.background,
+      borderRadius: 22,
+      paddingVertical: 10,
+      marginTop: 4,
+    },
+    categoryDetailResetButtonText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.primary,
+      letterSpacing: 0.3,
+    },
+    categoryDetailSectionLabel: {
+      fontSize: 11,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+      color: colors.muted,
+      marginHorizontal: 16,
+      marginBottom: 6,
+    },
+    categoryDetailTxRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      marginHorizontal: 16,
+      marginBottom: 8,
+      paddingVertical: 4,
+    },
+    categoryDetailTxTextCol: {
+      flex: 1,
+    },
+    categoryDetailTxName: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+    categoryDetailTxAmount: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
   });
 }

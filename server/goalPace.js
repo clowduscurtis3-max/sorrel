@@ -62,7 +62,10 @@ function computeRealizedAccountPace({
 
   const daysOfHistory = Math.floor((now - windowStart) / 86400000);
   if (daysOfHistory < MIN_DAYS_FOR_REALIZED_PACE) {
-    return { insufficient_history: true, days_of_history: Math.max(0, daysOfHistory) };
+    return {
+      insufficient_history: true,
+      days_of_history: Math.max(0, daysOfHistory),
+    };
   }
 
   const windowStartStr = windowStart.toISOString().slice(0, 10);
@@ -75,7 +78,11 @@ function computeRealizedAccountPace({
     }
   }
   if (transactionsInWindow < MIN_TRANSACTIONS_FOR_REALIZED_PACE) {
-    return { insufficient_history: true, days_of_history: daysOfHistory, transactions_in_window: transactionsInWindow };
+    return {
+      insufficient_history: true,
+      days_of_history: daysOfHistory,
+      transactions_in_window: transactionsInWindow,
+    };
   }
 
   // Positive amount = money out (balance decreased); negative = money in
@@ -172,7 +179,11 @@ async function getAccountPaces(userId, accountIds, now = new Date()) {
     );
     paces.set(
       internalId,
-      computeRealizedAccountPace({ transactions: accountTransactions, earliestTransactionDate, now })
+      computeRealizedAccountPace({
+        transactions: accountTransactions,
+        earliestTransactionDate,
+        now,
+      })
     );
   }
 

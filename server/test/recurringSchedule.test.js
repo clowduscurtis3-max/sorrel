@@ -76,7 +76,10 @@ test('expandOccurrences includes both window boundaries', () => {
     from: '2026-08-24',
     to: '2026-08-24',
   });
-  assert.deepEqual(occurrences.map((o) => o.date), ['2026-08-24']);
+  assert.deepEqual(
+    occurrences.map((o) => o.date),
+    ['2026-08-24']
+  );
 });
 
 test('expandOccurrences excludes occurrences before the window starts', () => {
@@ -86,7 +89,10 @@ test('expandOccurrences excludes occurrences before the window starts', () => {
     to: '2026-09-30',
   });
   // 08-24 is behind the window; the next monthly step (+30d) is 09-23.
-  assert.deepEqual(occurrences.map((o) => o.date), ['2026-09-23']);
+  assert.deepEqual(
+    occurrences.map((o) => o.date),
+    ['2026-09-23']
+  );
 });
 
 test('expandOccurrences reports a long-overdue series as stale instead of inventing charges', () => {
@@ -114,7 +120,10 @@ test('expandOccurrences tolerates a slightly-late series rather than dropping it
   });
 
   assert.equal(stale, false);
-  assert.deepEqual(occurrences.map((o) => o.date), ['2026-09-03']);
+  assert.deepEqual(
+    occurrences.map((o) => o.date),
+    ['2026-09-03']
+  );
 });
 
 test('expandOccurrences returns nothing for an unknown cadence', () => {
@@ -163,7 +172,11 @@ test('upcomingObligations reports stale series separately instead of silently dr
 });
 
 test('upcomingObligations returns an empty, zero-total result with no series', () => {
-  const result = upcomingObligations({ series: [], from: '2026-08-11', to: '2026-08-31' });
+  const result = upcomingObligations({
+    series: [],
+    from: '2026-08-11',
+    to: '2026-08-31',
+  });
   assert.deepEqual(result.occurrences, []);
   assert.equal(result.total, 0);
 });
@@ -190,7 +203,10 @@ test('nextExpectedIncome picks the earliest of several income series', () => {
     next_expected_date: '2026-08-12',
   };
 
-  const income = nextExpectedIncome({ series: [paycheck, sideGig], from: '2026-08-11' });
+  const income = nextExpectedIncome({
+    series: [paycheck, sideGig],
+    from: '2026-08-11',
+  });
   assert.equal(income.display_name, 'SIDE GIG');
   assert.equal(income.date, '2026-08-12');
 });

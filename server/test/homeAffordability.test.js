@@ -3,10 +3,7 @@ require('./setupEnv');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const {
-  computeHomeAffordability,
-  computeMonthlyDebtService,
-} = require('../homeAffordability');
+const { computeHomeAffordability, computeMonthlyDebtService } = require('../homeAffordability');
 
 // Every dollar figure below was independently cross-checked against a
 // plain Python amortization calculation and hand arithmetic before this
@@ -178,10 +175,20 @@ test('a normal DTI stays under the display cap', () => {
 
 test('rejects a non-positive home price or negative down payment', () => {
   assert.throws(() =>
-    computeHomeAffordability({ homePrice: 0, downPayment: 0, annualRatePercent: 6, state: 'OH' })
+    computeHomeAffordability({
+      homePrice: 0,
+      downPayment: 0,
+      annualRatePercent: 6,
+      state: 'OH',
+    })
   );
   assert.throws(() =>
-    computeHomeAffordability({ homePrice: 300000, downPayment: -1, annualRatePercent: 6, state: 'OH' })
+    computeHomeAffordability({
+      homePrice: 300000,
+      downPayment: -1,
+      annualRatePercent: 6,
+      state: 'OH',
+    })
   );
 });
 
@@ -199,7 +206,12 @@ test('computeMonthlyDebtService sums only debt_type-flagged series, converted to
     // itself a real recurring outflow.
     { debt_type: null, typical_amount: 15.99, interval: 'monthly' },
     // Not debt - category alone is irrelevant, only debt_type counts.
-    { debt_type: null, typical_amount: 1500, interval: 'monthly', category: 'Bills & Utilities' },
+    {
+      debt_type: null,
+      typical_amount: 1500,
+      interval: 'monthly',
+      category: 'Bills & Utilities',
+    },
   ];
   // Sum of the two debt entries' unrounded monthly-equivalents
   // (25.366666... + 54.357142857...), rounded once at the end - 79.72.

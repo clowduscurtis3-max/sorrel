@@ -58,7 +58,11 @@ export default function BiometricLock({ onRetry }) {
             dark green, dropping to 2.32:1 - genuinely hard to see.
             readableTextColor computes the correct color for the actual
             card fill in either mode. */}
-        <MaterialIcons name={biometricIcon} size={44} color={readableTextColor(colors.card, colors)} />
+        <MaterialIcons
+          name={biometricIcon}
+          size={44}
+          color={readableTextColor(colors.card, colors)}
+        />
       </View>
 
       <Text style={styles.welcome}>Welcome back.</Text>

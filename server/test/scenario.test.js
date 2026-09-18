@@ -74,7 +74,11 @@ function goalFixture(overrides = {}) {
 
 function baseContext(overrides = {}) {
   const budgets = overrides.budgets || [
-    { category: 'Dining', budgeted_amount: 300, reasoning: 'Based on recent spend.' },
+    {
+      category: 'Dining',
+      budgeted_amount: 300,
+      reasoning: 'Based on recent spend.',
+    },
     { category: 'Groceries', budgeted_amount: 500, reasoning: null },
     { category: 'Shopping', budgeted_amount: 200, reasoning: null },
   ];
@@ -114,15 +118,27 @@ test('rejects amounts that are not finite positive numbers', () => {
 });
 
 test('rejects an unknown category or cadence', () => {
-  assert.throws(() => normalizeScenario({ amount: 10, category: 'Yachts' }, NOW), /category must be one of/);
-  assert.throws(() => normalizeScenario({ amount: 10, recurrence: 'hourly' }, NOW), /recurrence must be one of/);
-  assert.throws(() => normalizeScenario({ amount: 10, date: '08/11/2026' }, NOW), /date must be a YYYY-MM-DD string/);
+  assert.throws(
+    () => normalizeScenario({ amount: 10, category: 'Yachts' }, NOW),
+    /category must be one of/
+  );
+  assert.throws(
+    () => normalizeScenario({ amount: 10, recurrence: 'hourly' }, NOW),
+    /recurrence must be one of/
+  );
+  assert.throws(
+    () => normalizeScenario({ amount: 10, date: '08/11/2026' }, NOW),
+    /date must be a YYYY-MM-DD string/
+  );
 });
 
 test('defaults the purchase date to today and computes a monthly equivalent', () => {
   assert.equal(normalizeScenario({ amount: 100 }, NOW).date, '2026-08-11');
   assert.equal(normalizeScenario({ amount: 100 }, NOW).monthly_equivalent, 0);
-  assert.equal(normalizeScenario({ amount: 100, recurrence: 'monthly' }, NOW).monthly_equivalent, 100);
+  assert.equal(
+    normalizeScenario({ amount: 100, recurrence: 'monthly' }, NOW).monthly_equivalent,
+    100
+  );
 });
 
 test('monthlyEquivalent normalizes every cadence onto a month', () => {
@@ -196,7 +212,10 @@ test('a large purchase competing with bills before payday is risky timing', () =
   const context = baseContext({
     recurringSeries: [{ ...PAYCHECK, next_expected_date: '2026-08-28' }, RENT],
   });
-  const result = evaluateScenario({ context, scenario: { amount: 500, category: 'Shopping' } });
+  const result = evaluateScenario({
+    context,
+    scenario: { amount: 500, category: 'Shopping' },
+  });
 
   assert.equal(result.status, 'risky_timing');
   assert.equal(result.cash.upcoming_obligations_total, 1500);
@@ -249,7 +268,10 @@ test('a trivial purchase barely moves the goal date', () => {
     scenario: { amount: 20, category: 'Dining' },
   });
 
-  assert.ok(result.goal_impact.delay_days <= 2, `expected ~1 day, got ${result.goal_impact.delay_days}`);
+  assert.ok(
+    result.goal_impact.delay_days <= 2,
+    `expected ~1 day, got ${result.goal_impact.delay_days}`
+  );
   assert.equal(result.status, 'comfortable');
 });
 
@@ -272,7 +294,10 @@ test('a debt goal says "freed up" and never claims debt was repaid', () => {
   const context = baseContext({
     goals: [goalFixture({ goal_type: 'debt', verb: 'freed up' })],
   });
-  const result = evaluateScenario({ context, scenario: { amount: 200, category: 'Shopping' } });
+  const result = evaluateScenario({
+    context,
+    scenario: { amount: 200, category: 'Shopping' },
+  });
 
   assert.equal(result.goal_impact.verb, 'freed up');
   const text = JSON.stringify(result);
@@ -281,9 +306,19 @@ test('a debt goal says "freed up" and never claims debt was repaid', () => {
 
 test('a goal with no dollar target falls back to the smarter-spending framing', () => {
   const context = baseContext({
-    goals: [goalFixture({ has_target: false, target_amount: null, saved_amount: 1000, percent_complete: null })],
+    goals: [
+      goalFixture({
+        has_target: false,
+        target_amount: null,
+        saved_amount: 1000,
+        percent_complete: null,
+      }),
+    ],
   });
-  const result = evaluateScenario({ context, scenario: { amount: 200, category: 'Shopping' } });
+  const result = evaluateScenario({
+    context,
+    scenario: { amount: 200, category: 'Shopping' },
+  });
 
   assert.equal(result.goal_impact.available, false);
   assert.equal(result.goal_impact.reason, 'no_target');
@@ -291,11 +326,18 @@ test('a goal with no dollar target falls back to the smarter-spending framing', 
   assert.ok(result.limitations.some((l) => /Goal impact isn't included/.test(l)));
 });
 
-test('a goal whose linked accounts don\'t clear the realized-pace history gate says so honestly', () => {
+test("a goal whose linked accounts don't clear the realized-pace history gate says so honestly", () => {
   const context = baseContext({
-    goals: [goalFixture({ realized_pace: { insufficient_history: true, days_of_history: 3 } })],
+    goals: [
+      goalFixture({
+        realized_pace: { insufficient_history: true, days_of_history: 3 },
+      }),
+    ],
   });
-  const result = evaluateScenario({ context, scenario: { amount: 200, category: 'Shopping' } });
+  const result = evaluateScenario({
+    context,
+    scenario: { amount: 200, category: 'Shopping' },
+  });
 
   assert.equal(result.goal_impact.available, false);
   assert.equal(result.goal_impact.reason, 'insufficient_history');
@@ -305,7 +347,10 @@ test('a goal with no linked accounts at all is reported as such, not silently dr
   const context = baseContext({
     goals: [goalFixture({ no_accounts_linked: true, account_ids: [] })],
   });
-  const result = evaluateScenario({ context, scenario: { amount: 100, category: 'Dining' } });
+  const result = evaluateScenario({
+    context,
+    scenario: { amount: 100, category: 'Dining' },
+  });
 
   assert.equal(result.goal_impact.available, false);
   assert.equal(result.goal_impact.reason, 'no_accounts_linked');
@@ -313,9 +358,16 @@ test('a goal with no linked accounts at all is reported as such, not silently dr
 
 test('a draining account (negative realized pace) does not produce a fabricated projection', () => {
   const context = baseContext({
-    goals: [goalFixture({ realized_pace: { insufficient_history: false, monthly_pace: -50 } })],
+    goals: [
+      goalFixture({
+        realized_pace: { insufficient_history: false, monthly_pace: -50 },
+      }),
+    ],
   });
-  const result = evaluateScenario({ context, scenario: { amount: 100, category: 'Dining' } });
+  const result = evaluateScenario({
+    context,
+    scenario: { amount: 100, category: 'Dining' },
+  });
 
   assert.equal(result.goal_impact.available, false);
   assert.equal(result.goal_impact.reason, 'no_projection_yet');
@@ -342,7 +394,10 @@ test('no budget, no goal and no recurring data collapses to insufficient_data', 
 
 test('partial data yields medium confidence rather than a confident verdict', () => {
   const context = baseContext({ recurringSeries: [] }); // no income detected
-  const result = evaluateScenario({ context, scenario: { amount: 50, category: 'Dining' } });
+  const result = evaluateScenario({
+    context,
+    scenario: { amount: 50, category: 'Dining' },
+  });
 
   assert.equal(result.confidence, 'medium');
   assert.equal(result.cash.next_expected_income, null);
@@ -351,7 +406,10 @@ test('partial data yields medium confidence rather than a confident verdict', ()
 });
 
 test('every result states that no live balance was available', () => {
-  const result = evaluateScenario({ context: baseContext(), scenario: { amount: 50, category: 'Dining' } });
+  const result = evaluateScenario({
+    context: baseContext(),
+    scenario: { amount: 50, category: 'Dining' },
+  });
   assert.equal(result.cash.balance_available, false);
   assert.ok(result.limitations.some((l) => /not on a live account balance/.test(l)));
 });
@@ -370,7 +428,10 @@ test('stale recurring series are reported rather than counted as live bills', ()
   const context = baseContext({
     recurringSeries: [PAYCHECK, { ...RENT, next_expected_date: '2026-05-24' }],
   });
-  const result = evaluateScenario({ context, scenario: { amount: 100, category: 'Dining' } });
+  const result = evaluateScenario({
+    context,
+    scenario: { amount: 100, category: 'Dining' },
+  });
 
   assert.equal(result.cash.upcoming_obligations_total, 0);
   assert.equal(result.cash.stale_series.length, 1);
@@ -386,15 +447,24 @@ test('evaluating a scenario never mutates the context it was given', () => {
   const snapshot = JSON.stringify(context);
 
   evaluateScenario({ context, scenario: { amount: 900, category: 'Dining' } });
-  evaluateScenario({ context, scenario: { amount: 100, category: 'Dining', recurrence: 'monthly' } });
+  evaluateScenario({
+    context,
+    scenario: { amount: 100, category: 'Dining', recurrence: 'monthly' },
+  });
 
   assert.equal(JSON.stringify(context), snapshot, 'context must be treated as read-only');
 });
 
 test('the same question asked twice gives the same answer', () => {
   const context = baseContext();
-  const a = evaluateScenario({ context, scenario: { amount: 750, category: 'Shopping' } });
-  const b = evaluateScenario({ context, scenario: { amount: 750, category: 'Shopping' } });
+  const a = evaluateScenario({
+    context,
+    scenario: { amount: 750, category: 'Shopping' },
+  });
+  const b = evaluateScenario({
+    context,
+    scenario: { amount: 750, category: 'Shopping' },
+  });
   assert.deepEqual(a, b);
 });
 
@@ -441,10 +511,7 @@ test('compareScenarios reports how much goal delay a cheaper option recovers', (
   const diff = comparison.differences[0];
   assert.equal(diff.label, 'the cheaper one');
   assert.ok(diff.goal_days_recovered > 0);
-  assert.equal(
-    diff.goal_days_recovered,
-    diff.goal_delay_days_from - diff.goal_delay_days_to
-  );
+  assert.equal(diff.goal_days_recovered, diff.goal_delay_days_from - diff.goal_delay_days_to);
 });
 
 test('compareScenarios with a single scenario reports no differences', () => {
@@ -465,9 +532,22 @@ test('no user-facing string ever speaks in the first person', () => {
   const context = baseContext();
   const results = [
     evaluateScenario({ context, scenario: { amount: 50, category: 'Dining' } }),
-    evaluateScenario({ context, scenario: { amount: 1500, category: 'Shopping' } }),
-    evaluateScenario({ context, scenario: { amount: 900, category: 'Subscriptions', recurrence: 'monthly' } }),
-    evaluateScenario({ context: baseContext({ recurringSeries: [] }), scenario: { amount: 50 } }),
+    evaluateScenario({
+      context,
+      scenario: { amount: 1500, category: 'Shopping' },
+    }),
+    evaluateScenario({
+      context,
+      scenario: {
+        amount: 900,
+        category: 'Subscriptions',
+        recurrence: 'monthly',
+      },
+    }),
+    evaluateScenario({
+      context: baseContext({ recurringSeries: [] }),
+      scenario: { amount: 50 },
+    }),
   ];
 
   for (const result of results) {
@@ -500,7 +580,10 @@ test('no user-facing string ever speaks in the first person', () => {
 
 test('suggestions: a purchase that overspends its own category names other categories with real slack, ranked by how much', () => {
   const context = baseContext();
-  const result = evaluateScenario({ context, scenario: { amount: 2000, category: 'Shopping' } });
+  const result = evaluateScenario({
+    context,
+    scenario: { amount: 2000, category: 'Shopping' },
+  });
 
   assert.equal(result.budget_impact.pushes_category_over, true);
   assert.equal(result.suggestions.length, 1);
@@ -530,7 +613,11 @@ test('suggestions: essential categories are never named, even when they have the
       { category: 'Dining', budgeted_amount: 300, reasoning: null },
       { category: 'Bills & Utilities', budgeted_amount: 500, reasoning: null },
       { category: 'Transportation', budgeted_amount: 400, reasoning: null },
-      { category: 'Health & Personal Care', budgeted_amount: 300, reasoning: null },
+      {
+        category: 'Health & Personal Care',
+        budgeted_amount: 300,
+        reasoning: null,
+      },
       { category: 'Shopping', budgeted_amount: 200, reasoning: null },
     ],
     actuals: [
@@ -541,7 +628,10 @@ test('suggestions: essential categories are never named, even when they have the
       { category: 'Shopping', actual_amount: 50 },
     ],
   });
-  const result = evaluateScenario({ context, scenario: { amount: 2000, category: 'Shopping' } });
+  const result = evaluateScenario({
+    context,
+    scenario: { amount: 2000, category: 'Shopping' },
+  });
 
   // Every essential category in this fixture has far more real slack than
   // Dining ($50), but a purchase can never be "fixed" by suggesting less
@@ -554,7 +644,10 @@ test('suggestions: essential categories are never named, even when they have the
 
 test('suggestions: a purchase that already fits comfortably gets no suggestions - nothing to guide toward', () => {
   const context = baseContext();
-  const result = evaluateScenario({ context, scenario: { amount: 50, category: 'Dining' } });
+  const result = evaluateScenario({
+    context,
+    scenario: { amount: 50, category: 'Dining' },
+  });
 
   assert.equal(result.budget_impact.pushes_category_over, false);
   assert.deepEqual(result.suggestions, []);
@@ -562,7 +655,10 @@ test('suggestions: a purchase that already fits comfortably gets no suggestions 
 
 test('suggestions: no budget generated yet produces no suggestions rather than guessing', () => {
   const context = baseContext({ budgets: [], actuals: [] });
-  const result = evaluateScenario({ context, scenario: { amount: 2000, category: 'Shopping' } });
+  const result = evaluateScenario({
+    context,
+    scenario: { amount: 2000, category: 'Shopping' },
+  });
 
   assert.equal(result.budget_impact.available, false);
   assert.deepEqual(result.suggestions, []);
@@ -579,7 +675,10 @@ test('suggestions: no other category has real slack produces an empty suggestion
       { category: 'Shopping', actual_amount: 50 },
     ],
   });
-  const result = evaluateScenario({ context, scenario: { amount: 2000, category: 'Shopping' } });
+  const result = evaluateScenario({
+    context,
+    scenario: { amount: 2000, category: 'Shopping' },
+  });
 
   assert.equal(result.budget_impact.pushes_category_over, true);
   assert.deepEqual(result.suggestions, []);
@@ -610,7 +709,10 @@ test('suggestions: caps at 3 named categories even when more have real slack', (
       { category: 'Shopping', actual_amount: 50 },
     ],
   });
-  const result = evaluateScenario({ context, scenario: { amount: 2000, category: 'Shopping' } });
+  const result = evaluateScenario({
+    context,
+    scenario: { amount: 2000, category: 'Shopping' },
+  });
 
   assert.equal(result.suggestions[0].categories.length, 3);
   // Ranked by real remaining, descending - Travel (300) and Dining (150)

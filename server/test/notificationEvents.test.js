@@ -103,7 +103,7 @@ test('reconcileSavingsReminderEvents: a real, on-track goal with a timeframe que
   assert.match(event.body, /\$440\.00/);
 });
 
-test('reconcileSavingsReminderEvents: a different period gets its own reminder, not blocked by a previous period\'s dedup key', () => {
+test("reconcileSavingsReminderEvents: a different period gets its own reminder, not blocked by a previous period's dedup key", () => {
   const oldDedupKey = `savings_reminder:${SIGNATURE}:2026-07-01`;
   const result = reconcileSavingsReminderEvents({
     existingEvents: [{ dedup_key: oldDedupKey }],
@@ -198,7 +198,12 @@ test('reminderPeriodStart: biweekly returns a stable 14-day window that never re
 // Phase 38 Step 7 (Notification Settings: low-balance threshold).
 
 function account({ id = 'acc-1', name = 'Checking', available = 500, current = 500 } = {}) {
-  return { plaid_account_id: id, name, available_balance: available, current_balance: current };
+  return {
+    plaid_account_id: id,
+    name,
+    available_balance: available,
+    current_balance: current,
+  };
 }
 
 test('reconcileLowBalanceEvents: an account below its own configured threshold queues a real alert', () => {
@@ -238,7 +243,14 @@ test('reconcileLowBalanceEvents: at or above the threshold does not fire', () =>
 test('reconcileLowBalanceEvents: a missing/non-numeric balance is skipped, never treated as $0', () => {
   const result = reconcileLowBalanceEvents({
     existingEvents: [],
-    accounts: [{ plaid_account_id: 'acc-1', name: 'Checking', available_balance: null, current_balance: undefined }],
+    accounts: [
+      {
+        plaid_account_id: 'acc-1',
+        name: 'Checking',
+        available_balance: null,
+        current_balance: undefined,
+      },
+    ],
     thresholds: { 'acc-1': 100 },
   });
   assert.deepEqual(result.toInsert, []);
@@ -279,7 +291,14 @@ test('reconcileLowBalanceEvents: recovering above the threshold resolves a pendi
 test('reconcileLowBalanceEvents: prefers available_balance over current_balance when both exist', () => {
   const result = reconcileLowBalanceEvents({
     existingEvents: [],
-    accounts: [{ plaid_account_id: 'acc-1', name: 'Checking', available_balance: 40, current_balance: 500 }],
+    accounts: [
+      {
+        plaid_account_id: 'acc-1',
+        name: 'Checking',
+        available_balance: 40,
+        current_balance: 500,
+      },
+    ],
     thresholds: { 'acc-1': 100 },
   });
   assert.equal(result.toInsert.length, 1);

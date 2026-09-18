@@ -1,5 +1,13 @@
 import { useCallback, useMemo, useState } from 'react';
-import { View, Text, Switch, ActivityIndicator, TextInput, ScrollView, StyleSheet } from 'react-native';
+import {
+  View,
+  Text,
+  Switch,
+  ActivityIndicator,
+  TextInput,
+  ScrollView,
+  StyleSheet,
+} from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { apiFetch, apiErrorMessage, formatDecimal, patchSettings } from '../_lib/api';
 import { useTheme } from '../_lib/theme';
@@ -16,7 +24,10 @@ const SECTION = 'notification_settings';
 // Theme redesign (2026-09-11): colors/styles now come from useTheme().
 export default function NotificationSettings() {
   const { colors, styles } = useTheme();
-  const notificationSettingsStyles = useMemo(() => buildNotificationSettingsStyles(colors), [colors]);
+  const notificationSettingsStyles = useMemo(
+    () => buildNotificationSettingsStyles(colors),
+    [colors]
+  );
   const router = useRouter();
   const [settings, setSettings] = useState(null);
   const [accounts, setAccounts] = useState(null);
@@ -136,7 +147,12 @@ export default function NotificationSettings() {
                 />
               )}
             </View>
-            <View style={[notificationSettingsStyles.toggleRow, notificationSettingsStyles.toggleRowDivider]}>
+            <View
+              style={[
+                notificationSettingsStyles.toggleRow,
+                notificationSettingsStyles.toggleRowDivider,
+              ]}
+            >
               <View style={notificationSettingsStyles.toggleTextCol}>
                 <Text style={notificationSettingsStyles.toggleLabel}>Goal milestones</Text>
                 <Text style={[styles.smallText, notificationSettingsStyles.description]}>
@@ -153,12 +169,16 @@ export default function NotificationSettings() {
                 />
               )}
             </View>
-            <View style={[notificationSettingsStyles.toggleRow, notificationSettingsStyles.toggleRowDivider]}>
+            <View
+              style={[
+                notificationSettingsStyles.toggleRow,
+                notificationSettingsStyles.toggleRowDivider,
+              ]}
+            >
               <View style={notificationSettingsStyles.toggleTextCol}>
                 <Text style={notificationSettingsStyles.toggleLabel}>Subscription findings</Text>
                 <Text style={[styles.smallText, notificationSettingsStyles.description]}>
-                  Price creep, price jumps, and lapsed subscriptions detected on the
-                  Recurring tab.
+                  Price creep, price jumps, and lapsed subscriptions detected on the Recurring tab.
                 </Text>
               </View>
               {saving ? (
@@ -176,17 +196,16 @@ export default function NotificationSettings() {
           <View style={[styles.card, notificationSettingsStyles.card]}>
             <Text style={styles.cardTitle}>Savings reminders</Text>
             <Text style={[styles.smallText, notificationSettingsStyles.description]}>
-              Controlled from Settings -> Goal -> Auto-Save reminder (frequency, including
-              Off), not repeated here as a second toggle.
+              Controlled from Settings → Goal → Auto-Save reminder (frequency, including Off), not
+              repeated here as a second toggle.
             </Text>
           </View>
 
           <View style={[styles.card, notificationSettingsStyles.card]}>
             <Text style={styles.cardTitle}>Low balance</Text>
             <Text style={[styles.smallText, notificationSettingsStyles.description]}>
-              Set a dollar threshold per account - leave blank to turn off for that
-              account. You'll be alerted once when it drops below, not again until it
-              recovers and drops again.
+              Set a dollar threshold per account - leave blank to turn off for that account. You'll
+              be alerted once when it drops below, not again until it recovers and drops again.
             </Text>
             {allAccounts.length === 0 ? (
               <Text style={[styles.smallText, notificationSettingsStyles.description]}>
@@ -237,73 +256,73 @@ export default function NotificationSettings() {
 // via useMemo inside the component (keyed on colors).
 function buildNotificationSettingsStyles(colors) {
   return StyleSheet.create({
-  bodyScroll: {
-    flex: 1,
-  },
-  body: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 40,
-    gap: 12,
-  },
-  card: {
-    gap: 8,
-  },
-  description: {
-    textAlign: 'left',
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    paddingVertical: 6,
-  },
-  toggleRowDivider: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.sage,
-    marginTop: 4,
-    paddingTop: 12,
-  },
-  toggleTextCol: {
-    flex: 1,
-    gap: 2,
-  },
-  toggleLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-  accountRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 10,
-  },
-  accountRowDivider: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.sage,
-  },
-  accountNameCol: {
-    flex: 1,
-    gap: 2,
-  },
-  accountName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.darkest,
-  },
-  thresholdInput: {
-    width: 90,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.sage,
-    borderRadius: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    fontSize: 14,
-    color: colors.darkest,
-    backgroundColor: colors.background,
-    textAlign: 'right',
-  },
+    bodyScroll: {
+      flex: 1,
+    },
+    body: {
+      paddingHorizontal: 16,
+      paddingTop: 8,
+      paddingBottom: 40,
+      gap: 12,
+    },
+    card: {
+      gap: 8,
+    },
+    description: {
+      textAlign: 'left',
+    },
+    toggleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      paddingVertical: 6,
+    },
+    toggleRowDivider: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.sage,
+      marginTop: 4,
+      paddingTop: 12,
+    },
+    toggleTextCol: {
+      flex: 1,
+      gap: 2,
+    },
+    toggleLabel: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+    accountRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingVertical: 10,
+    },
+    accountRowDivider: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.sage,
+    },
+    accountNameCol: {
+      flex: 1,
+      gap: 2,
+    },
+    accountName: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.darkest,
+    },
+    thresholdInput: {
+      width: 90,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.sage,
+      borderRadius: 10,
+      paddingVertical: 8,
+      paddingHorizontal: 10,
+      fontSize: 14,
+      color: colors.darkest,
+      backgroundColor: colors.background,
+      textAlign: 'right',
+    },
   });
 }
