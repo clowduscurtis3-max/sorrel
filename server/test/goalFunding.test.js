@@ -43,9 +43,9 @@ test('computeDiscretionaryCapacity: income minus essentials minus the discretion
     Other: 20,
   };
   // essentials: 400+800+100+100+50 = 1450, Other: 20
-  // discretionary total: 300+50+200+100+0 = 650, floor (70%) = 455
+  // discretionary total: 300+50+200+100+0 = 650, floor (20%) = 130
   const result = computeDiscretionaryCapacity({ averages, averageMonthlyIncome: 3000 });
-  assert.equal(result.capacity, 3000 - 1450 - 20 - 455);
+  assert.equal(result.capacity, 3000 - 1450 - 20 - 130);
 });
 
 test('computeDiscretionaryCapacity: never goes negative when essentials alone exceed income', () => {
@@ -58,9 +58,9 @@ test('computeDiscretionaryCapacity: never goes negative when essentials alone ex
 test('computeDiscretionaryCapacity: a user-set discretionary category is fixed at its real amount, not floored', () => {
   const averages = { Groceries: 0, 'Bills & Utilities': 0, Transportation: 0, Gas: 0, 'Health & Personal Care': 0,
     Dining: 1000, Subscriptions: 0, Shopping: 0, Entertainment: 0, Travel: 0, Other: 0 };
-  // Without user-set: Dining's floor is 700, leaving 300 trimmable.
+  // Without user-set: Dining's floor is 200, leaving 800 trimmable.
   const withoutUserSet = computeDiscretionaryCapacity({ averages, averageMonthlyIncome: 1000 });
-  assert.equal(withoutUserSet.capacity, 300);
+  assert.equal(withoutUserSet.capacity, 800);
   // User fixed Dining at the full 1000 (e.g. raised it manually) - all of
   // it is now committed, none of it trimmable, regardless of the floor.
   const withUserSet = computeDiscretionaryCapacity({
@@ -90,8 +90,20 @@ test('computeDiscretionaryCapacity: a negative category average (net refunds) is
   assert.equal(result.capacity, 1000);
 });
 
-test('computeDiscretionaryCapacity: DISCRETIONARY_FLOOR_RATIO is the real, exported 70% rule', () => {
-  assert.equal(DISCRETIONARY_FLOOR_RATIO, 0.7);
+test('computeDiscretionaryCapacity: DISCRETIONARY_FLOOR_RATIO is the real, exported 20% rule', () => {
+  // Lowered from 0.7 to 0.2 (2026-09-17, direct user decision) - going
+  // below even this floor requires the separate, explicit-acceptance
+  // path (DiscretionaryFloorShortfallError in budget.js), never automatic.
+  assert.equal(DISCRETIONARY_FLOOR_RATIO, 0.2);
+});
+
+test('computeDiscretionaryCapacity: raw_capacity is the unclamped figure - negative when even the floor does not fit inside income', () => {
+  const averages = { Groceries: 0, 'Bills & Utilities': 5000, Transportation: 0, Gas: 0, 'Health & Personal Care': 0,
+    Dining: 1000, Subscriptions: 0, Shopping: 0, Entertainment: 0, Travel: 0, Other: 0 };
+  // essentials: 5000, discretionary floor (20% of Dining's 1000): 200 - already 5200 against income of 1000.
+  const result = computeDiscretionaryCapacity({ averages, averageMonthlyIncome: 1000 });
+  assert.equal(result.capacity, 0); // clamped, matching every other caller that can't spend negative money
+  assert.equal(result.raw_capacity, 1000 - 5000 - 200); // -4200, the real, unclamped shortfall
 });
 
 // -- allocateGoalFunding ------------------------------------------------
@@ -242,4 +254,53 @@ test('computeDiscretionaryTarget: zero or negative capacity clamps to the floor,
     }),
     700
   );
+});
+
+// `allowBelowFloor` (2026-09-17, direct user decision): default false
+// always matches the tests above - never a silent behavior change.
+// Explicitly true, with the real (unclamped, negative) capacity that
+// implies, is the only way the target can fall below the floor - and
+// only by exactly the real gap, never further.
+
+test('computeDiscretionaryTarget: allowBelowFloor defaults to false - negative capacity still clamps to the floor', () => {
+  const target = computeDiscretionaryTarget({
+    discretionaryAverageTotal: 1000,
+    discretionaryFloorTotal: 700,
+    capacity: -300,
+    totalGoalFundingNeeded: 0,
+  });
+  assert.equal(target, 700);
+});
+
+test('computeDiscretionaryTarget: allowBelowFloor true drops exactly by the real shortfall, never further', () => {
+  const target = computeDiscretionaryTarget({
+    discretionaryAverageTotal: 1000,
+    discretionaryFloorTotal: 700,
+    capacity: -300, // essentials + the floor already overshoot income by 300
+    totalGoalFundingNeeded: 0,
+    allowBelowFloor: true,
+  });
+  assert.equal(target, 400); // 700 - 300, not forced all the way to 0
+});
+
+test('computeDiscretionaryTarget: allowBelowFloor true still floors at $0, never negative, even if the shortfall exceeds the floor itself', () => {
+  const target = computeDiscretionaryTarget({
+    discretionaryAverageTotal: 1000,
+    discretionaryFloorTotal: 700,
+    capacity: -5000, // essentials alone dwarf income
+    totalGoalFundingNeeded: 0,
+    allowBelowFloor: true,
+  });
+  assert.equal(target, 0);
+});
+
+test('computeDiscretionaryTarget: allowBelowFloor true with real capacity to spare behaves identically to the default path', () => {
+  const target = computeDiscretionaryTarget({
+    discretionaryAverageTotal: 1000,
+    discretionaryFloorTotal: 700,
+    capacity: 5000,
+    totalGoalFundingNeeded: 0,
+    allowBelowFloor: true,
+  });
+  assert.equal(target, 1000);
 });

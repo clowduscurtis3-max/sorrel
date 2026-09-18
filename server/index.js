@@ -35,6 +35,7 @@ const {
   applyBudgetEdit,
   currentMonthRange,
   NoHistoryError,
+  DiscretionaryFloorShortfallError,
 } = require('./budget');
 const { getBudgetHistory } = require('./budgetHistory');
 const { getHomeChanges } = require('./homeChanges');
@@ -1845,7 +1846,14 @@ app.post('/budget/generate', requireUser, async (req, res) => {
     // categories untouched. Real need found live: user-set values have no
     // expiry, so one set while testing against now-deleted Sandbox accounts
     // survived indefinitely with no way to clear it.
-    const budget = await generateBudget(req.userId, { force: req.body?.force === true });
+    const budget = await generateBudget(req.userId, {
+      force: req.body?.force === true,
+      // Explicit acceptance of the "your bills exceed your income even at
+      // discretionary's floor" prompt (see DiscretionaryFloorShortfallError)
+      // - never inferred, only ever set when the client re-calls this same
+      // route after the user has actually seen and confirmed the shortfall.
+      allowDiscretionaryBelowFloor: req.body?.allowDiscretionaryBelowFloor === true,
+    });
     // Best-effort: refreshes budget_actuals immediately so /budget/status
     // is accurate right after generating, without waiting for the next
     // sync cycle. A hiccup here shouldn't fail budget generation, which
@@ -1869,6 +1877,19 @@ app.post('/budget/generate', requireUser, async (req, res) => {
   } catch (err) {
     if (err instanceof NoHistoryError) {
       return res.status(400).json({ error: err.message });
+    }
+    // Not a failure - a real, computed fact the client has to show the
+    // user and get an explicit accept/decline on before this route can be
+    // safely re-called with allowDiscretionaryBelowFloor: true. 409, not
+    // 400/500, so the client can distinguish "needs a decision" from
+    // "broken request"/"server error".
+    if (err instanceof DiscretionaryFloorShortfallError) {
+      return res.status(409).json({
+        error: err.message,
+        needs_confirmation: true,
+        shortfall: err.shortfall,
+        discretionary_categories: err.discretionaryCategories,
+      });
     }
     // Reaches an Anthropic call (generateBudget), so this must go through
     // logError, not a raw console.error - see the CLAUDE.md rule this
@@ -1909,6 +1930,21 @@ app.post('/budget/reset-category', requireUser, async (req, res) => {
   } catch (err) {
     if (err instanceof NoHistoryError) {
       return res.status(400).json({ error: err.message });
+    }
+    // Same reasoning as /budget/generate's own catch just above -
+    // resetCategoryToAI calls generateBudget, which can hit the same
+    // shortfall. This route has no allowDiscretionaryBelowFloor of its
+    // own (resetting one category to AI never carries that acceptance),
+    // so it always surfaces as "needs confirmation" here - the client
+    // should point the user at a regular /budget/generate retry with the
+    // flag set, not silently swallow this into a generic reset failure.
+    if (err instanceof DiscretionaryFloorShortfallError) {
+      return res.status(409).json({
+        error: err.message,
+        needs_confirmation: true,
+        shortfall: err.shortfall,
+        discretionary_categories: err.discretionaryCategories,
+      });
     }
     // Same reasoning as /budget/generate's own catch just above -
     // resetCategoryToAI calls generateBudget, which reaches Anthropic.

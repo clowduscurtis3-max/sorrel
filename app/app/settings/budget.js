@@ -3,6 +3,7 @@ import { View, Text, Switch, ActivityIndicator, Pressable, Alert, StyleSheet } f
 import { useRouter, useFocusEffect } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { apiFetch, apiErrorMessage, patchSettings } from '../_lib/api';
+import { showDiscretionaryShortfallAlert } from '../_lib/goalFunding';
 import { useTheme } from '../_lib/theme';
 import SettingsScreenChrome from '../_components/SettingsScreenChrome';
 import SettingsFetchGate from '../_components/SettingsFetchGate';
@@ -65,19 +66,30 @@ export default function BudgetSettings() {
     }
   }
 
-  async function regenerateEntireBudget() {
+  async function regenerateEntireBudget({ allowDiscretionaryBelowFloor = false } = {}) {
     setRegenerating(true);
     setError(null);
     try {
       const res = await apiFetch('/budget/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ force: true }),
+        body: JSON.stringify({ force: true, allowDiscretionaryBelowFloor }),
       });
       if (!res.ok) {
         if (res.status === 400) {
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error || 'SERVER_ERROR');
+        }
+        // Real fact, not a failure - see (tabs)/budget.js's identical
+        // handling for the full "why" (DiscretionaryFloorShortfallError).
+        if (res.status === 409) {
+          const body = await res.json().catch(() => ({}));
+          if (body.needs_confirmation) {
+            showDiscretionaryShortfallAlert(body.error, body.discretionary_categories, () =>
+              regenerateEntireBudget({ allowDiscretionaryBelowFloor: true })
+            );
+            return;
+          }
         }
         throw new Error('SERVER_ERROR');
       }

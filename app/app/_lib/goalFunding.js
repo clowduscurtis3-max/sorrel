@@ -1,3 +1,4 @@
+import { Alert } from 'react-native';
 import { formatDateMDY, GOAL_TYPES } from './api';
 
 // The goal's own display name - moved here from (tabs)/goal.js
@@ -49,6 +50,52 @@ export function describeRealisticDateInsight(allocation, goalName) {
     );
   }
   return null;
+}
+
+// Shared by every /budget/generate and /budget/reset-category caller
+// (Budget tab, BudgetInsightModal, Settings) - all three can hit the
+// identical 409 (server's DiscretionaryFloorShortfallError). Pure text -
+// showDiscretionaryShortfallAlert just below is the actual Alert.alert
+// callers should use; this stays exported separately in case a caller
+// ever needs the wording without the dialog itself.
+//
+// `categories` (real bug caught by code review 2026-09-17): must be the
+// server's own `discretionary_categories` from the 409 body - the real,
+// current set generateBudget can actually rescale - never a hardcoded
+// full list. A category the user has manually fixed (is_user_set) is
+// excluded from that list and structurally won't move if this prompt is
+// accepted; naming it here anyway would promise a cut that never
+// happens. Server-side, this error is only ever thrown when that list is
+// non-empty (see budget.js's own needsShortfallDecision gate), so a
+// missing/empty list here means something upstream changed - falls back
+// to generic wording rather than silently naming nothing or crashing.
+export function discretionaryShortfallAlert(errorMessage, categories) {
+  const categoryList = Array.isArray(categories) && categories.length > 0 ? categories.join(', ') : null;
+  return {
+    title: 'Your budget doesn’t fit your income',
+    message:
+      `${errorMessage} ` +
+      (categoryList
+        ? `Discretionary spending (${categoryList}) can be cut further than usual - ` +
+          'down to $0 if necessary - to close this gap. Your other categories won’t be touched.'
+        : 'Discretionary spending can be cut further than usual - down to $0 if necessary - ' +
+          'to close this gap. Your other categories won’t be touched.'),
+  };
+}
+
+// Real dup caught by code review 2026-09-17: all three callers were
+// hand-building the identical Alert.alert (title/message/button set)
+// around discretionaryShortfallAlert()'s text above - the exact drift
+// risk that helper was introduced to prevent, just one layer up. This is
+// now the one place the actual dialog gets built; every caller passes
+// only its own onAccept (always a re-call with allowDiscretionaryBelowFloor:
+// true).
+export function showDiscretionaryShortfallAlert(errorMessage, categories, onAccept) {
+  const { title, message } = discretionaryShortfallAlert(errorMessage, categories);
+  Alert.alert(title, message, [
+    { text: 'Cancel', style: 'cancel' },
+    { text: 'Cut Discretionary Spending Further', style: 'destructive', onPress: onAccept },
+  ]);
 }
 
 // Budget tab: one entry of a category edit's `funding_impact.goals` diff -

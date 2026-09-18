@@ -33,7 +33,7 @@ import { useTheme } from '../_lib/theme';
 import { useAppData } from '../_lib/appData';
 import { iconForCategory } from '../_lib/categoryIcons';
 import { statusForCategory, computeSpendStats, computePace, computeMonthProgress } from '../_lib/homeSummary';
-import { describeFundingImpactLine, goalDisplayName } from '../_lib/goalFunding';
+import { describeFundingImpactLine, goalDisplayName, showDiscretionaryShortfallAlert } from '../_lib/goalFunding';
 import AffordabilityQuery from '../_components/AffordabilityQuery';
 import PrimaryButton from '../_components/PrimaryButton';
 import BudgetInsightModal from '../_components/BudgetInsightModal';
@@ -394,11 +394,22 @@ export default function Budget() {
   // second button/link competing with this one. The immediate fix for a
   // stale user-set category (see resetCategoryToAI below) is per-category,
   // not all-or-nothing.
-  async function generateBudget() {
+  // `allowDiscretionaryBelowFloor` (2026-09-17, direct user decision):
+  // discretionary spending can absorb a real cut on its own (down to its
+  // usual 20% floor), but never automatically all the way past that floor
+  // toward $0 - only with this explicit flag, set here ONLY after the user
+  // has actually seen the real dollar shortfall (via the 409 below) and
+  // chosen "Cut discretionary spending further." Never set on the first,
+  // default call.
+  async function generateBudget({ allowDiscretionaryBelowFloor = false } = {}) {
     setGeneratingBudget(true);
     setError(null);
     try {
-      const res = await apiFetch('/budget/generate', { method: 'POST' });
+      const res = await apiFetch('/budget/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allowDiscretionaryBelowFloor }),
+      });
       if (!res.ok) {
         // A 400 here is a specific, actionable message from the backend
         // (e.g. "sync your transactions first") - show it as-is rather
@@ -406,6 +417,20 @@ export default function Budget() {
         if (res.status === 400) {
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error || 'SERVER_ERROR');
+        }
+        // 409: not a failure - the backend has computed a real fact (your
+        // committed bills and essential spending exceed your income even
+        // after cutting discretionary to its normal floor) and is asking
+        // whether to cut discretionary further, all the way to $0 if
+        // needed. Never applied without this explicit round-trip.
+        if (res.status === 409) {
+          const body = await res.json().catch(() => ({}));
+          if (body.needs_confirmation) {
+            showDiscretionaryShortfallAlert(body.error, body.discretionary_categories, () =>
+              generateBudget({ allowDiscretionaryBelowFloor: true })
+            );
+            return;
+          }
         }
         throw new Error('SERVER_ERROR');
       }
@@ -436,7 +461,24 @@ export default function Budget() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ category }),
       });
-      if (!res.ok) throw new Error('SERVER_ERROR');
+      if (!res.ok) {
+        // Same real fact this route can hit as a plain regenerate
+        // (resetCategoryToAI calls generateBudget under the hood) - but
+        // this route has no way to carry the acceptance itself, so
+        // accepting here falls through to a full regenerate with the
+        // flag set instead, which covers this category too.
+        if (res.status === 409) {
+          const body = await res.json().catch(() => ({}));
+          if (body.needs_confirmation) {
+            cancelEditBudget();
+            showDiscretionaryShortfallAlert(body.error, body.discretionary_categories, () =>
+              generateBudget({ allowDiscretionaryBelowFloor: true })
+            );
+            return;
+          }
+        }
+        throw new Error('SERVER_ERROR');
+      }
       cancelEditBudget();
       await fetchBudgetStatus();
       await refetchAlerts();

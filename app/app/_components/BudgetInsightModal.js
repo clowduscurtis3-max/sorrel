@@ -3,6 +3,7 @@ import { View, Text, Modal, Pressable, ActivityIndicator, ScrollView, StyleSheet
 import { MaterialIcons } from '@expo/vector-icons';
 import { apiFetch, apiErrorMessage, formatDecimal, logRecommendationEvent } from '../_lib/api';
 import { useTheme } from '../_lib/theme';
+import { showDiscretionaryShortfallAlert } from '../_lib/goalFunding';
 import PrimaryButton from './PrimaryButton';
 
 // Budget Insight pill's modal (2026-08-24) - see CLAUDE.md's own "Sorrel —
@@ -109,15 +110,30 @@ export default function BudgetInsightModal({ visible, onClose, insight, onBudget
     }
   }
 
-  async function handleRegenerate() {
+  async function handleRegenerate({ allowDiscretionaryBelowFloor = false } = {}) {
     setRegenerating(true);
     setError(null);
     try {
-      const res = await apiFetch('/budget/generate', { method: 'POST' });
+      const res = await apiFetch('/budget/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allowDiscretionaryBelowFloor }),
+      });
       if (!res.ok) {
         if (res.status === 400) {
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error || 'SERVER_ERROR');
+        }
+        // Real fact, not a failure - see budget.js's identical handling
+        // for the full "why" (DiscretionaryFloorShortfallError).
+        if (res.status === 409) {
+          const body = await res.json().catch(() => ({}));
+          if (body.needs_confirmation) {
+            showDiscretionaryShortfallAlert(body.error, body.discretionary_categories, () =>
+              handleRegenerate({ allowDiscretionaryBelowFloor: true })
+            );
+            return;
+          }
         }
         throw new Error('SERVER_ERROR');
       }

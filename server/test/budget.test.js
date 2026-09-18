@@ -55,6 +55,39 @@ test('buildBudgetRows: capacity binding - the cap engages and discretionary cate
   assert.equal(groceries.budgeted_amount, 400);
 });
 
+test('buildBudgetRows: allowDiscretionaryBelowFloor lets the rescale drop a category below its usual floor, down toward $0', () => {
+  // Dining averages 200 (usual 20% floor would be 40) - target of 10
+  // could never be reached with the default floor in place. Only reached
+  // when the caller has explicitly passed allowDiscretionaryBelowFloor,
+  // mirroring generateBudget's own gate on DiscretionaryFloorShortfallError.
+  const rows = buildBudgetRows(
+    baseArgs({
+      proposed: { Dining: { budgeted_amount: 200, reasoning: 'r' } },
+      categoriesToGenerate: ['Dining'],
+      needsDiscretionaryCap: true,
+      discretionaryCategoriesToGenerate: ['Dining'],
+      discretionaryTarget: 10,
+      allowDiscretionaryBelowFloor: true,
+      averages: { Dining: 200 },
+    })
+  );
+  assert.equal(rows.find((r) => r.category === 'Dining').budgeted_amount, 10);
+});
+
+test('buildBudgetRows: allowDiscretionaryBelowFloor omitted (default false) still enforces the usual floor', () => {
+  const rows = buildBudgetRows(
+    baseArgs({
+      proposed: { Dining: { budgeted_amount: 200, reasoning: 'r' } },
+      categoriesToGenerate: ['Dining'],
+      needsDiscretionaryCap: true,
+      discretionaryCategoriesToGenerate: ['Dining'],
+      discretionaryTarget: 10, // below the real 20% floor (40) - can't be honored without the flag
+      averages: { Dining: 200 },
+    })
+  );
+  assert.equal(rows.find((r) => r.category === 'Dining').budgeted_amount, 40);
+});
+
 test('buildBudgetRows: real capacity to spare - the cap never engages, Claude\'s own numbers pass through unchanged', () => {
   const rows = buildBudgetRows(
     baseArgs({

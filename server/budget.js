@@ -124,6 +124,7 @@ function buildBudgetRows({
   needsDiscretionaryCap,
   discretionaryCategoriesToGenerate,
   discretionaryTarget,
+  allowDiscretionaryBelowFloor = false,
   averages,
 }) {
   // A category is only usable if Claude gave it a finite, non-negative
@@ -175,6 +176,10 @@ function buildBudgetRows({
       discretionaryCategories: discretionaryCategoriesToGenerate,
       target: discretionaryTarget,
       averages,
+      // Only relaxed to 0 when the caller has already passed through the
+      // explicit-acceptance path in generateBudget - never a silent
+      // default. See DiscretionaryFloorShortfallError's own comment.
+      floorRatio: allowDiscretionaryBelowFloor ? 0 : DISCRETIONARY_FLOOR_RATIO,
     });
   }
 
@@ -185,6 +190,30 @@ function buildBudgetRows({
 // not a server fault - lets index.js return 400 instead of 500 and the
 // app show this exact, actionable message instead of a generic error.
 class NoHistoryError extends Error {}
+
+// Thrown when necessities (essentials + known bills) alone exceed income
+// even after discretionary is squeezed to its normal floor (2026-09-17,
+// direct user decision: discretionary can be cut further than that, all
+// the way to $0 if it must, but NEVER automatically - it has to be
+// surfaced as a real fact and explicitly accepted first). index.js
+// catches this and returns it distinctly (409, `needs_confirmation`)
+// instead of a generic 500, carrying `shortfall` so the client can show
+// the real dollar gap and offer the explicit accept/decline choice.
+// Re-calling with `{ allowDiscretionaryBelowFloor: true }` is that
+// acceptance - never anything generateBudget decides on its own.
+class DiscretionaryFloorShortfallError extends Error {
+  constructor(message, shortfall, discretionaryCategories) {
+    super(message);
+    this.shortfall = shortfall;
+    // Real bug caught by code review 2026-09-17: the client's alert used
+    // to hardcode all 5 discretionary categories regardless of which
+    // ones are actually is_user_set (fixed) and excluded from the real
+    // rescale - promising a cut to categories that structurally won't
+    // move. This is always the real, current discretionaryCategoriesToGenerate
+    // list generateBudget computed, never a static assumption.
+    this.discretionaryCategories = discretionaryCategories;
+  }
+}
 
 // Claude is told to respond with ONLY a JSON object, but doesn't always
 // comply - caught live in testing: it added a full "**Reasoning:**"
@@ -380,22 +409,68 @@ async function generateBudget(userId, target = {}) {
   // nothing deterministically verifying the total stayed within real
   // income. "You can't budget more than you have" has to hold
   // regardless of whether a goal happens to be competing for the same
-  // room. `fundingPlan.capacity` (getDiscretionaryCapacity) is already
+  // room. `fundingPlan.raw_capacity` (getDiscretionaryCapacity) is
   // income minus every category's own committed floor (discretionary
-  // included, at its 70% floor) - the room that exists ABOVE every
-  // floor, up to income. Goal funding spends some of that first
-  // (totalGoalFundingNeeded); whatever's left is what discretionary
-  // spend is actually allowed to grow toward its own full average with.
-  const capacity = fundingPlan ? fundingPlan.capacity : Infinity;
+  // included, at its DISCRETIONARY_FLOOR_RATIO floor), UNCLAMPED - can
+  // go negative when even that floor doesn't fit inside real income.
+  // Goal funding spends some of the real (clamped) room first
+  // (totalGoalFundingNeeded); whatever's left of the raw figure is what
+  // discretionary spend is allowed to grow toward its own full average
+  // with, or - only once the caller has explicitly accepted the prompt
+  // below - shrink past its floor toward.
+  const rawCapacity = fundingPlan ? fundingPlan.raw_capacity : Infinity;
   const discretionaryTarget =
     discretionaryCategoriesToGenerate.length === 0
       ? 0
       : computeDiscretionaryTarget({
           discretionaryAverageTotal,
           discretionaryFloorTotal,
-          capacity,
+          capacity: rawCapacity,
           totalGoalFundingNeeded,
         });
+
+  // Real, distinct case from the one above (2026-09-17, direct user
+  // decision): discretionary can absorb a real cut on its own, down to
+  // DISCRETIONARY_FLOOR_RATIO - but never all the way to $0 without the
+  // user explicitly being told why and agreeing to it. If necessities
+  // (essentials + known bills) alone still don't fit inside income even
+  // AFTER discretionary is squeezed to that floor, that's a genuine
+  // "your committed bills exceed your income" fact, not something this
+  // function gets to paper over silently. Computed here, before the
+  // (billed) Anthropic call below, so an unaccepted shortfall never
+  // spends money on a budget that's about to be thrown away.
+  const essentialShortfall = fundingPlan ? round2(Math.max(0, -rawCapacity)) : 0;
+  // Real bug caught by code review 2026-09-17: gating this on the
+  // shortfall alone, without checking there's actually a discretionary
+  // category left to cut, let this fire even when every discretionary
+  // category is user-set (fixed) - accepting the prompt in that case
+  // changes nothing (discretionaryCategoriesToGenerate is empty, so
+  // needsDiscretionaryCap below can never engage), silently saving a
+  // budget that still exceeds income while telling the user their
+  // acceptance fixed it. Only offer this when there's real discretionary
+  // room this mechanism can actually touch.
+  const needsShortfallDecision =
+    !isBackfill && discretionaryCategoriesToGenerate.length > 0 && essentialShortfall > 0.01;
+  const allowDiscretionaryBelowFloor = needsShortfallDecision && target.allowDiscretionaryBelowFloor === true;
+  if (needsShortfallDecision && !allowDiscretionaryBelowFloor) {
+    throw new DiscretionaryFloorShortfallError(
+      `Your committed bills and essential spending exceed your income by ` +
+        `$${essentialShortfall.toFixed(2)}, even after cutting discretionary ` +
+        `spending to its ${Math.round(DISCRETIONARY_FLOOR_RATIO * 100)}% floor.`,
+      essentialShortfall,
+      discretionaryCategoriesToGenerate
+    );
+  }
+  const finalDiscretionaryTarget = allowDiscretionaryBelowFloor
+    ? computeDiscretionaryTarget({
+        discretionaryAverageTotal,
+        discretionaryFloorTotal,
+        capacity: rawCapacity,
+        totalGoalFundingNeeded,
+        allowBelowFloor: true,
+      })
+    : discretionaryTarget;
+
   // Only engage the hard prompt instruction + deterministic rescale
   // below when income genuinely can't support the full average - if
   // there's real room, this stays a soft prompt suggestion exactly like
@@ -403,8 +478,9 @@ async function generateBudget(userId, target = {}) {
   const needsDiscretionaryCap =
     !isBackfill &&
     discretionaryCategoriesToGenerate.length > 0 &&
-    discretionaryTarget < discretionaryAverageTotal - 0.01;
+    finalDiscretionaryTarget < discretionaryAverageTotal - 0.01;
 
+  const floorPercent = Math.round(DISCRETIONARY_FLOOR_RATIO * 100);
   const goalFundingInstruction = needsDiscretionaryCap
     ? (totalGoalFundingNeeded > 0.01
         ? `Across your active goals, the realistic amount to free up in your ` +
@@ -412,17 +488,25 @@ async function generateBudget(userId, target = {}) {
           `already computed from your real income, essential spending, and goal ` +
           `priorities, accounting for what's actually achievable. `
         : ``) +
-      `Your real income can only support $${discretionaryTarget.toFixed(2)} total across your ` +
+      (allowDiscretionaryBelowFloor
+        ? `Your real income can't cover your committed bills and discretionary ` +
+          `spending together, even at a reduced discretionary total - you've ` +
+          `already accepted cutting discretionary below its usual ${floorPercent}% ` +
+          `floor to close that gap. `
+        : ``) +
+      `Your real income can only support $${finalDiscretionaryTarget.toFixed(2)} total across your ` +
       `discretionary categories once your necessities are covered - the combined ` +
       `budgeted_amount across only these discretionary categories - ` +
       `${discretionaryCategoriesToGenerate.join(', ')} - must sum to exactly ` +
-      `$${discretionaryTarget.toFixed(2)} (a firm total, not a suggestion), ` +
-      `distributed however best fits the real spend pattern below. Never ` +
-      `propose any single one of them under 70% of its own actual average.`
+      `$${finalDiscretionaryTarget.toFixed(2)} (a firm total, not a suggestion), ` +
+      `distributed however best fits the real spend pattern below.` +
+      (allowDiscretionaryBelowFloor
+        ? ``
+        : ` Never propose any single one of them under ${floorPercent}% of its own actual average.`)
     : `If a savings target and timeframe are given, the required monthly savings ` +
       `is roughly (target amount / timeframe in months) - trim discretionary ` +
       `categories (${DISCRETIONARY_CATEGORIES.join(', ')}) enough ` +
-      `to plausibly work toward that, without proposing anything under 70% of a ` +
+      `to plausibly work toward that, without proposing anything under ${floorPercent}% of a ` +
       `category's actual average (drastic cuts don't stick). If no specific goal ` +
       `was given, trim obvious waste modestly (5-15% below average on discretionary ` +
       `categories).`;
@@ -502,7 +586,8 @@ async function generateBudget(userId, target = {}) {
     knownBillsFloor,
     needsDiscretionaryCap,
     discretionaryCategoriesToGenerate,
-    discretionaryTarget,
+    discretionaryTarget: finalDiscretionaryTarget,
+    allowDiscretionaryBelowFloor,
     averages,
   });
 
@@ -570,6 +655,21 @@ async function resetCategoryToAI(userId, category) {
     throw new Error(`Unknown category: ${category}`);
   }
   const { period_start } = currentMonthRange();
+  // Fetched before deleting (real bug caught by code review 2026-09-17):
+  // generateBudget can now realistically throw DiscretionaryFloorShortfallError
+  // on a normal over-committed account, not just the practically-unreachable
+  // NoHistoryError this delete-then-regenerate was written against - without
+  // a way to restore this row, a decline (or any other failure) left the
+  // category with zero budget rows for the period, silently unbudgeted,
+  // until the user separately triggered a full accepted regenerate.
+  const { data: existingRows, error: fetchError } = await supabaseAdmin
+    .from('budgets')
+    .select('category, period_end, budgeted_amount, reasoning, is_user_set')
+    .eq('user_id', userId)
+    .eq('period_start', period_start)
+    .eq('category', category);
+  if (fetchError) throw fetchError;
+
   const { error: deleteError } = await supabaseAdmin
     .from('budgets')
     .delete()
@@ -577,7 +677,40 @@ async function resetCategoryToAI(userId, category) {
     .eq('period_start', period_start)
     .eq('category', category);
   if (deleteError) throw deleteError;
-  return generateBudget(userId);
+
+  try {
+    return await generateBudget(userId);
+  } catch (err) {
+    // Restores exactly what THIS function deleted above, so a decline or
+    // any other failure here leaves this one category exactly as it was -
+    // not "all-or-nothing" for the whole budget, since generateBudget's
+    // own internal delete-then-insert (its own documented, pre-existing,
+    // separately-accepted tradeoff - see its header comment) can still
+    // leave every other category's rows gone if ITS insert fails after
+    // ITS delete. Out of scope here: that risk predates this function and
+    // isn't something a per-category reset changes either way.
+    if (existingRows && existingRows.length > 0) {
+      // Real bug caught by code review 2026-09-17: the restore insert's
+      // own error was never checked, unlike every other insert in this
+      // file (e.g. line 635) - a failed restore (constraint collision,
+      // transient DB error) would silently leave the category unbudgeted
+      // while this catch's own comment claimed it was restored. Logged,
+      // not thrown - `err` (the real reason generateBudget failed) is
+      // still the more useful error to surface to the caller, but a
+      // failed restore must never disappear with zero trace.
+      const { error: restoreError } = await supabaseAdmin.from('budgets').insert(
+        existingRows.map((r) => ({ ...r, user_id: userId, period_start }))
+      );
+      if (restoreError) {
+        console.error(
+          `resetCategoryToAI: failed to restore ${category} for user ${userId} after ` +
+            `generateBudget failed - category is now unbudgeted for this period:`,
+          restoreError
+        );
+      }
+    }
+    throw err;
+  }
 }
 
 // Phase 3 Step 3: recomputes this user's actual spend per category for the
@@ -1035,5 +1168,6 @@ module.exports = {
   summarizeSpending,
   extractJson,
   NoHistoryError,
+  DiscretionaryFloorShortfallError,
   HISTORY_DAYS,
 };

@@ -10,10 +10,15 @@ function round2(n) {
 }
 
 // Promotes generateBudget's/proposeCategoryTrim's existing prompt-only
-// "never propose under 70% of a category's actual average" rule into a
-// real, enforced constant - the ceiling on how much of a discretionary
-// category's average spend can realistically be cut.
-const DISCRETIONARY_FLOOR_RATIO = 0.7;
+// "never propose under X% of a category's actual average" rule into a
+// real, enforced constant - the default floor on how much of a
+// discretionary category's average spend can be cut without the user's
+// explicit say-so. Lowered from 0.7 to 0.2 (2026-09-17, direct user
+// decision): discretionary can absorb real cuts on its own, but never
+// silently all the way to $0 - going below this floor requires the
+// separate, explicit-acceptance path below (see
+// DiscretionaryFloorShortfallError in budget.js), never automatic.
+const DISCRETIONARY_FLOOR_RATIO = 0.2;
 
 // Pure. One uniform rule per SPEND_CATEGORIES entry, deliberately
 // category-agnostic (not "only discretionary categories matter") so this
@@ -60,8 +65,17 @@ function computeDiscretionaryCapacity({
     }
   }
   const totalMinSpend = Object.values(minSpendByCategory).reduce((sum, v) => sum + v, 0);
-  const capacity = Math.max(0, round2(averageMonthlyIncome - totalMinSpend));
-  return { capacity, min_spend_by_category: minSpendByCategory };
+  // `raw_capacity` (2026-09-17): the same figure before clamping to 0 -
+  // negative when income can't even cover essentials plus the
+  // discretionary floor. `capacity` (clamped) is what goal-funding
+  // allocation and the normal discretionary target always use, since you
+  // can't fund a goal or hold a floor with money that doesn't exist. The
+  // unclamped value exists only to detect and size the "discretionary
+  // would need to drop below its floor" case - never used to imply real
+  // spendable room.
+  const rawCapacity = round2(averageMonthlyIncome - totalMinSpend);
+  const capacity = Math.max(0, rawCapacity);
+  return { capacity, raw_capacity: rawCapacity, min_spend_by_category: minSpendByCategory };
 }
 
 // Pure. The actual dollar total discretionary categories are allowed to
@@ -75,16 +89,28 @@ function computeDiscretionaryCapacity({
 // spend within what `capacity` actually supports. This function is the
 // one place that math lives now, independently testable from
 // generateBudget's own "does this even need to be capped" decision.
+// `allowBelowFloor` (2026-09-17, direct user decision): default false -
+// this always stops at discretionaryFloorTotal, exactly like before,
+// never dropping further on its own. Only when a user has explicitly
+// accepted the "your necessities exceed your income even at the floor"
+// prompt (see DiscretionaryFloorShortfallError in budget.js) does the
+// caller pass true and a negative (unclamped) `capacity` - letting the
+// target fall below the floor, down to (never past) $0, by exactly
+// enough to close that specific gap.
 function computeDiscretionaryTarget({
   discretionaryAverageTotal,
   discretionaryFloorTotal,
   capacity,
   totalGoalFundingNeeded = 0,
+  allowBelowFloor = false,
 }) {
   const roomAboveFloor = round2(discretionaryAverageTotal - discretionaryFloorTotal);
-  return round2(
-    discretionaryFloorTotal + Math.max(0, Math.min(capacity - totalGoalFundingNeeded, roomAboveFloor))
-  );
+  const addedRoom = capacity - totalGoalFundingNeeded;
+  if (!allowBelowFloor) {
+    return round2(discretionaryFloorTotal + Math.max(0, Math.min(addedRoom, roomAboveFloor)));
+  }
+  const raw = discretionaryFloorTotal + Math.min(addedRoom, roomAboveFloor);
+  return round2(Math.max(0, Math.min(discretionaryAverageTotal, raw)));
 }
 
 // DB-touching wrapper. `simulateEdit: { category, budgeted_amount }`
@@ -190,7 +216,7 @@ function orderGoalsByPriority(goals, savedOrder) {
 // DB-touching wrapper - composes everything above into the one real
 // funding plan for a user's active, deadline-having goals.
 async function getGoalFundingPlan(userId, { simulateEdit } = {}) {
-  const [{ capacity }, allGoals, settings] = await Promise.all([
+  const [{ capacity, raw_capacity }, allGoals, settings] = await Promise.all([
     getDiscretionaryCapacity(userId, { simulateEdit }),
     getGoalsProgress(userId),
     getSettings(userId),
@@ -199,7 +225,7 @@ async function getGoalFundingPlan(userId, { simulateEdit } = {}) {
   const deadlineHavingGoals = allGoals.filter((g) => g.has_target && g.target_timeframe_months);
   const ordered = orderGoalsByPriority(deadlineHavingGoals, settings.goal_settings?.goal_priority_order);
 
-  return allocateGoalFunding({ goals: ordered, capacity });
+  return { ...allocateGoalFunding({ goals: ordered, capacity }), raw_capacity };
 }
 
 // The category-edit-impact feature: reuses getGoalFundingPlan twice
