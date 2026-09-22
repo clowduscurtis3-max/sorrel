@@ -105,6 +105,7 @@ const { getHomeAffordability } = require('./homeAffordability');
 const {
   logRecommendationEvent,
   getRecommendationHistory,
+  getRecommendationSummary,
   clearRecommendationHistory,
   VALID_TYPES,
   VALID_STATUSES,
@@ -2392,6 +2393,20 @@ app.post('/recommendations/log', requireUser, async (req, res) => {
     console.error(err);
   }
   res.json({ ok: true });
+});
+
+// Account tab summary card (2026-09-18) - a single accepted/total count,
+// distinct from /recommendations/history's full per-event list. Same
+// "surface a real error" reasoning as that route - this is a direct read,
+// not a fire-and-forget log.
+app.get('/recommendations/summary', requireUser, async (req, res) => {
+  try {
+    const summary = await getRecommendationSummary(req.userId);
+    res.json(summary);
+  } catch (err) {
+    logError('Failed to load recommendation summary:', err);
+    res.status(500).json({ error: 'Failed to load recommendation summary' });
+  }
 });
 
 // Phase 46 Step 3 (2026-09-16, direct user request) - a Settings screen

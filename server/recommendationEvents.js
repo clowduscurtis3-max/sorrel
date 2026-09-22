@@ -107,6 +107,25 @@ async function getRecommendationHistory(userId) {
   });
 }
 
+// Account tab summary card (2026-09-18, direct user request) - a single
+// glanceable accepted/total count, distinct from getRecommendationHistory's
+// full per-event list (Settings -> Decision History, already built). This
+// exists so the Account tab can show something without duplicating that
+// screen's own per-type breakdown - deliberately just one aggregate number,
+// not a second per-type list living in two places that could drift.
+async function getRecommendationSummary(userId) {
+  const { data, error } = await supabaseAdmin
+    .from('recommendation_events')
+    .select('status')
+    .eq('user_id', userId);
+  if (error) throw error;
+  const events = data || [];
+  return {
+    total: events.length,
+    accepted: events.filter((e) => e.status === 'accepted').length,
+  };
+}
+
 // `type` optional - a real reset of just one recommendation type's
 // history, or (unset) everything. Deliberately a hard delete, not a
 // soft-archive - this is a user-owned record of their own past
@@ -127,6 +146,7 @@ async function clearRecommendationHistory(userId, { type } = {}) {
 module.exports = {
   logRecommendationEvent,
   getRecommendationHistory,
+  getRecommendationSummary,
   clearRecommendationHistory,
   VALID_TYPES,
   VALID_STATUSES,

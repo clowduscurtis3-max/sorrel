@@ -72,6 +72,7 @@ export default function Account() {
   const [gmailLinking, setGmailLinking] = useState(false);
   const [showGmailExplainer, setShowGmailExplainer] = useState(false);
   const [showNotificationCenter, setShowNotificationCenter] = useState(false);
+  const [recommendationSummary, setRecommendationSummary] = useState(null);
   const [addingAccount, setAddingAccount] = useState(false);
   const [error, setError] = useState(null);
   const [signingOut, setSigningOut] = useState(false);
@@ -92,10 +93,27 @@ export default function Account() {
     }
   }
 
+  // Account tab summary card (2026-09-18) - a single accepted/total count
+  // linking into the existing Settings -> Decision History screen, which
+  // already shows the full per-event breakdown. Best-effort like the other
+  // two fetches in this effect - a failure here just means the card stays
+  // hidden, not a screen-blocking error.
+  async function fetchRecommendationSummary() {
+    try {
+      const res = await apiFetch('/recommendations/summary');
+      if (!res.ok) throw new Error('SERVER_ERROR');
+      const data = await res.json();
+      setRecommendationSummary(data);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   useFocusEffect(
     useCallback(() => {
       fetchGmailStatus();
       refetchPlaidItems();
+      fetchRecommendationSummary();
     }, [])
   );
 
@@ -342,6 +360,35 @@ export default function Account() {
             </View>
             <MaterialIcons name="chevron-right" size={20} color={colors.muted} />
           </Pressable>
+
+          {/* Phase 46 Step 3 follow-up (2026-09-18, direct user request):
+              a glanceable summary of Sorrel's own propose-then-act
+              suggestions, linking into the existing Decision History
+              screen (Settings -> Decision History) rather than duplicating
+              its per-type breakdown here. Hidden entirely until at least
+              one real suggestion has been accepted or rejected - no
+              fabricated "0 of 0" stat. */}
+          {recommendationSummary && recommendationSummary.total > 0 && (
+            <Pressable
+              style={[styles.card, accountStyles.cardMargin, accountStyles.settingsRow]}
+              onPress={() => router.push('/settings/recommendation-history')}
+              accessibilityRole="button"
+              accessibilityLabel="Decision History"
+            >
+              <View style={accountStyles.iconRow}>
+                <View style={accountStyles.iconCircle}>
+                  <MaterialIcons name="history" size={18} color={colors.dark} />
+                </View>
+                <View style={accountStyles.recommendationSummaryTextCol}>
+                  <Text style={accountStyles.recommendationSummaryTitle}>Decision History</Text>
+                  <Text style={accountStyles.recommendationSummarySubtext}>
+                    {`You've accepted ${recommendationSummary.accepted} of ${recommendationSummary.total} suggestions`}
+                  </Text>
+                </View>
+              </View>
+              <MaterialIcons name="chevron-right" size={20} color={colors.muted} />
+            </Pressable>
+          )}
 
           {error && (
             <View style={[styles.card, accountStyles.cardMargin]}>
@@ -709,6 +756,20 @@ function buildAccountStyles(colors) {
       fontSize: 13,
       color: colors.dark,
       lineHeight: 18,
+    },
+    recommendationSummaryTextCol: {
+      flex: 1,
+      gap: 2,
+    },
+    recommendationSummaryTitle: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.dark,
+      lineHeight: 18,
+    },
+    recommendationSummarySubtext: {
+      fontSize: 12,
+      color: colors.muted,
     },
     iconRowTextBold: {
       fontWeight: '700',
