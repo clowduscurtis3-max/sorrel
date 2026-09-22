@@ -10,6 +10,17 @@
       "android": {
         "buildType": "apk"
       }
+    },
+    "production": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://xaennhhmvtjkxtnwoqdm.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_IFNBqOPt2jUGlJFW_KgbrQ_cCy4XSas",
+        "EXPO_PUBLIC_API_URL": "https://api.sorrel-app.com"
+      }
     }
   }
 }
