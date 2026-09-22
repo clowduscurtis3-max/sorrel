@@ -1,0 +1,3 @@
+api.sorrel-app.com {
+	reverse_proxy localhost:3000
+}

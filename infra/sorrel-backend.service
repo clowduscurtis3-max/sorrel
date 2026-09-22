@@ -1,0 +1,32 @@
+[Unit]
+Description=Sorrel backend (Express API)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sorrel
+Group=sorrel
+WorkingDirectory=/opt/sorrel/server
+ExecStartPre=/opt/sorrel/fetch-env.sh
+# The leading "-" marks this optional to systemd's own pre-flight check,
+# which otherwise runs BEFORE ExecStartPre and fails immediately on a
+# completely fresh instance where this file doesn't exist yet - a real
+# chicken-and-egg bug hit on first boot, fixed here rather than patched
+# around per-instance.
+EnvironmentFile=-/opt/sorrel/server/.env
+ExecStart=/usr/bin/node index.js
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Least-privilege hardening - this process never needs to touch anything
+# outside its own working directory or escalate privileges.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/sorrel/server
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
