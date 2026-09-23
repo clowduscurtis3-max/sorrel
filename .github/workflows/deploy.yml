@@ -32,8 +32,38 @@ jobs:
           cd server
           zip -r ../server.zip . -x "node_modules/*" -x ".env" -x "*.log"
 
-      - name: Upload deploy artifact
+      - name: Upload server deploy artifact
         run: aws s3 cp server.zip s3://sorrel-deploy-860803563132/server.zip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install app dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Export web build
+        working-directory: app
+        env:
+          # Same values as app/eas.json's own "production" build profile -
+          # not secrets: EXPO_PUBLIC_* vars are baked into the client bundle
+          # either way, and the Supabase key is its public anon/publishable
+          # key, not a service-role credential.
+          EXPO_PUBLIC_SUPABASE_URL: https://xaennhhmvtjkxtnwoqdm.supabase.co
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_IFNBqOPt2jUGlJFW_KgbrQ_cCy4XSas
+          EXPO_PUBLIC_API_URL: https://api.sorrel-app.com
+        run: npx expo export --platform web --output-dir dist
+
+      - name: Package web build
+        run: |
+          cd app/dist
+          zip -r ../../web.zip .
+
+      - name: Upload web deploy artifact
+        run: aws s3 cp web.zip s3://sorrel-deploy-860803563132/web.zip
 
       - name: Run deploy on instance (via SSM, no SSH)
         run: |

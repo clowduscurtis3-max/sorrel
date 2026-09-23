@@ -29,4 +29,14 @@ else
   exit 1
 fi
 
+# Web build (Phase 39 Step 5) - static files served directly by Caddy,
+# no service to restart, just swap the files in place.
+aws s3 cp "s3://${BUCKET}/web.zip" "$TMP/web.zip" --region us-east-1
+unzip -oq "$TMP/web.zip" -d "$TMP/web"
+
+mkdir -p /opt/sorrel/web
+rsync -a --delete "$TMP/web/" /opt/sorrel/web/
+chown -R caddy:caddy /opt/sorrel/web
+echo "WEB_DEPLOY_OK"
+
 rm -rf "$TMP"
