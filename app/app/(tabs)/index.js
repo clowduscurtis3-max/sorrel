@@ -11,11 +11,11 @@ import {
   RefreshControl,
   AppState,
   StyleSheet,
+  Platform,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
-import { createPlaidLinkSession } from 'react-native-plaid-link-sdk';
 import { MaterialIcons } from '@expo/vector-icons';
 import {
   apiFetch,
@@ -55,6 +55,8 @@ import SpentSoFarModal from '../_components/SpentSoFarModal';
 import IncomeModal from '../_components/IncomeModal';
 import NotificationCenter, { resolveNotificationTarget } from '../_components/NotificationCenter';
 import AdvisorBriefingModal from '../_components/AdvisorBriefingModal';
+import PlaidLinkWeb from '../_components/PlaidLinkWeb';
+import { createPlaidLinkSession } from '../_lib/plaidNativeLink';
 
 const STATUS_ICON = { ok: 'check-circle', warning: 'warning', severe: 'error' };
 
@@ -289,6 +291,11 @@ export default function Home() {
   const [refreshing, setRefreshing] = useState(false);
   const [linked, setLinked] = useState(false);
   const [linking, setLinking] = useState(false);
+  // Phase 39 Step 2 (web build) - see (tabs)/account.js's own identical
+  // state for the full explanation: react-plaid-link's usePlaidLink is a
+  // real hook, so the web Link flow needs a mounted component
+  // (<PlaidLinkWeb>) rather than the native SDK's imperative open() call.
+  const [plaidWebLink, setPlaidWebLink] = useState(null);
   const [error, setError] = useState(null);
   const [reviewingTransactionId, setReviewingTransactionId] = useState(null);
   const [correctingCategory, setCorrectingCategory] = useState(false);
@@ -529,28 +536,51 @@ export default function Home() {
       if (!linkTokenRes.ok) throw new Error('SERVER_ERROR');
       const { link_token } = await linkTokenRes.json();
 
+      async function handleSuccess(success) {
+        try {
+          const exchangeRes = await apiFetch('/exchange-token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ public_token: success.publicToken }),
+          });
+          if (!exchangeRes.ok) throw new Error('SERVER_ERROR');
+          await fetchTransactions();
+        } catch (err) {
+          console.error(err);
+          setError(apiErrorMessage(err));
+        } finally {
+          setLinking(false);
+          setPlaidWebLink(null);
+        }
+      }
+
+      function handleExit(exit) {
+        if (exit.error) console.error(exit.error);
+        setLinking(false);
+        setPlaidWebLink(null);
+      }
+
+      function handleLoadError(err) {
+        console.error(err);
+        setError('Could not load Plaid. Check your connection and try again.');
+        setLinking(false);
+        setPlaidWebLink(null);
+      }
+
+      if (Platform.OS === 'web') {
+        setPlaidWebLink({
+          token: link_token,
+          onSuccess: handleSuccess,
+          onExit: handleExit,
+          onLoadError: handleLoadError,
+        });
+        return;
+      }
+
       const plaidSession = await createPlaidLinkSession({
         token: link_token,
-        onSuccess: async (success) => {
-          try {
-            const exchangeRes = await apiFetch('/exchange-token', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ public_token: success.publicToken }),
-            });
-            if (!exchangeRes.ok) throw new Error('SERVER_ERROR');
-            setLinking(false);
-            await fetchTransactions();
-          } catch (err) {
-            console.error(err);
-            setError(apiErrorMessage(err));
-            setLinking(false);
-          }
-        },
-        onExit: (exit) => {
-          if (exit.error) console.error(exit.error);
-          setLinking(false);
-        },
+        onSuccess: handleSuccess,
+        onExit: handleExit,
         onEvent: () => {},
       });
 
@@ -1300,6 +1330,14 @@ export default function Home() {
     // illustrated backdrop's own absolutely-positioned artwork layer is
     // gone, this flat container background is the whole "backdrop" now.
     <View style={styles.container}>
+      {plaidWebLink && (
+        <PlaidLinkWeb
+          token={plaidWebLink.token}
+          onSuccess={plaidWebLink.onSuccess}
+          onExit={plaidWebLink.onExit}
+          onLoadError={plaidWebLink.onLoadError}
+        />
+      )}
       {viewingItemId === null && (
         <View style={homeStyles.wordmarkStrip}>
           <SorrelWordmark layout="row" leafSize={30} showTagline={false} />

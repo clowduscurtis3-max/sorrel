@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { DrumPicker } from 'react-native-drum-picker';
+import { View, Text, TextInput, StyleSheet, Platform } from 'react-native';
+import { parseDollarAmount } from '../_lib/api';
+// react-native-drum-picker is a real native module (Kotlin/Swift) with no
+// web implementation - importing it unconditionally crashes the web build
+// at load time (`codegenNativeComponent is not a function`). Only require
+// it on native platforms; web renders a plain typed input instead below.
+const DrumPicker = Platform.OS === 'web' ? null : require('react-native-drum-picker').DrumPicker;
 
 // Replaces both the earlier single continuous wheel (DrumAmountPicker.js,
 // deleted) and its tiered-step follow-up (buildTieredDollarValues,
@@ -38,6 +43,48 @@ function valueFromDigits(digits) {
   return digits.reduce((acc, d) => acc * 10 + d, 0);
 }
 
+function WebAmountInput({ value, onValueChange }) {
+  const [text, setText] = useState(value ? String(value) : '');
+
+  useEffect(() => {
+    const parsed = parseDollarAmount(text);
+    if (parsed == null || parsed !== value) {
+      setText(value ? String(value) : '');
+    }
+    // Only re-sync from an external value change, same "don't fight the
+    // user mid-edit" reasoning as the native picker's own effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  function handleChangeText(next) {
+    setText(next);
+    // Always propagate, even when unparseable (an emptied field, a bare
+    // "0") - the native odometer can never represent "no value," it always
+    // emits a real number on every digit change, and callers (e.g.
+    // AffordabilityQuery's wheel, which mirrors this value straight into
+    // its own submitted text field) rely on that. Only calling
+    // onValueChange for a successfully-parsed amount left the field
+    // showing "" or "0" while the parent's own value silently stayed at
+    // whatever was last valid - a real stale-value bug, not just a
+    // cosmetic one.
+    const parsed = parseDollarAmount(next);
+    onValueChange(parsed != null ? parsed : 0);
+  }
+
+  return (
+    <View style={localStyles.card}>
+      <Text style={localStyles.dollarSign}>$</Text>
+      <TextInput
+        style={localStyles.webInput}
+        value={text}
+        onChangeText={handleChangeText}
+        keyboardType="decimal-pad"
+        placeholder="0"
+      />
+    </View>
+  );
+}
+
 export default function DigitAmountPicker({ value, onValueChange, digitCount = DIGIT_COUNT }) {
   const [digits, setDigits] = useState(() => digitsFromValue(value, digitCount));
 
@@ -58,6 +105,10 @@ export default function DigitAmountPicker({ value, onValueChange, digitCount = D
       onValueChange(valueFromDigits(next));
       return next;
     });
+  }
+
+  if (Platform.OS === 'web') {
+    return <WebAmountInput value={value} onValueChange={onValueChange} />;
   }
 
   return (
@@ -120,5 +171,12 @@ const localStyles = StyleSheet.create({
   digitPicker: {
     width: 44,
     height: ITEM_HEIGHT * VISIBLE_ITEM_COUNT,
+  },
+  webInput: {
+    fontSize: SELECTED_TEXT_SIZE,
+    fontWeight: '600',
+    color: '#333',
+    minWidth: 120,
+    paddingVertical: 4,
   },
 });

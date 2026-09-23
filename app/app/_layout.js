@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, View } from 'react-native';
+import { ActivityIndicator, AppState, Platform, View } from 'react-native';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import * as LocalAuthentication from 'expo-local-authentication';
@@ -908,6 +908,13 @@ export default function RootLayout() {
   }
 
   useEffect(() => {
+    // Push notifications aren't supported on web (no service-worker web-push
+    // setup exists for this app) - expo-notifications' own web shim throws
+    // on getLastNotificationResponseAsync rather than resolving null, so
+    // this whole tap-handling path is skipped entirely on web, not just the
+    // one unsupported call.
+    if (Platform.OS === 'web') return;
+
     // Cold start: the app was launched by tapping a notification (wasn't
     // already running). Checked once on mount.
     Notifications.getLastNotificationResponseAsync().then((response) => {

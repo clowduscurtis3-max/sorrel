@@ -8,21 +8,23 @@ import {
   Alert,
   ScrollView,
   StyleSheet,
+  Platform,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useFocusEffect } from '@react-navigation/native';
-import { createPlaidLinkSession } from 'react-native-plaid-link-sdk';
 import { MaterialIcons } from '@expo/vector-icons';
 import { apiFetch, apiErrorMessage, GMAIL_REDIRECT } from '../_lib/api';
 import { useTheme } from '../_lib/theme';
 import { useSessionContext } from '../_lib/session';
 import { useAppData } from '../_lib/appData';
+import { createPlaidLinkSession } from '../_lib/plaidNativeLink';
 import PrimaryButton from '../_components/PrimaryButton';
 import SorrelWordmark from '../_components/SorrelWordmark';
 import NotificationCenter, { resolveNotificationTarget } from '../_components/NotificationCenter';
 import { TopEdgeFade } from '../_components/Illustrations';
+import PlaidLinkWeb from '../_components/PlaidLinkWeb';
 
 // Phase 14 (5-tab conversion, 2026-08-24): account-level actions - Gmail
 // link/unlink, per-bank re-link/delete, biometric-lock preference, sign
@@ -77,6 +79,13 @@ export default function Account() {
   const [error, setError] = useState(null);
   const [signingOut, setSigningOut] = useState(false);
   const [actioningItemId, setActioningItemId] = useState(null);
+  // Phase 39 Step 2 (web build): react-plaid-link's usePlaidLink is a real
+  // React hook, unlike the native SDK's imperative
+  // createPlaidLinkSession(...).open() - it can only run inside a mounted
+  // component, so this holds the token/callbacks for <PlaidLinkWeb>, which
+  // is only ever mounted (and only ever mounted once) while a web Link
+  // flow is actually in progress. Never touched on native.
+  const [plaidWebLink, setPlaidWebLink] = useState(null);
 
   async function fetchGmailStatus() {
     try {
@@ -190,30 +199,53 @@ export default function Account() {
       if (!linkTokenRes.ok) throw new Error('SERVER_ERROR');
       const { link_token } = await linkTokenRes.json();
 
+      async function handleSuccess(success) {
+        try {
+          const exchangeRes = await apiFetch('/exchange-token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ public_token: success.publicToken }),
+          });
+          if (!exchangeRes.ok) throw new Error('SERVER_ERROR');
+          await refetchAccounts();
+          await refetchPlaidItems();
+          notifyBankRelinked();
+        } catch (err) {
+          console.error(err);
+          setError(apiErrorMessage(err));
+        } finally {
+          setAddingAccount(false);
+          setPlaidWebLink(null);
+        }
+      }
+
+      function handleExit(exit) {
+        if (hasRealPlaidError(exit.error)) console.error(exit.error);
+        setAddingAccount(false);
+        setPlaidWebLink(null);
+      }
+
+      function handleLoadError(err) {
+        console.error(err);
+        setError('Could not load Plaid. Check your connection and try again.');
+        setAddingAccount(false);
+        setPlaidWebLink(null);
+      }
+
+      if (Platform.OS === 'web') {
+        setPlaidWebLink({
+          token: link_token,
+          onSuccess: handleSuccess,
+          onExit: handleExit,
+          onLoadError: handleLoadError,
+        });
+        return;
+      }
+
       const plaidSession = await createPlaidLinkSession({
         token: link_token,
-        onSuccess: async (success) => {
-          try {
-            const exchangeRes = await apiFetch('/exchange-token', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ public_token: success.publicToken }),
-            });
-            if (!exchangeRes.ok) throw new Error('SERVER_ERROR');
-            await refetchAccounts();
-            await refetchPlaidItems();
-            notifyBankRelinked();
-            setAddingAccount(false);
-          } catch (err) {
-            console.error(err);
-            setError(apiErrorMessage(err));
-            setAddingAccount(false);
-          }
-        },
-        onExit: (exit) => {
-          if (hasRealPlaidError(exit.error)) console.error(exit.error);
-          setAddingAccount(false);
-        },
+        onSuccess: handleSuccess,
+        onExit: handleExit,
         onEvent: () => {},
       });
 
@@ -243,33 +275,56 @@ export default function Account() {
       }
       const { link_token } = await linkTokenRes.json();
 
+      async function handleSuccess(success) {
+        try {
+          const exchangeRes = await apiFetch('/exchange-token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              public_token: success.publicToken,
+              relink_item_id: item.id,
+            }),
+          });
+          if (!exchangeRes.ok) throw new Error('SERVER_ERROR');
+          await refetchAccounts();
+          await refetchPlaidItems();
+          notifyBankRelinked();
+        } catch (err) {
+          console.error(err);
+          setError(apiErrorMessage(err));
+        } finally {
+          setActioningItemId(null);
+          setPlaidWebLink(null);
+        }
+      }
+
+      function handleExit(exit) {
+        if (hasRealPlaidError(exit.error)) console.error(exit.error);
+        setActioningItemId(null);
+        setPlaidWebLink(null);
+      }
+
+      function handleLoadError(err) {
+        console.error(err);
+        setError('Could not load Plaid. Check your connection and try again.');
+        setActioningItemId(null);
+        setPlaidWebLink(null);
+      }
+
+      if (Platform.OS === 'web') {
+        setPlaidWebLink({
+          token: link_token,
+          onSuccess: handleSuccess,
+          onExit: handleExit,
+          onLoadError: handleLoadError,
+        });
+        return;
+      }
+
       const plaidSession = await createPlaidLinkSession({
         token: link_token,
-        onSuccess: async (success) => {
-          try {
-            const exchangeRes = await apiFetch('/exchange-token', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                public_token: success.publicToken,
-                relink_item_id: item.id,
-              }),
-            });
-            if (!exchangeRes.ok) throw new Error('SERVER_ERROR');
-            await refetchAccounts();
-            await refetchPlaidItems();
-            notifyBankRelinked();
-            setActioningItemId(null);
-          } catch (err) {
-            console.error(err);
-            setError(apiErrorMessage(err));
-            setActioningItemId(null);
-          }
-        },
-        onExit: (exit) => {
-          if (hasRealPlaidError(exit.error)) console.error(exit.error);
-          setActioningItemId(null);
-        },
+        onSuccess: handleSuccess,
+        onExit: handleExit,
         onEvent: () => {},
       });
 
@@ -316,6 +371,14 @@ export default function Account() {
     // backgroundColor: colors.background - the old illustrated backdrop's
     // artwork layer is gone, this flat container background is it now.
     <View style={styles.container}>
+      {plaidWebLink && (
+        <PlaidLinkWeb
+          token={plaidWebLink.token}
+          onSuccess={plaidWebLink.onSuccess}
+          onExit={plaidWebLink.onExit}
+          onLoadError={plaidWebLink.onLoadError}
+        />
+      )}
       {/* Same fixed wordmark strip every other tab uses (2026-08-27, direct
           user feedback - "they need to all have the same sorrel logo at
           the top"). Account was the one tab with no header row above its

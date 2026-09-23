@@ -8,7 +8,7 @@ import {
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
 } from 'expo-audio';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import DateTimePicker from './PlatformDatePicker';
 import { apiFetch, apiErrorMessage, GOAL_TYPES, parseDollarAmount } from '../_lib/api';
 import { readableTextColor } from '../_lib/styles';
 import { useTheme } from '../_lib/theme';

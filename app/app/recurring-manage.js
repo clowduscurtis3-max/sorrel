@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import DateTimePicker from './_components/PlatformDatePicker';
 import {
   apiFetch,
   apiErrorMessage,

@@ -9,6 +9,7 @@ import {
   ScrollView,
   StyleSheet,
   Alert,
+  Platform,
 } from 'react-native';
 // Reverted from react-native-gesture-handler's ScrollView back to plain
 // React Native (2026-08-19). It was switched to RNGH's version in Phase 13
@@ -1163,7 +1164,15 @@ export default function Budget() {
                     style={[styles.card, budgetLocalStyles.categoryCard]}
                     onPress={() => openCategory(s.category)}
                     disabled={isEditing}
-                    accessibilityRole="button"
+                    // react-native-web renders accessibilityRole="button" as
+                    // a real <button> element - nesting the EDIT chip's own
+                    // <button> inside this outer one is invalid HTML and
+                    // triggers a hydration warning (and can break the
+                    // inner chip's clicks) on web specifically. Native is
+                    // unaffected either way, so only web drops the role;
+                    // the inner EDIT chip keeps its own accessibilityRole
+                    // as the one real button here.
+                    accessibilityRole={Platform.OS === 'web' ? undefined : 'button'}
                     accessibilityLabel={`View ${s.category} transactions`}
                   >
                     <View style={budgetLocalStyles.categoryTopRow}>
