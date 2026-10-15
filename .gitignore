@@ -30,3 +30,9 @@ web-build/
 .vscode/
 .idea/
 *.swp
+
+# private project notes - contains real personal/financial detail,
+# never belongs in a public repo. Kept locally only; purged from
+# history 2026-10-15 before the repo went public.
+docs/CLAUDE.md
+docs/CLAUDE_ARCHIVE.md

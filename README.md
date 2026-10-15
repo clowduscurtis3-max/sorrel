@@ -58,9 +58,7 @@ server/                 Express backend
   test/                 node:test suite
 supabase/
   migrations/           Every schema change, in order
-docs/
-  CLAUDE.md             Full build history/decision log across every development session
-  CLAUDE_ARCHIVE.md      Older sessions' detail, moved out of CLAUDE.md to keep it readable
+infra/                  AWS deploy scripts/configs (systemd unit, Caddyfile, deploy script)
 ```
 
 ## Getting started
@@ -104,7 +102,7 @@ See `server/.env.example` and `app/.env.example` for the full, current list with
 
 ### Running locally
 
-Three processes run simultaneously (see `docs/CLAUDE.md`'s "Local dev environment" section for the full detail, including a real gotcha about stale processes surviving a laptop sleep):
+Three processes run simultaneously:
 
 1. Backend: `cd server && node index.js`
 2. ngrok tunnel to the backend: `ngrok http 3000` — the resulting URL has to match `EXPO_PUBLIC_API_URL` (app) and `BACKEND_URL` (server), **and** be registered as the Google OAuth redirect URI.
@@ -127,7 +125,7 @@ npm run lint            # ESLint (eslint-config-expo)
 npm run format:check    # Prettier
 ```
 
-There's no CI pipeline yet — linting, formatting, and the backend test suite run locally. Every backend change is expected to pass `npm test` before being committed; every user-facing change is tap-tested on the real Android device before being considered done, not just verified against the API.
+CI (`.github/workflows/ci.yml`) runs the backend test suite plus lint/format checks on both `app/` and `server/` on every push and PR to `main`; a separate workflow (`deploy.yml`) auto-deploys the backend and web build to AWS once CI passes. Every user-facing change is also tap-tested on a real Android device before being considered done, not just verified against the API.
 
 ## Engineering notes
 
